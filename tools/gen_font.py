@@ -37,6 +37,15 @@ for path in glob.glob(os.path.join(ROOT, "source", "*.cpp")) + glob.glob(
             if ord(ch) > 127:
                 chars.add(ch)
 
+try:
+    from fontTools.ttLib import TTFont
+    cmap = TTFont(FONT_PATH).getBestCmap()
+    missing = sorted(ch for ch in chars if ord(ch) not in cmap)
+    if missing:
+        print("WARNING: font has no glyph for: " + "".join(missing))
+except ImportError:
+    pass
+
 font = ImageFont.truetype(FONT_PATH, SIZE)
 ascent, descent = font.getmetrics()
 ordered = sorted(chars, key=ord)
