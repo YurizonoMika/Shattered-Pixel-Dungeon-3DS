@@ -765,6 +765,27 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 70) {
+          start_new_game(0);
+          G.add_item(IT_SEED_SUNGRASS, 3, 0);
+          G.add_item(IT_SEED_FIREBLOOM, 3, 0);
+          G.add_item(IT_SEED_BLINDWEED, 3, 0);
+          for (size_t i = 0; i < G.features.size(); i++)
+            if (G.features[i].type == F_ALCHEMY) {
+              G.px = G.features[i].x; G.py = G.features[i].y + 1;
+              G.pvx = (float)G.px; G.pvy = (float)G.py;
+              G.alchemy_open = true; G.demo_lock = true;
+              break;
+            }
+          G.recompute_fov();
+        }
+        else if (want == 71) {
+          start_new_game(0);
+          G.level = 12;
+          G.check_talents();
+          G.paused = 1;
+          G.demo_lock = true;
+        }
         else if (want == 65) {
           start_new_game(0);
           for (int f = 1; f <= 25; f++) { G.floor = f; G.gen_level(); }

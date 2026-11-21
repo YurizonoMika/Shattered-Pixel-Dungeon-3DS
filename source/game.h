@@ -7,6 +7,7 @@
 #define MW 41
 #define MH 41
 #define BAG_CAP 25
+#define BAG_MAX 40
 
 enum TileType : uint8_t {
   T_WALL = 0,
@@ -119,15 +120,15 @@ struct GameDisk {
   uint16_t item_n;
   FloorItemDisk items[48];
   uint8_t inv_n;
-  ItemDisk inv[BAG_CAP];
+  ItemDisk inv[BAG_MAX];
   uint8_t feature_n;
   FeatureDisk features[64];
   uint8_t boss_dead[5];
   uint8_t tokens, token_quest, smith_used, imp_state;
   uint8_t shop_n, shop_floor;
-  ItemDisk shop_items[16];
-  int16_t shop_prices[16];
-  uint8_t shop_sold[16];
+  ItemDisk shop_items[20];
+  int16_t shop_prices[20];
+  uint8_t shop_sold[20];
   ItemDisk buyback_items[3];
   int16_t buyback_prices[3];
   uint8_t buyback_n;
@@ -136,6 +137,10 @@ struct GameDisk {
   uint8_t smith_floor, smith_state, ore_count;
   uint8_t imp_floor, imp_kills, imp_target;
   uint8_t reward1, reward1_level, reward2, reward2_level;
+  uint8_t bag_potion, bag_scroll, bag_wand;
+  uint8_t shop_warned[25], shop_gone[25];
+  uint8_t dust_timer;
+  uint8_t talents[4], talent_tier;
 };
 
 struct Game {
@@ -157,12 +162,18 @@ struct Game {
   uint8_t token_quest = 0;
   uint8_t smith_used = 0;
   uint8_t imp_state = 0;
+  bool bag_potion = false, bag_scroll = false, bag_wand = false;
+  bool shop_warned[25]{}, shop_gone[25]{};
+  int dust_timer = 0;
+  uint8_t talents[4]{}, talent_tier = 0;
+  bool alchemy_open = false;
+  int alchemy_sel = 0;
   bool shop_open = false;
   int shop_sel = 0, shop_n = 0, shop_floor = -1;
   int shop_mode = 0, shop_page = 0;  // 0 buy, 1 sell, 2 buyback
-  Item shop_items[16];
-  int shop_prices[16];
-  bool shop_sold[16];
+  Item shop_items[20];
+  int shop_prices[20];
+  bool shop_sold[20];
   Item buyback_items[3];
   int buyback_prices[3];
   int buyback_n = 0;
@@ -171,7 +182,7 @@ struct Game {
   uint8_t smith_floor = 0, smith_state = 0, ore_count = 0;
   uint8_t imp_floor = 0, imp_kills = 0, imp_target = 0;
   uint8_t reward1 = 0, reward1_level = 0, reward2 = 0, reward2_level = 0;
-  Item inv[BAG_CAP];
+  Item inv[BAG_MAX];
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
   uint8_t armor = IT_CLOTH_ARMOR, armor_level = 0;
@@ -247,10 +258,14 @@ struct Game {
   void shop_buy(int i);
   void shop_sell(int i);
   void shop_buyback(int i);
+  void harm_shopkeeper();
+  void alchemy_brew(int recipe);
+  void check_talents();
   int shop_sell_price(uint8_t id, int count, int level) const;
   void spawn_quest_miniboss();
   void talk_npc(int idx);
   void give_loot(int tier, bool chest);
+  int bag_capacity() const;
   int weapon_bonus() const;
   int armor_bonus() const;
   int ring_atk() const;

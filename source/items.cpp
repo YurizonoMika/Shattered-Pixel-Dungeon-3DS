@@ -97,6 +97,12 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"尸尘", "制杖师需要的诅咒骨灰。", K_QUEST, CAT_MISC, 0, 0, 61},
     {"暗金矿石", "铁匠需要的矿石，熔于日光。", K_QUEST, CAT_MISC, 0, 0, 18},
     {"矮人徽记", "僧侣与魔像携带的金属徽记。", K_QUEST, CAT_MISC, 0, 0, 61},
+    {"药水带", "增加 5 个药水背包空间。", K_BAG, CAT_GEAR, 0, 0, 48},
+    {"卷轴匣", "增加 5 个卷轴背包空间。", K_BAG, CAT_GEAR, 0, 0, 49},
+    {"法杖套", "增加 5 个法杖背包空间。", K_BAG, CAT_GEAR, 0, 0, 50},
+    {"强化石", "强化当前武器或护甲。", K_USE, CAT_MISC, 0, 0, 51},
+    {"淬毒飞镖", "命中后附加毒素/催眠。", K_MISSILE, CAT_MISC, 6, 0, 162},
+    {"镐", "可以砸开路障的沉重工具。", K_WEAPON, CAT_GEAR, 6, 0, 101},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
@@ -119,6 +125,7 @@ int item_value(uint8_t id) {
     case K_WAND: return 80 + d.power * 10;
     case K_RING: return 120;
     case K_MISSILE: return 15 + d.power * 5;
+    case K_BAG: return 100;
     case K_SEED: return 25;
     default: return 0;
   }

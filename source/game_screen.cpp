@@ -361,8 +361,8 @@ static void draw_messages() {
   textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
-static const float BAG_X = 66, BAG_Y = 84, BAG_W = 36, BAG_H = 24;
-static const float BAG_GX = 38, BAG_GY = 25;
+static const float BAG_X = 17, BAG_Y = 84, BAG_W = 34, BAG_H = 24;
+static const float BAG_GX = 36, BAG_GY = 25;
 
 static const char* BAG_TABS[6] = {"全部", "药水", "卷轴", "法杖", "装备", "其他"};
 
@@ -438,7 +438,7 @@ static void draw_backpack() {
   text("背包", 14, 8, CLR_YELLOW, 2.0f);
   draw_item_icon(IT_GOLD, 210, 12, 1.0f);
   textf(230, 14, CLR_YELLOW, 1.0f, "%d", G.gold);
-  textf(260, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, BAG_CAP);
+  textf(248, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, G.bag_capacity());
 
   textf(14, 32, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
   if (G.weapon_level) textf(112, 32, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
@@ -454,17 +454,17 @@ static void draw_backpack() {
 
   int vis[BAG_CAP];
   int n = bag_visible(vis);
-  for (int i = 0; i < BAG_CAP; i++) {
-    float x = BAG_X + (i % 5) * BAG_GX;
-    float y = BAG_Y + (i / 5) * BAG_GY;
+  for (int i = 0; i < BAG_MAX; i++) {
+    float x = BAG_X + (i % 8) * BAG_GX;
+    float y = BAG_Y + (i / 8) * BAG_GY;
     draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, BAG_W, BAG_H, 1.4f);
     if (i < n) {
       int idx = vis[i];
       const ItemDef& d = item_def(G.inv[idx].id);
-      draw_item_icon(G.inv[idx].id, x + 8, y + 2, 1.3f);
+      draw_item_icon(G.inv[idx].id, x + 6, y + 2, 1.3f);
       int num = d.kind == K_WAND ? G.inv[idx].charges : G.inv[idx].count;
       if (d.kind == K_WAND || num > 1)
-        textf(x + BAG_W - 10, y + BAG_H - 12, CLR_WHITE, 1.0f, "%d", num);
+        textf(x + BAG_W - 9, y + BAG_H - 12, CLR_WHITE, 1.0f, "%d", num);
       if (d.kind == K_WAND || d.kind == K_WEAPON || d.kind == K_ARMOR)
         draw_box(x + 2, y + 2, 3, 3, CLR_YELLOW, 0.55f);
     }
@@ -542,6 +542,33 @@ static void draw_shop() {
   text_c("X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 214, CLR_GREY, 0.9f);
 }
 
+static int count_item(uint8_t id) {
+  int n = 0;
+  for (int i = 0; i < G.inv_n; i++)
+    if (G.inv[i].id == id) n += G.inv[i].count;
+  return n;
+}
+
+static void draw_alchemy() {
+  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 200), 0.66f);
+  draw_panel(8, 40, BOT_W - 16, 176, 2.0f);
+  text("炼金釜", 20, 46, CLR_YELLOW, 2.0f);
+  static const uint8_t NEED[3] = {IT_SEED_SUNGRASS, IT_SEED_FIREBLOOM,
+                                  IT_SEED_BLINDWEED};
+  static const uint8_t OUT[3] = {IT_POTION_HEAL, IT_POTION_FLAME,
+                                 IT_POTION_INVIS};
+  for (int i = 0; i < 3; i++) {
+    float y = 78 + i * 36;
+    draw_button(18, y, BOT_W - 36, 32, "", G.alchemy_sel == i, 1.6f);
+    draw_item_icon(OUT[i], 24, y + 8, 1.0f);
+    text(item_name(OUT[i]), 46, y + 5, CLR_WHITE, 1.0f);
+    char b[40];
+    snprintf(b, sizeof(b), "%s %d/3", item_name(NEED[i]), count_item(NEED[i]));
+    text(b, 46, y + 18, CLR_GREY, 0.8f);
+  }
+  text_c("A 炼金  B 关闭", 0, BOT_W, 202, CLR_GREY, 0.9f);
+}
+
 static void draw_pause() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
   draw_panel(60, 52, 200, 150, 2.0f);
@@ -549,6 +576,7 @@ static void draw_pause() {
   draw_button(76, 84, 168, 30, "继续游戏", G.paused == 1, 1.8f);
   draw_button(76, 118, 168, 30, "设置", G.paused == 2, 1.8f);
   draw_button(76, 152, 168, 30, "返回主菜单", G.paused == 3, 1.8f);
+  textf(76, 186, CLR_GREY, 0.9f, "天赋 %d/4", G.talent_tier);
   text_c("上下键 选择  A 确认  B 继续", 0, BOT_W, 210, CLR_GREY, 1.0f);
 }
 
@@ -563,6 +591,7 @@ void game_draw_bottom() {
   if (G.backpack) draw_backpack();
   if (G.paused) draw_pause();
   if (G.shop_open) draw_shop();
+  if (G.alchemy_open) draw_alchemy();
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +705,22 @@ void game_update() {
     return;
   }
 
+  if (G.alchemy_open) {
+    if (IN.pressed(KEY_B)) { G.alchemy_open = false; return; }
+    if (IN.dy) G.alchemy_sel = (G.alchemy_sel + IN.dy + 3) % 3;
+    if (IN.pressed(KEY_A)) { G.alchemy_brew(G.alchemy_sel); return; }
+    if (IN.tap) {
+      for (int i = 0; i < 3; i++)
+        if (in_rect(IN.tap_x, IN.tap_y, 18, 78 + i * 36, BOT_W - 36, 32)) {
+          G.alchemy_sel = i;
+          G.alchemy_brew(i);
+          return;
+        }
+      G.alchemy_open = false;
+    }
+    return;
+  }
+
   if (G.dialog) {
     if (IN.pressed(KEY_A)) G.dialog_choose(0);
     else if (IN.pressed(KEY_B)) G.dialog_choose(1);
@@ -731,7 +776,7 @@ void game_update() {
       return;
     }
     if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dx));
-    if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dy * 5));
+    if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_MAX - 1, g_bag_sel + IN.dy * 8));
     if (IN.pressed(KEY_A) && bag_sel_inv() >= 0) g_bag_action = true;
     if (IN.tap) {
       if (IN.tap_y >= 58 && IN.tap_y < 80 && IN.tap_x >= 10 && IN.tap_x < 310) {
@@ -745,9 +790,9 @@ void game_update() {
       }
       int vis[BAG_CAP];
       int n = bag_visible(vis);
-      for (int i = 0; i < BAG_CAP; i++) {
-        float x = BAG_X + (i % 5) * BAG_GX;
-        float y = BAG_Y + (i / 5) * BAG_GY;
+      for (int i = 0; i < BAG_MAX; i++) {
+        float x = BAG_X + (i % 8) * BAG_GX;
+        float y = BAG_Y + (i / 8) * BAG_GY;
         if (in_rect(IN.tap_x, IN.tap_y, x, y, BAG_W, BAG_H)) {
           g_bag_sel = i;
           if (i < n) g_bag_action = true;

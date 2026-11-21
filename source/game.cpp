@@ -16,6 +16,10 @@ static int absi(int v) { return v < 0 ? -v : v; }
 
 static bool is_npc(uint8_t t) { return t >= M_NPC_GHOST; }
 
+static bool is_shopkeeper(uint8_t t, int floor) {
+  return t == M_NPC_SHOP || (t == M_NPC_IMP && floor == 20);
+}
+
 static bool is_quest_miniboss(uint8_t t) {
   return t == M_FETID_RAT || t == M_TRICKSTER || t == M_GREAT_CRAB;
 }
@@ -52,6 +56,11 @@ int Game::weapon_bonus() const {
   if (weapon == IT_NONE) return 0;
   return item_def(weapon).power + weapon_level * 2;
 }
+int Game::bag_capacity() const {
+  return BAG_CAP + 5 * ((bag_potion ? 1 : 0) + (bag_scroll ? 1 : 0) +
+                        (bag_wand ? 1 : 0));
+}
+
 int Game::armor_bonus() const {
   if (armor == IT_NONE) return 0;
   return item_def(armor).power + armor_level;
@@ -642,7 +651,7 @@ void Game::add_item(uint8_t id, int count, int level) {
       }
     }
   }
-  if (inv_n >= BAG_CAP) { message("背包满了！"); return; }
+  if (inv_n >= bag_capacity()) { message("背包满了！"); return; }
   Item it;
   it.id = id;
   it.count = (uint8_t)count;
@@ -686,7 +695,10 @@ void Game::use_item(int idx) {
   const ItemDef& d = item_def(it.id);
   switch (d.kind) {
     case K_USE:
-      if (it.id == IT_ANKH) {
+      if (it.id == IT_STONE_AUG) {
+        if (weapon != IT_NONE) { weapon_level++; message("强化石强化了武器。"); }
+        else { armor_level++; message("强化石强化了护甲。"); }
+      } else if (it.id == IT_ANKH) {
         message("安卡会在你死亡时自动生效。");
         return;
       }
@@ -726,10 +738,17 @@ void Game::use_item(int idx) {
         message("你的攻击变得更有力。");
       } else if (it.id == IT_POTION_TOXIC || it.id == IT_POTION_FLAME) {
         int dmg = d.power + floor / 3;
-        for (size_t i = 0; i < mobs.size(); i++)
-          if (mobs[i].alive && !is_npc(mobs[i].type) &&
-              absi(mobs[i].x - px) <= 3 && absi(mobs[i].y - py) <= 3)
+        for (size_t i = 0; i < mobs.size(); i++) {
+          if (!mobs[i].alive) continue;
+          if (is_shopkeeper(mobs[i].type, floor) &&
+              absi(mobs[i].x - px) <= 3 && absi(mobs[i].y - py) <= 3) {
+            harm_shopkeeper();
+            continue;
+          }
+          if (!is_npc(mobs[i].type) && absi(mobs[i].x - px) <= 3 &&
+              absi(mobs[i].y - py) <= 3)
             damage_mob((int)i, dmg);
+        }
         message(it.id == IT_POTION_TOXIC ? "毒气弥漫开来。" : "烈焰席卷四周。");
       } else if (it.id == IT_SCROLL_MAP) {
         for (int y = 0; y < MH; y++)
@@ -752,8 +771,10 @@ void Game::use_item(int idx) {
                                            : "装备上的诅咒被驱散了。");
       } else if (it.id == IT_SCROLL_TERROR || it.id == IT_SCROLL_LULLABY) {
         for (Mob& m : mobs) {
-          if (!m.alive || is_npc(m.type)) continue;
+          if (!m.alive) continue;
           if (absi(m.x - px) > 6 || absi(m.y - py) > 6) continue;
+          if (is_shopkeeper(m.type, floor)) { harm_shopkeeper(); continue; }
+          if (is_npc(m.type)) continue;
           if (it.id == IT_SCROLL_TERROR) m.terror_t = 15;
           else m.sleep_t = 15;
         }
@@ -830,6 +851,12 @@ void Game::use_item(int idx) {
       target_item = idx;
       message(targeting ? "选择投掷目标（B 取消）。" : "取消投掷。");
       return;
+    case K_BAG:
+      if (it.id == IT_BAG_POTION) bag_potion = true;
+      else if (it.id == IT_BAG_SCROLL) bag_scroll = true;
+      else bag_wand = true;
+      message("背包容量增加了 5 格。");
+      break;
     case K_RING:
       equip_ring(idx);
       return;
@@ -854,6 +881,10 @@ void Game::cast_wand(int idx, int tx, int ty) {
     message("目标不可达。");
     return;
   }
+  for (Mob& m : mobs)
+    if (m.alive && is_shopkeeper(m.type, floor) && absi(m.x - tx) <= 2 &&
+        absi(m.y - ty) <= 2)
+      harm_shopkeeper();
   int dmg = d.power + it.level * 2 + ri(*this, 0, 2);
   auto hit_area = [&](int radius, int bonus) {
     int hits = 0;
@@ -1013,10 +1044,8 @@ void Game::use_feature(int idx) {
       advance_turn();
       break;
     case F_ALCHEMY:
-      add_item(IT_POTION_SHIELD, 1);
-      f.type = F_ALCHEMY_USED;
-      message("炼金釜里还剩一瓶护盾药水。");
-      advance_turn();
+      alchemy_open = true;
+      alchemy_sel = 0;
       break;
     case F_STATUE:
       gold += 15 + tier * 5;
@@ -1090,7 +1119,24 @@ void Game::trigger_tile_features() {
   }
 }
 
+void Game::harm_shopkeeper() {
+  if (shop_gone[floor]) return;
+  if (!shop_warned[floor]) {
+    shop_warned[floor] = 1;
+    message("店主：别乱来！再这样我就走了！");
+  } else {
+    shop_gone[floor] = 1;
+    shop_open = false;
+    shop_n = 0;
+    for (Mob& m : mobs)
+      if (is_shopkeeper(m.type, floor)) m.alive = false;
+    message("店主带着所有货物逃走了！");
+  }
+}
+
 void Game::open_shop() {
+  if (shop_gone[floor]) { message("商店已经空了。"); return; }
+
   shop_open = true;
   shop_sel = 0;
   shop_mode = 0;
@@ -1101,7 +1147,7 @@ void Game::open_shop() {
   int tier = std::min(5, floor / 5 + 1);  // 6->2, 11->3, 16->4, 20->5
   int mult = floor / 5 + 1;
   auto add = [&](uint8_t id, int count, int level) {
-    if (shop_n >= 16) return;
+    if (shop_n >= 20) return;
     Item it;
     it.id = id; it.count = (uint8_t)count; it.level = (uint8_t)level;
     it.charges = item_def(id).kind == K_WAND ? item_def(id).max_charge : 0;
@@ -1133,6 +1179,18 @@ void Game::open_shop() {
   int roll = ri(*this, 0, 99);
   add(roll < 55 ? IT_BOMB : (roll < 80 ? IT_BOMB_FIRE : IT_BOMB_FROST), 1, 0);
   add(IT_ANKH, 1, 0);
+  add(IT_STONE_AUG, 1, 0);
+  add(IT_DART_TIPPED, 2, 0);
+  int pots = 0, scrs = 0, wnds = 0;
+  for (int i = 0; i < inv_n; i++) {
+    uint8_t k = item_def(inv[i].id).kind;
+    if (k == K_USE && inv[i].id >= IT_POTION_HEAL && inv[i].id <= IT_POTION_FLAME) pots += inv[i].count;
+    else if (k == K_USE) scrs += inv[i].count;
+    else if (k == K_WAND) wnds++;
+  }
+  if (pots >= scrs && pots >= wnds) add(IT_BAG_POTION, 1, 0);
+  else if (scrs >= wnds) add(IT_BAG_SCROLL, 1, 0);
+  else add(IT_BAG_WAND, 1, 0);
   if (ri(*this, 0, 99) < 30)
     add(ri(*this, 0, 1) ? random_wand(*this, tier)
                         : (uint8_t)ri(*this, IT_RING_MIGHT, IT_RING_ELEMENTS),
@@ -1176,6 +1234,27 @@ void Game::shop_sell(int i) {
   char b[96];
   snprintf(b, sizeof(b), "卖出了 %s，得到 %d 金", item_name(sold.id), price);
   message(b);
+}
+
+void Game::alchemy_brew(int recipe) {
+  static const uint8_t NEED[3] = {IT_SEED_SUNGRASS, IT_SEED_FIREBLOOM,
+                                  IT_SEED_BLINDWEED};
+  static const uint8_t OUT[3] = {IT_POTION_HEAL, IT_POTION_FLAME,
+                                 IT_POTION_INVIS};
+  if (recipe < 0 || recipe > 2) return;
+  int have = 0;
+  for (int i = 0; i < inv_n; i++)
+    if (inv[i].id == NEED[recipe]) have += inv[i].count;
+  if (have < 3) { message("材料不足，需要 3 个同类种子。"); return; }
+  int need = 3;
+  for (int i = inv_n - 1; i >= 0 && need > 0; i--) {
+    if (inv[i].id != NEED[recipe]) continue;
+    int take = std::min((int)inv[i].count, need);
+    remove_item(i, take);
+    need -= take;
+  }
+  add_item(OUT[recipe], 1, 0);
+  message("炼金成功！");
 }
 
 void Game::shop_buyback(int i) {
@@ -1391,8 +1470,10 @@ void Game::damage_mob(int idx, int raw) {
 void Game::attack(int idx, bool ranged, int bonus) {
   Mob& m = mobs[idx];
   if (!m.alive) return;
+  if (is_shopkeeper(m.type, floor)) { harm_shopkeeper(); return; }
   if (is_npc(m.type)) { talk_npc(idx); return; }
-  int raw = hero_atk() + weapon_bonus() + ring_atk() + ri(*this, 0, 2) + bonus;
+  int raw = hero_atk() + weapon_bonus() + ring_atk() + talents[1] +
+            ri(*this, 0, 2) + bonus;
   if (might_t > 0) raw += 3;
   if (ranged) raw += 1;
   damage_mob(idx, raw);
@@ -1588,7 +1669,8 @@ void Game::mob_turn(Mob& m) {
     return;
   }
   if (dist == 1) {
-    int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus() - ring_def());
+    int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus() -
+                            ring_def() - talents[2]);
     if (shield > 0) {
       int a = std::min(shield, dmg);
       shield -= a; dmg -= a;
@@ -1659,6 +1741,11 @@ void Game::search() {
 
 bool Game::drop_item(int idx) {
   if (idx < 0 || idx >= inv_n) return false;
+  if (inv[idx].id == IT_CORPSE_DUST || inv[idx].id == IT_DARK_ORE ||
+      inv[idx].id == IT_DWARF_TOKEN) {
+    message("任务物品不能丢弃。");
+    return false;
+  }
   if (item_at(px, py) >= 0) { message("这里已经有东西了。"); return false; }
   items.push_back({px, py, inv[idx].id, inv[idx].level});
   char b[96];
@@ -1666,6 +1753,22 @@ bool Game::drop_item(int idx) {
   message(b);
   remove_item(idx, 1);
   return true;
+}
+
+void Game::check_talents() {
+  static const uint8_t NEED[4] = {3, 6, 9, 12};
+  static const char* NAMES[4] = {"坚韧", "强击", "护甲", "精通"};
+  while (talent_tier < 4 && level >= NEED[talent_tier]) {
+    talents[talent_tier] = 1;
+    if (talent_tier == 0) { maxhp += 4; hp += 4; }
+    else if (talent_tier == 1) { /* +1 attack handled below */ }
+    else if (talent_tier == 2) { /* +1 defense handled below */ }
+    else { maxhp += 4; hp += 4; }
+    char b[64];
+    snprintf(b, sizeof(b), "获得天赋：%s", NAMES[talent_tier]);
+    message(b);
+    talent_tier++;
+  }
 }
 
 void Game::advance_turn() {
@@ -1679,6 +1782,28 @@ void Game::advance_turn() {
   if (mind_t > 0) mind_t--;
   if (rage_t > 0) rage_t--;
   if (ring_has(IT_RING_FORCE) && turns % 10 == 0) shield += 3;
+  if (have_dust && wand_state == 1) {
+    dust_timer++;
+    int wraiths = 0;
+    for (const Mob& m : mobs)
+      if (m.alive && m.type == M_WRAITH) wraiths++;
+    if (dust_timer >= 5 && wraiths < 4) {
+      dust_timer = 0;
+      for (int a = 0; a < 30; a++) {
+        int x = px + ri(*this, -3, 3), y = py + ri(*this, -3, 3);
+        if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
+        if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
+        Mob m;
+        m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+        m.type = M_WRAITH;
+        m.hp = m.maxhp = 20 + floor;
+        m.atk = 6; m.def = 2;
+        mobs.push_back(m);
+        message("尸尘中冒出了一只怨灵！");
+        break;
+      }
+    }
+  }
   recharge_wands();
   bool skip = (haste_t > 0 || ring_has(IT_RING_HASTE)) && (turns % 2 == 0);
   if (!skip) {
@@ -1775,6 +1900,10 @@ void Game::dialog_choose(int i) {
   } else if (dlg_type == 7) {  // wandmaker reward
     dialog = false;
     wand_state = 2;
+    have_dust = 0;
+    dust_timer = 0;
+    for (Mob& m : mobs)
+      if (m.type == M_WRAITH) m.alive = false;
     if (i == 0) add_item(reward1, 1, reward1_level);
     else add_item(reward2, 1, reward2_level);
     for (Mob& m : mobs)
@@ -1783,6 +1912,8 @@ void Game::dialog_choose(int i) {
   } else if (dlg_type == 8) {  // smith reward
     dialog = false;
     smith_state = 2;
+    for (int k = 0; k < inv_n; k++)
+      if (inv[k].id == IT_PICKAXE) { remove_item(k, 1); break; }
     if (i == 0) weapon_level++;
     else armor_level++;
     for (Mob& m : mobs)
@@ -1812,6 +1943,17 @@ void Game::dialog_choose(int i) {
     dialog = false;
     if (i == 0 && smith_state == 0) {
       smith_state = 1;
+      add_item(IT_PICKAXE, 1, 0);
+      for (int n = 0; n < 4; n++) {
+        for (int a = 0; a < 60; a++) {
+          int x = ri(*this, 1, MW - 2), y = ri(*this, 1, MH - 2);
+          if (tiles[y][x] != T_FLOOR || feature_at(x, y) >= 0) continue;
+          Feature f;
+          f.x = x; f.y = y; f.type = F_BARRICADE; f.aux = 2;
+          features.push_back(f);
+          break;
+        }
+      }
       for (int n = 0; n < 15; n++) {
         for (int t = 0; t < 100; t++) {
           int x = ri(*this, 1, MW - 2), y = ri(*this, 1, MH - 2);
@@ -1864,7 +2006,12 @@ void Game::cast_or_throw(int x, int y) {
     }
     if (mi < 0) { message("投掷物没有命中。"); }
     else {
-      damage_mob(mi, item_def(it.id).power + it.level * 2 + ri(*this, 0, 2));
+      int dmg = item_def(it.id).power + it.level * 2 + ri(*this, 0, 2);
+      if (it.id == IT_DART_TIPPED) {
+        dmg += 3;
+        if (mobs[mi].alive) mobs[mi].sleep_t = 8;
+      }
+      damage_mob(mi, dmg);
       message("投掷物命中了目标。");
     }
   } else {
@@ -1890,7 +2037,7 @@ void Game::cast_or_throw(int x, int y) {
 }
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 8;
+static const uint16_t SAVE_VERSION = 9;
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -1945,7 +2092,7 @@ bool Game::save(int slot) const {
   for (int i = 0; i < d.item_n; i++)
     d.items[i] = {(int16_t)items[i].x, (int16_t)items[i].y,
                   (int16_t)items[i].level, items[i].id};
-  d.inv_n = (uint8_t)std::min(inv_n, BAG_CAP);
+  d.inv_n = (uint8_t)std::min(inv_n, BAG_MAX);
   for (int i = 0; i < d.inv_n; i++)
     d.inv[i] = {inv[i].id, inv[i].count, inv[i].level, inv[i].charges};
   d.feature_n = (uint8_t)std::min((int)features.size(), 64);
@@ -1964,13 +2111,21 @@ bool Game::save(int slot) const {
   d.imp_floor = imp_floor; d.imp_kills = imp_kills; d.imp_target = imp_target;
   d.reward1 = reward1; d.reward1_level = reward1_level;
   d.reward2 = reward2; d.reward2_level = reward2_level;
+  d.bag_potion = bag_potion ? 1 : 0;
+  d.bag_scroll = bag_scroll ? 1 : 0;
+  d.bag_wand = bag_wand ? 1 : 0;
+  memcpy(d.shop_warned, shop_warned, sizeof(shop_warned));
+  memcpy(d.shop_gone, shop_gone, sizeof(shop_gone));
+  d.dust_timer = (uint8_t)std::min(dust_timer, 255);
+  memcpy(d.talents, talents, sizeof(talents));
+  d.talent_tier = talent_tier;
   d.buyback_n = (uint8_t)buyback_n;
   for (int i = 0; i < buyback_n && i < 3; i++) {
     d.buyback_items[i] = {buyback_items[i].id, buyback_items[i].count,
                           buyback_items[i].level, buyback_items[i].charges};
     d.buyback_prices[i] = (int16_t)buyback_prices[i];
   }
-  d.shop_n = (uint8_t)std::min(shop_n, 16);
+  d.shop_n = (uint8_t)std::min(shop_n, 20);
   d.shop_floor = (uint8_t)std::max(0, std::min(shop_floor, 25));
   for (int i = 0; i < d.shop_n; i++) {
     d.shop_items[i] = {shop_items[i].id, shop_items[i].count,
@@ -2025,7 +2180,7 @@ bool Game::load(int slot) {
   items.clear();
   for (int i = 0; i < d.item_n && i < 48; i++)
     items.push_back({d.items[i].x, d.items[i].y, d.items[i].id, d.items[i].level});
-  inv_n = std::min((int)d.inv_n, BAG_CAP);
+  inv_n = std::min((int)d.inv_n, BAG_MAX);
   for (int i = 0; i < inv_n; i++)
     inv[i] = {d.inv[i].id, d.inv[i].count, d.inv[i].level, d.inv[i].charges};
   features.clear();
@@ -2049,13 +2204,21 @@ bool Game::load(int slot) {
   imp_floor = d.imp_floor; imp_kills = d.imp_kills; imp_target = d.imp_target;
   reward1 = d.reward1; reward1_level = d.reward1_level;
   reward2 = d.reward2; reward2_level = d.reward2_level;
+  bag_potion = d.bag_potion != 0;
+  bag_scroll = d.bag_scroll != 0;
+  bag_wand = d.bag_wand != 0;
+  memcpy(shop_warned, d.shop_warned, sizeof(shop_warned));
+  memcpy(shop_gone, d.shop_gone, sizeof(shop_gone));
+  dust_timer = d.dust_timer;
+  memcpy(talents, d.talents, sizeof(talents));
+  talent_tier = d.talent_tier;
   buyback_n = std::min((int)d.buyback_n, 3);
   for (int i = 0; i < buyback_n; i++) {
     buyback_items[i] = {d.buyback_items[i].id, d.buyback_items[i].count,
                         d.buyback_items[i].level, d.buyback_items[i].charges};
     buyback_prices[i] = d.buyback_prices[i];
   }
-  shop_n = std::min((int)d.shop_n, 16);
+  shop_n = std::min((int)d.shop_n, 20);
   shop_floor = d.shop_floor ? d.shop_floor : -1;
   for (int i = 0; i < shop_n; i++) {
     shop_items[i] = {d.shop_items[i].id, d.shop_items[i].count,
@@ -2075,6 +2238,7 @@ bool Game::load(int slot) {
   dead = false;
   won = false;
   msg[0] = 0;
+  check_talents();
   recompute_fov();
   return true;
 }

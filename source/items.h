@@ -43,6 +43,8 @@ enum ItemId : uint8_t {
   IT_KNIFE, IT_DART, IT_JAVELIN,
   IT_SEED_SUNGRASS, IT_SEED_FIREBLOOM, IT_SEED_BLINDWEED,
   IT_ANKH, IT_CORPSE_DUST, IT_DARK_ORE, IT_DWARF_TOKEN,
+  IT_BAG_POTION, IT_BAG_SCROLL, IT_BAG_WAND,
+  IT_STONE_AUG, IT_DART_TIPPED, IT_PICKAXE,
   IT_COUNT
 };
 
@@ -59,6 +61,7 @@ enum ItemKind : uint8_t {
   K_RING,
   K_MISSILE,
   K_SEED,
+  K_BAG,
 };
 
 // Bag tabs: 0 = all, 1..5 match ItemDef::cat.

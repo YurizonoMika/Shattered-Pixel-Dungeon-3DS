@@ -41,8 +41,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
 | **Item details / actions** | **Bag tabs (药水 filter)** |
 | ![Item actions](docs/screens/bag_item.png) | ![Bag tabs](docs/screens/bag_tabs.png) |
-| **Search effect (CheckedCell pulse)** | **Shop** |
-| ![Search](docs/screens/search.png) | ![Shop](docs/screens/shop.png) |
+| **Alchemy** | **Shop** |
+| ![Alchemy](docs/screens/alchemy.png) | ![Shop](docs/screens/shop.png) |
 | **Prison (6–10)** | **Caves (11–15)** |
 | ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
 | **City (16–20)** | **Halls boss (21–25)** |
@@ -88,7 +88,7 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   Search reveals traps and secret doors with SPD's blue `CheckedCell` pulse.
 - **Shops**: 3–4 stocked items per region (potions, food, tiered gear, wands) with
   gold prices, sold-out state and touch/keyboard buying.
-- **84 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
+- **90 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
   11 potions, 11 scrolls, 8 rings, 3 food types, 3 bombs, 3 throwing weapons,
   3 seeds, keys/gold/quest items.
 - **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
@@ -137,8 +137,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   price) and the last **3 sold items** can be bought back at the same price.
 - Shop UI has 购买 / 出售 / 回购 tabs, 6 rows per page, **X** switches tabs,
   **L/R** pages, **A** trades and **B** closes.
-- The shopkeeper's warn-then-flee behaviour for damage/debuffs is not implemented
-  yet (shop AoE effects currently cannot hit him).
+- Shopkeeper warn/flee is implemented: damaging or debuffing him warns once,
+  the second offense makes him vanish with all wares (saved per floor).
+- Bag stock: Potion Bandolier / Scroll Holder / Magical Holster, each +5 slots;
+  also sells an Ankh, Stone of Augmentation and tipped darts.
 
 ### NPC quests (ported from SPD)
 
@@ -151,7 +153,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 Quest floors are rolled per run and stored in the save. Quest items are
 non-sellable; the ghost disappears after the reward, and the Imp reappears as the
-floor-20 shopkeeper.
+floor-20 shopkeeper. Picking up corpse dust spawns wraiths every few turns until
+the Wandmaker is paid; the Blacksmith lends a pickaxe and seals a mine area behind
+breakable barricades (implemented as a room on the same floor, not a separate
+sub-level).
 
 ### Sources
 
@@ -166,7 +171,7 @@ Implementation was cross-checked against:
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v8): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v9): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
 floor items (including gold amounts and chest contents), features/traps, shop stock
 and sold flags, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
@@ -337,6 +342,8 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 61 | Ghost reward choice |
 | 62–64 | Wandmaker / Blacksmith / Imp quest accepted |
 | 65 | Generate all 25 floors (smoke test) |
+| 70 | Alchemy UI |
+| 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |
 
@@ -353,8 +360,10 @@ useful when the emulator shows an exception dialog.
       interactables and area events
 - [x] Full item table across all categories (weapons/armor/wands/potions/
       scrolls/rings/bombs/missiles/seeds) with gameplay effects
-- [ ] Parity polish: SPD's talents, alchemy recipes, bags, shopkeeper fleeing
-- [ ] Wandmaker wraith spawns and the blacksmith's Old Mine sub-level
+- [x] Shopkeeper warn/flee, bags, alchemy UI, Stone of Augmentation, tipped darts
+- [x] Wandmaker wraith spawns, pickaxe/ore mine area, class-neutral talent tiers
+- [ ] True Old Mine sub-level (currently a sealed room on the same floor)
+- [ ] Full class-specific 3-way talent trees (currently 4 fixed talent tiers)
 - [ ] Difficulty tuning across all 25 floors
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
 - [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)
