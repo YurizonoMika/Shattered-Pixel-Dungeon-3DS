@@ -62,6 +62,10 @@ void draw_img(const Img& im, float x, float y, float sx = 1, float sy = 1,
 // Draw a cell from a grid sheet.
 void draw_cell(const Img& im, int cx, int cy, int cw, int ch, float x, float y,
                float sx = 1, float sy = 1, u32 tint = 0, float z = 0.5f);
+// Rotated cell, angle in radians, centered on the destination cell.
+void draw_cell_rot(const Img& im, int cx, int cy, int cw, int ch, float x,
+                   float y, float scale, float angle, u32 tint = 0,
+                   float z = 0.5f);
 // Draw a sub-rect of a sheet in source pixels (no grid assumption).
 void draw_rect_src(const Img& im, int sx0, int sy0, int sw, int sh, float x,
                    float y, float dx, float dy, u32 tint = 0, float z = 0.5f);

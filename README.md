@@ -63,6 +63,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   interacts (attack / pick up / open secret door / descend).
 - Mobs: giant rat, gnoll, sewer crab, albino rat; a **floor-3 boss** guards the exit,
   and a friendly ghost NPC gives a quest.
+- Sprite animation: idle and run cycles for the hero, every mob and the NPC, plus
+  smooth per-tile movement interpolation for the player and monsters.
+- Orientation-aware doors (the flat door sprite is rotated to match the wall) and
+  floating/bobbing floor items with small shadows.
 - Weapons and armor with upgrade levels, two wands with charges and recharging,
   bombs, three potions, mapping/upgrade/teleport scrolls, food, keys and gold.
 - Backpack equips gear and shows stats; quick slots show stack counts or wand charges.
@@ -84,7 +88,7 @@ auto-saves. Slots written by older builds are detected and ignored safely.
 
 | Context | Input |
 | --- | --- |
-| Menus | D-pad / Circle Pad move, **A** confirm, **B** back, touch supported |
+| Menus | D-pad / Circle Pad move, **A** confirm, **B** back, bottom-screen touch supported |
 | Settings | ← → switch tab, ↑ ↓ select, **A** change value |
 | Hero select | **A** select, **A** again on the same hero to start, **X** info popup |
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
@@ -170,6 +174,10 @@ tools/                # asset prep, font generation, dev helpers
 - Two `C2D_RenderTarget`s (top 400×240, bottom 320×240) are drawn every frame.
 - `C3D_DepthTest(true, GPU_ALWAYS, ...)` keeps strict submission order for 2D UI.
 - All textures use `GPU_NEAREST` filtering to preserve pixel art.
+- Character frames follow SPD's sheets (hero/gnoll 12×15, rat 16×15, crab 16×16)
+  with the same idle/run frame tables, drawn with SPD's tile-relative offsets.
+- Player movement is a queued BFS path: one tile per turn, with a short visual
+  interpolation, so turns stay deterministic while sprites move smoothly.
 - Text is a generated white-alpha glyph atlas tinted at runtime with `C2D_TintMult`.
 - Saves use a fixed-size `GameDisk` struct (`source/game.h`) with magic + version
   fields; `Game::slot_meta` reads just the header for the slot list.
@@ -221,6 +229,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 17 | Same as 15 + wand targeting |
 | 18 | Floor 3 next to the boss |
 | 19 | Floor 2 next to the quest amulet |
+| 21 | Frozen mid-walk pose (animation check) |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.

@@ -48,11 +48,13 @@ int Game::armor_bonus() const {
 bool Game::walkable(int x, int y) const {
   if (x < 0 || y < 0 || x >= MW || y >= MH) return false;
   uint8_t t = tiles[y][x];
-  return t == T_FLOOR || t == T_DOOR || t == T_STAIRS || t == T_WATER || t == T_GRASS;
+  return t == T_FLOOR || t == T_DOOR_OPEN || t == T_STAIRS || t == T_WATER ||
+         t == T_GRASS;
 }
 bool Game::blocks_sight(int x, int y) const {
   if (x < 0 || y < 0 || x >= MW || y >= MH) return true;
-  return tiles[y][x] == T_WALL || tiles[y][x] == T_SECRET;
+  uint8_t t = tiles[y][x];
+  return t == T_WALL || t == T_SECRET || t == T_DOOR;
 }
 int Game::mob_at(int x, int y) const {
   for (size_t i = 0; i < mobs.size(); i++) {
@@ -180,7 +182,8 @@ void Game::gen_level() {
     if (tiles[y][x] == T_WALL) return;
     if (mob_at(x, y) >= 0) return;
     Mob m;
-    m.x = x; m.y = y; m.type = (uint8_t)type;
+    m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+    m.type = (uint8_t)type;
     const MobStats& s = MOB_STATS[type];
     int bonus = scale ? (floor - 1) : 0;
     m.maxhp = s.hp + bonus * 2;
@@ -212,6 +215,7 @@ void Game::gen_level() {
     npc.type = M_NPC;
     npc.x = r.x + r.w / 2;
     npc.y = r.y + r.h / 2;
+    npc.vx = (float)npc.x; npc.vy = (float)npc.y;
     npc.hp = npc.maxhp = 999;
     mobs.push_back(npc);
   }
@@ -280,7 +284,9 @@ void Game::new_run(int hero_class, uint32_t s) {
   won = false;
   dialog = false;
   paused = backpack = false;
+  clear_path();
   gen_level();
+  pvx = (float)px; pvy = (float)py; panim_ms = 0;
   message("你来到了地牢入口。");
 }
 
@@ -461,6 +467,11 @@ void Game::pick_item(int idx) {
 
 void Game::move_player(int dx, int dy) {
   int nx = px + dx, ny = py + dy;
+  if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
+  if (tiles[ny][nx] == T_DOOR) {
+    tiles[ny][nx] = T_DOOR_OPEN;
+    message("你推开了门。");
+  }
   if (!walkable(nx, ny)) return;
   int m = mob_at(nx, ny);
   if (m >= 0) {
@@ -480,6 +491,7 @@ void Game::move_player(int dx, int dy) {
     advance_turn();
     return;
   }
+  pvx = (float)px; pvy = (float)py;
   px = nx;
   py = ny;
   recompute_fov();
@@ -601,6 +613,7 @@ void Game::act_at(int x, int y, bool interact) {
       cast_or_throw(x, y);
     return;
   }
+  clear_path();
   if (x == px && y == py) {
     advance_turn();
     message("你等待了一回合。");
@@ -621,7 +634,7 @@ void Game::act_at(int x, int y, bool interact) {
     for (int k = 0; k < 4; k++) {
       int nx = cx + DX[k], ny = cy + DY[k];
       if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
-      if (!walkable(nx, ny)) continue;
+      if (!walkable(nx, ny) && tiles[ny][nx] != T_DOOR) continue;
       if (mob_at(nx, ny) >= 0) continue;
       if (prev[ny][nx] != -1) continue;
       prev[ny][nx] = (int16_t)(cy * MW + cx);
@@ -649,9 +662,49 @@ void Game::act_at(int x, int y, bool interact) {
   }
   std::reverse(path, path + n);
   int steps = std::min(n, 8);
+  path_n = steps;
+  path_i = 0;
   for (int i = 0; i < steps; i++) {
-    if (!dialog && !dead) move_player(path[i][0] - px, path[i][1] - py);
-    if (dialog || dead) break;
+    path_x[i] = path[i][0];
+    path_y[i] = path[i][1];
+  }
+}
+
+void Game::clear_path() {
+  path_n = path_i = 0;
+}
+
+void Game::tick(int dt_ms) {
+  if (dt_ms < 1) dt_ms = 1;
+  if (dt_ms > 100) dt_ms = 100;
+  const float sp = dt_ms * 0.014f;  // ~14 tiles / second
+
+  if (!freeze_anim) {
+    if (pvx < px) pvx = std::min((float)px, pvx + sp);
+    else if (pvx > px) pvx = std::max((float)px, pvx - sp);
+    if (pvy < py) pvy = std::min((float)py, pvy + sp);
+    else if (pvy > py) pvy = std::max((float)py, pvy - sp);
+  }
+  panim_ms += dt_ms;
+
+  for (Mob& m : mobs) {
+    if (!freeze_anim) {
+      if (m.vx < m.x) m.vx = std::min((float)m.x, m.vx + sp);
+      else if (m.vx > m.x) m.vx = std::max((float)m.x, m.vx - sp);
+      if (m.vy < m.y) m.vy = std::min((float)m.y, m.vy + sp);
+      else if (m.vy > m.y) m.vy = std::max((float)m.y, m.vy - sp);
+    }
+    m.anim_ms += dt_ms;
+  }
+
+  // Advance the queued walk once the player has visually reached the tile.
+  if (!dialog && !dead && !paused && !backpack && path_i < path_n &&
+      fabsf(pvx - px) < 0.02f && fabsf(pvy - py) < 0.02f) {
+    int nx = path_x[path_i], ny = path_y[path_i];
+    path_i++;
+    int ox = px, oy = py;
+    move_player(nx - px, ny - py);
+    if ((px == ox && py == oy) || dialog || dead) clear_path();
   }
 }
 
@@ -666,6 +719,7 @@ void Game::mob_turn(Mob& m) {
       static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
       int nx = m.x + DX[d], ny = m.y + DY[d];
       if (walkable(nx, ny) && mob_at(nx, ny) < 0 && !(nx == px && ny == py)) {
+        m.vx = (float)m.x; m.vy = (float)m.y;
         m.x = nx; m.y = ny;
       }
     }
@@ -685,12 +739,18 @@ void Game::mob_turn(Mob& m) {
     return;
   }
   int sx = (dx > 0) - (dx < 0), sy = (dy > 0) - (dy < 0);
+  auto try_move = [&](int nx, int ny) {
+    if (!walkable(nx, ny) || mob_at(nx, ny) >= 0 || (nx == px && ny == py)) return false;
+    m.vx = (float)m.x; m.vy = (float)m.y;
+    m.x = nx; m.y = ny;
+    return true;
+  };
   if (absi(dx) >= absi(dy)) {
-    if (walkable(m.x + sx, m.y) && mob_at(m.x + sx, m.y) < 0 && !(m.x + sx == px && m.y == py)) { m.x += sx; return; }
-    if (walkable(m.x, m.y + sy) && mob_at(m.x, m.y + sy) < 0 && !(m.x == px && m.y + sy == py)) m.y += sy;
+    if (try_move(m.x + sx, m.y)) return;
+    try_move(m.x, m.y + sy);
   } else {
-    if (walkable(m.x, m.y + sy) && mob_at(m.x, m.y + sy) < 0 && !(m.x == px && m.y + sy == py)) { m.y += sy; return; }
-    if (walkable(m.x + sx, m.y) && mob_at(m.x + sx, m.y) < 0 && !(m.x + sx == px && m.y == py)) m.x += sx;
+    if (try_move(m.x, m.y + sy)) return;
+    try_move(m.x + sx, m.y);
   }
 }
 
@@ -739,6 +799,8 @@ void Game::descend() {
   }
   floor++;
   gen_level();
+  pvx = (float)px; pvy = (float)py;
+  clear_path();
   hp = std::min(maxhp, hp + 3);
   char b[64];
   snprintf(b, sizeof(b), "你来到了第 %d 层。", floor);
@@ -902,6 +964,7 @@ bool Game::load(int slot) {
     m.hp = d.mobs[i].hp; m.maxhp = d.mobs[i].maxhp;
     m.atk = d.mobs[i].atk; m.def = d.mobs[i].def;
     m.type = d.mobs[i].type; m.alive = d.mobs[i].alive != 0;
+    m.vx = (float)m.x; m.vy = (float)m.y;
     mobs.push_back(m);
   }
   items.clear();
@@ -911,6 +974,8 @@ bool Game::load(int slot) {
   for (int i = 0; i < inv_n; i++)
     inv[i] = {d.inv[i].id, d.inv[i].count, d.inv[i].level, d.inv[i].charges};
   memset(vis, 0, sizeof(vis));
+  pvx = (float)px; pvy = (float)py; panim_ms = 0;
+  clear_path();
   cursor_x = px; cursor_y = py;
   targeting = false;
   paused = backpack = false;

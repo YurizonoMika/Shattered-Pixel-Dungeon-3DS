@@ -111,6 +111,22 @@ void draw_cell(const Img& im, int cx, int cy, int cw, int ch, float x, float y,
   draw_rect_src(im, cx, cy, cw, ch, x, y, cw * sx, ch * sy, tint, z);
 }
 
+void draw_cell_rot(const Img& im, int cx, int cy, int cw, int ch, float x,
+                   float y, float scale, float angle, u32 tint, float z) {
+  if (!im.ok() || cw <= 0 || ch <= 0) return;
+  Tex3DS_SubTexture st = make_sub(im, cx, cy, cw, ch);
+  C2D_Image img{im.tex, &st};
+  C2D_ImageTint t;
+  const C2D_ImageTint* tp = nullptr;
+  if (tint) {
+    t = make_tint(tint);
+    tp = &t;
+  }
+  // Rotated draws are centered on the given point.
+  C2D_DrawImageAtRotated(img, x + cw * scale * 0.5f, y + ch * scale * 0.5f, z,
+                         angle, tp, scale, scale);
+}
+
 void draw_img(const Img& im, float x, float y, float sx, float sy, u32 tint,
               float z) {
   draw_rect_src(im, 0, 0, im.w, im.h, x, y, im.w * sx, im.h * sy, tint, z);

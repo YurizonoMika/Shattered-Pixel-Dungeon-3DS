@@ -9,11 +9,12 @@
 enum TileType : uint8_t {
   T_WALL = 0,
   T_FLOOR,
-  T_DOOR,
+  T_DOOR,       // closed
   T_SECRET,
   T_STAIRS,
   T_WATER,
   T_GRASS,
+  T_DOOR_OPEN,  // walkable, still drawn as a door frame
 };
 
 enum MobType : uint8_t {
@@ -27,6 +28,8 @@ enum MobType : uint8_t {
 
 struct Mob {
   int x = 0, y = 0;
+  float vx = 0, vy = 0;  // visual position (tile units)
+  int anim_ms = 0;
   uint8_t type = M_RAT;
   int hp = 1, maxhp = 1, atk = 1, def = 0;
   bool alive = true;
@@ -103,6 +106,10 @@ struct Game {
   int target_item = -1;
   int camx = 0, camy = 0;
   int wait_hold = 0;
+  float pvx = 0, pvy = 0;   // player visual position
+  int panim_ms = 0;
+  int16_t path_x[32]{}, path_y[32]{};
+  int path_n = 0, path_i = 0;
   int fx_x = -1, fx_y = -1, fx_t = 0;
 
   bool paused = false, backpack = false;
@@ -114,6 +121,7 @@ struct Game {
   int dlg_optn = 0;
   bool dead = false;
   bool won = false;
+  bool freeze_anim = false;  // debug: hold mid-walk pose
 
   char msg[128]{};
   int msg_timer = 0;
@@ -132,6 +140,8 @@ struct Game {
   void attack(int mob, bool ranged, int bonus = 0);
   void damage_mob(int idx, int raw);
   void advance_turn();
+  void tick(int dt_ms);
+  void clear_path();
   void wait_turns(int n);
   void mob_turn(Mob& m);
   void message(const char* s);

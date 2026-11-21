@@ -168,26 +168,33 @@ void input_update(Input& in) {
   touchPosition tp;
   hidTouchRead(&tp);
   in.touch = (in.held & KEY_TOUCH) != 0;
-  in.tx = tp.px;
-  in.ty = tp.py;
   static bool touching = false, moved = false;
   static float sx = 0, sy = 0;
+  static float last_x = 0, last_y = 0;
   in.tap = false;
-  if (in.touch && !touching) {
-    touching = true;
-    moved = false;
-    sx = tp.px;
-    sy = tp.py;
-  } else if (in.touch) {
-    if (fabsf(tp.px - sx) > 8 || fabsf(tp.py - sy) > 8) moved = true;
+  if (in.touch) {
+    // hidTouchRead can report (0,0) on the release frame, so keep the last
+    // real position and use it for the tap.
+    last_x = tp.px;
+    last_y = tp.py;
+    if (!touching) {
+      touching = true;
+      moved = false;
+      sx = tp.px;
+      sy = tp.py;
+    } else if (fabsf(tp.px - sx) > 8 || fabsf(tp.py - sy) > 8) {
+      moved = true;
+    }
   } else if (touching) {
     touching = false;
     if (!moved) {
       in.tap = true;
-      in.tap_x = tp.px;
-      in.tap_y = tp.py;
+      in.tap_x = last_x;
+      in.tap_y = last_y;
     }
   }
+  in.tx = last_x;
+  in.ty = last_y;
 }
 
 // ---------------------------------------------------------------------------
@@ -731,7 +738,17 @@ int main() {
           for (Mob& m : G.mobs)
             if (m.type == M_BOSS) { G.px = m.x - 1; G.py = m.y; break; }
           G.cursor_x = G.px; G.cursor_y = G.py;
+          G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
+        }
+        else if (want == 21) {
+          start_new_game(0);
+          G.freeze_anim = true;
+          G.pvx = (float)G.px + 0.55f;
+          G.panim_ms = 250;
+          for (Mob& m : G.mobs) {
+            if (m.type != M_NPC) { m.vx = (float)m.x - 0.5f; m.anim_ms = 150; break; }
+          }
         }
         else if (want == 19) {
           start_new_game(0);
@@ -739,6 +756,7 @@ int main() {
           for (FloorItem& it : G.items)
             if (it.id == IT_AMULET) { G.px = it.x; G.py = it.y + 1; break; }
           G.cursor_x = G.px; G.cursor_y = G.py;
+          G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
         }
         else if (want >= 15 && want <= 17) {

@@ -19,6 +19,62 @@ static void tile_cell(uint8_t t, int& cx, int& cy) {
   cy = (idx / 16) * 16;
 }
 
+static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
+                        float y, u32 tint = 0) {
+  int cols = 256 / fw;
+  int cx = (frame % cols) * fw;
+  int cy = (frame / cols) * fh;
+  draw_cell(sheet, cx, cy, fw, fh, x, y, 1, 1, tint);
+}
+
+static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
+                      int camx, int camy) {
+  static const uint8_t idle[8] = {0, 0, 0, 1, 0, 0, 1, 1};
+  int frame = moving ? 2 + (anim_ms / 100) % 6 : idle[(anim_ms / 1000) % 8];
+  draw_sprite(A_hero[hero % 6], 12, 15, frame,
+              vx * 16 - camx + 2, vy * 16 - camy + 1);
+}
+
+static void draw_mob(const Mob& m, int camx, int camy) {
+  bool moving = fabsf(m.vx - m.x) > 0.01f || fabsf(m.vy - m.y) > 0.01f;
+  const Img* sheet = &A_rat;
+  int fw = 16, fh = 15, ox = 0, oy = 1;
+  u32 tint = 0;
+  int frame = 0;
+  static const uint8_t rat_idle[4] = {0, 0, 0, 1};
+  static const uint8_t gnoll_idle[8] = {0, 0, 0, 1, 0, 0, 1, 1};
+  static const uint8_t crab_idle[4] = {0, 1, 0, 2};
+  switch (m.type) {
+    case M_RAT:
+      sheet = &A_rat; fw = 16; fh = 15; ox = 0; oy = 1;
+      frame = moving ? 6 + (m.anim_ms / 100) % 5 : rat_idle[(m.anim_ms / 500) % 4];
+      break;
+    case M_ALBINO:
+      sheet = &A_rat; fw = 16; fh = 15; ox = 0; oy = 1; tint = 0xFFD6E6FF;
+      frame = moving ? 6 + (m.anim_ms / 100) % 5 : rat_idle[(m.anim_ms / 500) % 4];
+      break;
+    case M_GNOLL:
+      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1;
+      frame = moving ? 4 + (m.anim_ms / 83) % 4 : gnoll_idle[(m.anim_ms / 500) % 8];
+      break;
+    case M_CRAB:
+      sheet = &A_crab; fw = 16; fh = 16; ox = 0; oy = 0;
+      frame = moving ? 3 + (m.anim_ms / 66) % 4 : crab_idle[(m.anim_ms / 200) % 4];
+      break;
+    case M_BOSS:
+      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1; tint = 0xFF9090FF;
+      frame = moving ? 4 + (m.anim_ms / 83) % 4 : gnoll_idle[(m.anim_ms / 500) % 8];
+      break;
+    default:
+      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1; tint = 0x9FC0FFFF;
+      frame = gnoll_idle[(m.anim_ms / 700) % 8];
+      oy += (int)(sinf(TIME_S * 2.0f) * 1.5f);
+      break;
+  }
+  draw_sprite(*sheet, fw, fh, frame, m.vx * 16 - camx + ox,
+              m.vy * 16 - camy + oy, tint);
+}
+
 static void draw_map() {
   int camx = G.px * 16 - TOP_W / 2 + 8;
   int camy = G.py * 16 - TOP_H / 2 + 8;
@@ -42,32 +98,34 @@ static void draw_map() {
       int scx, scy;
       tile_cell(G.tiles[y][x], scx, scy);
       u32 tint = G.vis[y][x] ? 0 : 0x707070FF;
-      draw_cell(A_tiles, scx, scy, 16, 16, (float)(x * 16 - camx),
-                (float)(y * 16 - camy), 1, 1, tint);
+      float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
+      if (G.tiles[y][x] == T_DOOR || G.tiles[y][x] == T_DOOR_OPEN) {
+        // The flat door sprite is a vertical panel. Rotate it when the wall
+        // runs left-to-right so doors match the corridor orientation.
+        bool horizontal_wall =
+            G.blocks_sight(x - 1, y) && G.blocks_sight(x + 1, y);
+        draw_cell_rot(A_tiles, scx, scy, 16, 16, tx, ty, 1.0f,
+                      horizontal_wall ? (float)M_PI * 0.5f : 0.0f, tint);
+      } else {
+        draw_cell(A_tiles, scx, scy, 16, 16, tx, ty, 1, 1, tint);
+      }
     }
   }
 
-  // floor items
+  // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x]) continue;
-    draw_item_icon(it.id, (float)(it.x * 16 - camx), (float)(it.y * 16 - camy), 1.0f);
+    float ix = (float)(it.x * 16 - camx);
+    float iy = (float)(it.y * 16 - camy);
+    float bob = sinf(TIME_S * 3.2f + it.x * 0.9f + it.y * 1.7f) * 1.5f;
+    draw_box(ix + 4, iy + 12, 8, 3, C2D_Color32(0, 0, 0, 90), 0.45f);
+    draw_item_icon(it.id, ix, iy + bob, 1.0f);
   }
 
-  // mobs
+  // mobs (correct SPD frame sizes: rat 16x15, gnoll 12x15, crab 16x16)
   for (const Mob& m : G.mobs) {
     if (!m.alive || !G.vis[m.y][m.x]) continue;
-    const Img* sheet = &A_rat;
-    u32 tint = 0;
-    switch (m.type) {
-      case M_RAT: sheet = &A_rat; break;
-      case M_ALBINO: sheet = &A_rat; tint = 0xFFD6E6FF; break;
-      case M_GNOLL: sheet = &A_gnoll; break;
-      case M_CRAB: sheet = &A_crab; break;
-      case M_BOSS: sheet = &A_gnoll; tint = 0xFF9090FF; break;
-      default: sheet = &A_gnoll; tint = 0x9FC0FFFF; break;
-    }
-    draw_cell(*sheet, 0, 0, 16, 16, (float)(m.x * 16 - camx),
-              (float)(m.y * 16 - camy), 1, 1, tint);
+    draw_mob(m, camx, camy);
   }
 
   // spell / bomb impact spark
@@ -76,9 +134,10 @@ static void draw_map() {
              4, 4, CLR_YELLOW, 0.7f);
   }
 
-  // player
-  draw_cell(A_hero[G.hero], 0, 0, 16, 16, (float)(G.px * 16 - camx),
-            (float)(G.py * 16 - camy), 1, 1, 0);
+  // player (hero frames are 12x15 inside the sheet)
+  draw_hero(G.hero, G.pvx, G.pvy, G.panim_ms,
+            fabsf(G.pvx - G.px) > 0.01f || fabsf(G.pvy - G.py) > 0.01f, camx,
+            camy);
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
@@ -139,7 +198,7 @@ void game_draw_top() {
 // ---------------------------------------------------------------------------
 // Bottom screen
 // ---------------------------------------------------------------------------
-static const float SLOT_X = 32, SLOT_Y = 34, SLOT_SIZE = 32;
+static const float SLOT_X = 52, SLOT_Y = 34, SLOT_SIZE = 27;
 
 static void draw_status() {
   draw_box(0, 0, BOT_W, 32, C2D_Color32(12, 14, 20, 255), 0.3f);
@@ -163,18 +222,23 @@ static void draw_status() {
 }
 
 static void draw_quickslots() {
+  // SPD toolbar.t3x layouts: start (86,0,20,24), middle (88,0,18,24),
+  // end (106,0,19,24). Repeated 32x32 cells look broken, so build the strip.
   for (int i = 0; i < 8; i++) {
     float x = SLOT_X + i * SLOT_SIZE;
-    draw_cell(A_toolbar, 0, 0, 32, 32, x, SLOT_Y, 1, 1, 0, 0.4f);
+    int sx = 88, sw = 18;
+    if (i == 0) { sx = 86; sw = 20; }
+    else if (i == 7) { sx = 106; sw = 19; }
+    draw_rect_src(A_toolbar, sx, 0, sw, 24, x, SLOT_Y, SLOT_SIZE, 36, 0, 0.4f);
     if (i < G.inv_n) {
       const ItemDef& d = item_def(G.inv[i].id);
-      draw_item_icon(G.inv[i].id, x + 8, SLOT_Y + 6, 1.0f);
+      draw_item_icon(G.inv[i].id, x + 6, SLOT_Y + 8, 1.0f);
       int num = d.kind == K_WAND ? G.inv[i].charges : G.inv[i].count;
       if (d.kind == K_WAND || num > 1)
-        textf(x + 22, SLOT_Y + 18, CLR_WHITE, 1.0f, "%d", num);
+        textf(x + 17, SLOT_Y + 21, CLR_WHITE, 1.0f, "%d", num);
     }
     if (G.targeting && G.target_item == i)
-      draw_cursor(x, SLOT_Y, SLOT_SIZE, SLOT_SIZE, CLR_YELLOW);
+      draw_cursor(x, SLOT_Y, SLOT_SIZE, 36, CLR_YELLOW);
   }
 }
 
@@ -194,14 +258,14 @@ static void draw_action_bar() {
 
 static void draw_messages() {
   if (G.msg_timer > 0 && G.msg[0]) {
-    draw_box(6, 70, BOT_W - 12, 22, C2D_Color32(0, 0, 0, 160), 0.38f);
-    text_wrap(G.msg, 12, 74, BOT_W - 24, CLR_WHITE, 1.0f, 0.5f);
+    draw_box(6, 76, BOT_W - 12, 22, C2D_Color32(0, 0, 0, 160), 0.38f);
+    text_wrap(G.msg, 12, 80, BOT_W - 24, CLR_WHITE, 1.0f, 0.5f);
   }
-  text_wrap("摇杆/十字键移动光标，A 走向目标，Y 交互。", 10, 104, BOT_W - 20,
+  text_wrap("摇杆/十字键移动光标，A 走向目标，Y 交互。", 10, 108, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
-  text_wrap("快捷栏：点击道具使用；法杖/炸弹可进入瞄准模式。", 10, 134, BOT_W - 20,
+  text_wrap("快捷栏：点击道具使用；法杖/炸弹可进入瞄准模式。", 10, 138, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
-  textf(10, 166, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
+  textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
 static void draw_backpack() {
@@ -287,12 +351,17 @@ static void activate_action(int i) {
   switch (i) {
     case 0: G.wait_turns(1); G.message("你等待了一回合。"); break;
     case 1: do_search(); break;
-    case 2: G.backpack = !G.backpack; break;
-    case 3: G.paused = 1; break;
+    case 2: G.clear_path(); G.backpack = !G.backpack; break;
+    case 3: G.clear_path(); G.paused = 1; break;
   }
 }
 
 void game_update() {
+  static u64 last_tick = 0;
+  u64 now_tick = osGetTime();
+  int dt = last_tick ? (int)(now_tick - last_tick) : 16;
+  last_tick = now_tick;
+  G.tick(dt);
   if (G.msg_timer > 0) G.msg_timer--;
 
   if (G.dialog) {
@@ -344,8 +413,8 @@ void game_update() {
   }
 
   if (IN.pressed(KEY_B)) {
-    if (G.targeting) { G.targeting = false; G.message("取消投掷。"); }
-    else leave_game_to_saves(true);
+    if (G.targeting) { G.targeting = false; G.message("取消瞄准。"); }
+    else { G.clear_path(); leave_game_to_saves(true); }
     return;
   }
 
@@ -355,16 +424,16 @@ void game_update() {
 
   if (IN.pressed(KEY_A)) G.act_at(G.cursor_x, G.cursor_y, false);
   if (IN.pressed(KEY_Y)) G.act_at(G.cursor_x, G.cursor_y, true);
-  if (IN.pressed(KEY_X)) G.backpack = true;
+  if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; }
   if (IN.pressed(KEY_L)) { G.wait_turns(1); G.message("你等待了一回合。"); }
   if (IN.pressed(KEY_R)) do_search();
 
   // Touch: quickslots and action buttons.
   if (IN.tap) {
-    if (IN.tap_y >= SLOT_Y && IN.tap_y < SLOT_Y + SLOT_SIZE &&
+    if (IN.tap_y >= SLOT_Y && IN.tap_y < SLOT_Y + 36 &&
         IN.tap_x >= SLOT_X && IN.tap_x < SLOT_X + SLOT_SIZE * 8) {
       int i = (int)((IN.tap_x - SLOT_X) / SLOT_SIZE);
-      if (i < G.inv_n && i >= 0) G.use_item(i);
+      if (i < G.inv_n && i >= 0) { G.clear_path(); G.use_item(i); }
       return;
     }
     if (IN.tap_y >= 196) {
