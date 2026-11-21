@@ -306,9 +306,9 @@ Readability rules used by the renderer:
   **no drop shadow**, so upscaled glyphs stay crisp instead of growing a grey halo;
 - body text uses high-contrast near-white instead of mid-grey.
 
-> If text looks soft in Azahar, make the emulator window an integer multiple of the
-> 3DS resolution (e.g. 4×: 1600×960 for the bottom screen) — non-integer window
-> scaling blurs the whole framebuffer, not just text.
+> If text looks soft in Azahar, scale the window by an integer factor (4× gives
+> 1600×960 for the top screen and 1280×960 for the bottom screen). Non-integer
+> window scaling blurs the whole framebuffer, not just text.
 
 ## Debug
 
