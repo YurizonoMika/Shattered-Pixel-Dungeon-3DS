@@ -1,5 +1,7 @@
 #include "game.h"
 #include "floor_layout.h"
+#include "floor_maze.h"
+#include "floor_patch.h"
 #include "pathfinder.h"
 
 void dlog(const char* fmt, ...);
@@ -724,7 +726,7 @@ void Game::gen_level() {
     int door_x = -1, door_y = -1;
   };
   enum { RK_ENTRANCE, RK_EXIT, RK_STANDARD, RK_SPECIAL, RK_SECRET, RK_SHOP,
-         RK_QUEST };
+         RK_QUEST, RK_CONNECTOR };
   std::vector<GRoom> rooms;
 
   int nstd = 5;
@@ -747,23 +749,54 @@ void Game::gen_level() {
   bool imp_shop = (floor == 20 && imp_state == 2);
   bool quest_extra = !boss_floor && (floor == smith_floor || floor == imp_floor);
   const bool shop = shop_here || imp_shop;
-  const int leaves = nspec + nsecret + int(shop) + int(quest_extra);
-  const bool eight = !boss_floor && nstd >= 5 && ri(*this, 0, 1) != 0;
   int entrance_room = 0, exit_room = 0;
-  auto layout = boss_floor ? floor_layout::Layout{} :
-      floor_layout::build(nstd + 2, leaves, shop, eight, MW, MH,
-                          [&](int lo, int hi) { return ri(*this, lo, hi); });
+  using namespace floor_layout;
+  auto layout_rng = floor_random(seed, floor);
+  const Shape shape = select_shape(layout_rng);
+  Layout layout;
+  layout_builder = 0;
+  if (!boss_floor) {
+    // Room inputs currently come from the port's run plan. Keep the graph's
+    // random stream independent of the native loot and actor streams.
+    std::vector<Spec> specs{{Kind::Entrance,5,10,5,10}, {Kind::Exit,5,10,5,10}};
+    for (int remaining = nstd; remaining > 0;) {
+      int factor = 1;
+      if (remaining >= 2 && layout_rng.index(large ? 3 : 6) == 0) factor = 2;
+      const int min = factor == 1 ? 4 : 10, max = factor == 1 ? 10 : 14;
+      specs.push_back({Kind::Standard,min,max,min,max,factor});
+      remaining -= factor;
+    }
+    nstd = int(specs.size()) - 2;
+    if (shop) specs.push_back({Kind::Shop,7,10,7,10,1,1,1});
+    if (quest_extra) specs.push_back({Kind::Leaf,7,10,7,10,1,1,1});
+    for (int i = 0; i < nspec; ++i)
+      specs.push_back({Kind::Leaf,5,10,5,10,1,1,1});
+    for (int i = 0; i < nsecret; ++i)
+      specs.push_back({Kind::Secret,5,10,5,10,1,1,1});
+    std::vector<int> order;
+    for (int i = 0; i < int(specs.size()); ++i) order.push_back(i);
+    layout_rng.shuffle(order);
+    Builder builder(layout_rng, shape, floor);
+    for (int attempt = 0; attempt < 256; ++attempt) {
+      layout = builder.attempt(specs, order);
+      if (!layout.rooms.empty() && normalize(layout, 1, MW, MH)) {
+        layout_builder = shape.eight ? 2 : 1;
+        break;
+      }
+      layout = {};
+    }
+  }
   if (!layout.rooms.empty()) {
     map_width = layout.width; map_height = layout.height;
-    entrance_room = eight ? 2 : 0;
-    exit_room = eight ? 5 : 3;
+    exit_room = 1;
     for (int i = 0; i < int(layout.rooms.size()); ++i) {
-      const auto& p = layout.rooms[i];
-      GRoom r{p.x, p.y, p.w, p.h, p.x + p.w / 2, p.y + p.h / 2,
+      const auto p = layout.rooms[i].box;
+      GRoom r{p.l, p.t, p.w(), p.h(), (p.l+p.r+1)/2, (p.t+p.b+1)/2,
               RK_STANDARD, SP_NONE, false};
       int leaf = i - (nstd + 2);
       if (i == entrance_room) r.kind = RK_ENTRANCE;
       else if (i == exit_room) r.kind = RK_EXIT;
+      else if (layout.rooms[i].spec.kind == Kind::Connector) r.kind = RK_CONNECTOR;
       else if (leaf >= 0) {
         if (shop && leaf == 0) r.kind = RK_SHOP;
         else if (quest_extra && leaf == int(shop)) r.kind = RK_QUEST;
@@ -773,15 +806,66 @@ void Game::gen_level() {
           r.locked = spec_locked(r.spec);
         } else r.kind = RK_SECRET;
       }
-      for (int y = r.y + 1; y < r.y + r.h - 1; ++y)
-        for (int x = r.x + 1; x < r.x + r.w - 1; ++x) tiles[y][x] = T_FLOOR;
+      if (r.kind != RK_CONNECTOR)
+        for (int y = r.y + 1; y < r.y + r.h - 1; ++y)
+          for (int x = r.x + 1; x < r.x + r.w - 1; ++x) tiles[y][x] = T_FLOOR;
       rooms.push_back(r);
     }
-    for (const auto& e : layout.edges) {
-      auto& r = rooms[e.b];
-      uint8_t t = r.kind == RK_SECRET ? T_SECRET : r.locked ? T_DOOR_LOCKED : T_DOOR;
-      tiles[e.door.y][e.door.x] = t;
-      if (r.kind >= RK_SPECIAL) { r.door_x = e.door.x; r.door_y = e.door.y; }
+    auto paint_order = layout.order;
+    layout_rng.shuffle(paint_order);
+    std::vector<std::vector<Point>> doors(rooms.size());
+    std::vector<std::vector<bool>> placed(rooms.size(), std::vector<bool>(rooms.size()));
+    for (int a : paint_order) for (int b : layout.rooms[a].links) {
+      if (placed[a][b]) continue;
+      placed[a][b] = placed[b][a] = true;
+      const Point d = choose_door(layout.rooms[a].box, layout.rooms[b].box, layout_rng);
+      doors[a].push_back(d); doors[b].push_back(d);
+      const uint8_t tile = rooms[a].locked || rooms[b].locked ? T_DOOR_LOCKED :
+          rooms[a].kind == RK_SECRET || rooms[b].kind == RK_SECRET ||
+          layout.rooms[a].type == Maze || layout.rooms[b].type == Maze ? T_SECRET :
+          rooms[a].kind == RK_CONNECTOR && rooms[b].kind == RK_CONNECTOR ? T_FLOOR : T_DOOR;
+      tiles[d.y][d.x] = tile;
+      for (int id : {a,b}) if (rooms[id].kind >= RK_SPECIAL && rooms[id].kind < RK_CONNECTOR) {
+        rooms[id].door_x = d.x; rooms[id].door_y = d.y;
+      }
+    }
+    auto line = [&](Point a, Point b) {
+      for (int y = std::min(a.y,b.y); y <= std::max(a.y,b.y); ++y)
+        for (int x = std::min(a.x,b.x); x <= std::max(a.x,b.x); ++x) tiles[y][x] = T_FLOOR;
+    };
+    for (int i : paint_order) if (rooms[i].kind == RK_CONNECTOR && !doors[i].empty()) {
+      const auto& r = layout.rooms[i];
+      const auto p = r.box;
+      if (r.type == Maze) {
+        auto mask = maze(p,doors[i],layout_rng);
+        if (p.w() >= 5 && p.h() >= 5 && (p.w() <= 7 || p.h() <= 7)) {
+          // Upstream retries small mazes until the central cell is a wall.
+          const int center = (p.h()/2)*p.w()+p.w()/2;
+          for (int retry = 0; retry < 16 && !mask[center]; ++retry)
+            mask = maze(p,doors[i],layout_rng);
+        }
+        for (int y = p.t+1; y < p.b; ++y)
+          for (int x = p.l+1; x < p.r; ++x)
+            if (!mask[(y-p.t)*p.w()+x-p.l]) tiles[y][x] = T_FLOOR;
+        continue;
+      }
+      Point center{};
+      for (auto d : doors[i]) { center.x += d.x; center.y += d.y; }
+      const int radius = r.type == RingTunnel || r.type == RingBridge ? 1 : 0;
+      center.x = std::clamp(center.x / int(doors[i].size()),p.l+1+radius,p.r-1-radius);
+      center.y = std::clamp(center.y / int(doors[i].size()),p.t+1+radius,p.b-1-radius);
+      for (auto d : doors[i]) {
+        const bool side = d.x == p.l || d.x == p.r;
+        Point start{std::clamp(d.x,p.l+1,p.r-1), std::clamp(d.y,p.t+1,p.b-1)};
+        const Point end{std::clamp(start.x,center.x-radius,center.x+radius),
+                        std::clamp(start.y,center.y-radius,center.y+radius)};
+        const Point bend = side ? Point{end.x,start.y} : Point{start.x,end.y};
+        line(start,bend); line(bend,end);
+      }
+      if (radius) {
+        line({center.x-1,center.y-1},{center.x+1,center.y+1});
+        tiles[center.y][center.x] = T_WALL;
+      }
     }
   } else {
   int required = 2 + nstd + nspec + nsecret + (shop_here ? 1 : 0) +
@@ -808,7 +892,7 @@ void Game::gen_level() {
   std::fill_n(parent, 25, -1);
   int rw = 2 + ri(*this, 0, std::min(2, (main_budget - 4) / 2));
   int rh = ri(*this, 2, std::min(4, (main_budget + 4) / 2 - rw));
-  if (!boss_floor && rw == 2 && rh == 2) rh = 3;
+  if (!boss_floor && rw == 2 && rh == 2 && main_budget >= 6) rh = 3;
   const int lx = ri(*this, 0, GS - rw), ly = ri(*this, 0, GS - rh);
   auto loop_cell = [&](int x, int y) { order.push_back((ly + y) * GS + lx + x); };
   for (int x = 0; x < rw; ++x) loop_cell(x, 0);
@@ -1036,26 +1120,46 @@ void Game::gen_level() {
     }
   };
 
-  // Paint standard rooms (water/grass patches).
-  auto paint_patch = [&](const GRoom& r, uint8_t tile) {
-    int w = 2 + (int)(rnd(*this) % 2);
-    int h = 2 + (int)(rnd(*this) % 2);
-    int x0 = r.x + 1 + (int)(rnd(*this) % std::max(1, r.w - 1 - w));
-    int y0 = r.y + 1 + (int)(rnd(*this) % std::max(1, r.h - 1 - h));
-    for (int y = y0; y < y0 + h && y < r.y + r.h - 1; y++)
-      for (int x = x0; x < x0 + w && x < r.x + r.w - 1; x++)
-        if (tiles[y][x] == T_FLOOR && !(x == px && y == py))
-          tiles[y][x] = tile;
-  };
-  for (const GRoom& r : rooms) {
-    if (r.kind != RK_STANDARD && r.kind != RK_ENTRANCE) continue;
-    if (feeling == 1 || (rnd(*this) % 100) < 25) paint_patch(r, T_WATER);
-    if (feeling == 2 || (rnd(*this) % 100) < 20) {
-      paint_patch(r, T_GRASS);
-      for (int i = 0; i < 2; i++) {
-        auto p = room_cell(r);
-        if (p.first >= 0 && tiles[p.second][p.first] == T_GRASS)
-          add_feature(F_PLANT, p.first, p.second);
+  // RegularPainter's independent terrain RNG and regional Patch parameters.
+  if (!boss_floor) {
+    struct TerrainPatch { float normal, feeling; int smooth; };
+    static constexpr TerrainPatch water[] = {
+        {.30f,.85f,5}, {.30f,.90f,4}, {.30f,.85f,6}, {.30f,.90f,4}, {.15f,.70f,6}};
+    static constexpr TerrainPatch grass[] = {
+        {.20f,.80f,4}, {.20f,.80f,3}, {.15f,.65f,3}, {.20f,.80f,3}, {.10f,.65f,3}};
+    Random painter_rng(layout_rng.next_long());
+    auto paint_patch = [&](TerrainPatch p, bool boosted, uint8_t tile) {
+      const auto mask = patch(map_width,map_height,boosted ? p.feeling : p.normal,p.smooth,true,painter_rng);
+      for (const GRoom& r : rooms) {
+        // Until class-specific painter vetoes are ported, do not overwrite
+        // quest, corridor or special-room mechanics with regional features.
+        if (r.kind != RK_STANDARD && r.kind != RK_ENTRANCE && r.kind != RK_EXIT) continue;
+        for (int y = r.y+1; y < r.y+r.h-1; ++y) for (int x = r.x+1; x < r.x+r.w-1; ++x)
+          if (tiles[y][x] == T_FLOOR && mask[y*map_width+x] && !(x == px && y == py))
+            tiles[y][x] = tile;
+      }
+    };
+    paint_patch(water[reg],feeling == 1,T_WATER);
+    paint_patch(grass[reg],feeling == 2,T_GRASS);
+  } else {
+    // Leave the legacy boss substrate alone until its individual painters land.
+    for (const GRoom& r : rooms) {
+      if (r.kind != RK_STANDARD && r.kind != RK_ENTRANCE) continue;
+      auto boss_patch = [&](uint8_t tile) {
+        const int w = 2 + int(rnd(*this)%2), h = 2 + int(rnd(*this)%2);
+        const int x0 = r.x + 1 + int(rnd(*this)%std::max(1,r.w-1-w));
+        const int y0 = r.y + 1 + int(rnd(*this)%std::max(1,r.h-1-h));
+        for (int y = y0; y < std::min(y0+h,r.y+r.h-1); ++y)
+          for (int x = x0; x < std::min(x0+w,r.x+r.w-1); ++x)
+            if (tiles[y][x] == T_FLOOR && !(x == px && y == py)) tiles[y][x] = tile;
+      };
+      if (feeling == 1 || rnd(*this)%100 < 25) boss_patch(T_WATER);
+      if (feeling == 2 || rnd(*this)%100 < 20) {
+        boss_patch(T_GRASS);
+        for (int i = 0; i < 2; ++i) {
+          auto p = room_cell(r);
+          if (p.first >= 0 && tiles[p.second][p.first] == T_GRASS) add_feature(F_PLANT,p.first,p.second);
+        }
       }
     }
   }

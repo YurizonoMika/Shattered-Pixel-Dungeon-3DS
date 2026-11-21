@@ -206,6 +206,7 @@ struct Game {
   uint8_t next_spawn_type();
   bool try_respawn();
   int room_count = 0;
+  uint8_t layout_builder = 0; // debug: 0 legacy, 1 loop, 2 figure eight
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
   bool icon_test = false;

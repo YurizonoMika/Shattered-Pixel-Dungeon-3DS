@@ -802,12 +802,14 @@ int main() {
           int bad = 0;
           int rule_failures = 0;
           int variable_maps = 0, largest_width = 0, largest_height = 0;
+          int builders[3]{};
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
             int strength = 0, upgrades = 0;
             for (int floor = 1; floor <= 25; ++floor) {
               G.floor = floor;
               G.gen_level();
+              if (floor % 5 != 0) ++builders[G.layout_builder];
               if (floor % 5 != 0 && (G.map_width != LEGACY_MAP_SIZE || G.map_height != LEGACY_MAP_SIZE)) ++variable_maps;
               largest_width = std::max(largest_width, G.map_width);
               largest_height = std::max(largest_height, G.map_height);
@@ -871,6 +873,7 @@ int main() {
           dlog("[generation] 800 maps, %d failures", bad);
           dlog("[floor rules] 800 maps, %d failures", rule_failures);
           dlog("[layout] non-legacy dimensions=%d/640 max width=%d max height=%d", variable_maps, largest_width, largest_height);
+          dlog("[layout] loop=%d figure-eight=%d fallback=%d", builders[1], builders[2], builders[0]);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }

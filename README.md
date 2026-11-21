@@ -140,9 +140,12 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 ### Level generation (ported from SPD)
 
-- **Room budget** follows the five region classes: 4–6 / 5–6 / 6–7 / 6–8 / 8–9
-  standard rooms, 1–2 / 1–3 / 2–3 / 2–3 / 2–3 special rooms, plus entrance, exit,
-  shops (6/11/16), the Imp shop (20) and 2–3 secret rooms per region.
+- **Normal-floor layout** uses native ports of the v4.0.2 `LoopBuilder` and
+  `FigureEightBuilder`, including weighted branches, connector rooms, and extra
+  links. Water and grass use the regional `Patch` parameters, and secret
+  connectors use the upstream maze algorithm.
+- **Room inputs** still come from the port's region budgets and room catalog.
+  Boss floors and room-specific painters are not yet equivalent to upstream.
 - **Special rooms** are drawn from SPD's equip/consumable rotation and include
   treasury, armory, crypt, pool, magic well, garden, library, storage, laboratory
   (one per region on floor 3/4), statue, sentry, trap/toxic/fire rooms, runestone
@@ -476,7 +479,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 76 | Clean enemy gallery (no items/features) |
 | 77 | Jump next to a locked side door |
 | 85/86 | Door rendering comparison: closed, open, locked, left to right; side doors above front doors; 1× / 1.33× |
-| 87 | Check stairs, keys, initial monsters, food, and region drop quotas on 32 seeds across all 25 floors |
+| 87 | Check stairs, keys, initial monsters, food, and drop quotas across 800 floors; count both builders and legacy fallbacks |
 | 88 | Check long hero route, door closure, and pursuit of a last-seen target |
 | 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
 | 91 | Check one-turn respawn retry and consumption of the remaining monster deck |
