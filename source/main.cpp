@@ -272,7 +272,7 @@ static void draw_logo(float scale, float y) {
 }
 
 static void draw_slot(int i, float x, float y, float w, float h, bool focused) {
-  draw_panel(x, y, w, h, 1.6f);
+  draw_panel(x, y, w, h, 1.0f);
   if (i == 3) {
     draw_icon(96, 32, 11, 11, x + w / 2 - 16, y + 16, 3.0f, CLR_YELLOW);
     text_c("新游戏", x, w, y + 60, focused ? CLR_YELLOW : CLR_WHITE, 1.0f);
@@ -281,7 +281,7 @@ static void draw_slot(int i, float x, float y, float w, float h, bool focused) {
     text_c("按 A 开始新游戏", x, w, y + 56, C2D_Color32(196, 196, 204, 255), 1.0f);
   } else {
     const SlotMeta& m = SLOTS[i];
-    draw_hero_portrait(m.hero, x + 8, y + 8, 1.3f);
+    draw_hero_portrait(m.hero, x + 8, y + 8, 1.0f);
     text(HERO_NAMES[m.hero % 6], x + 44, y + 8, CLR_WHITE, 1.0f);
     textf(x + 44, y + 24, CLR_GREY, 1.0f, "第 %d 层 · Lv%d", m.depth, m.level);
     // HP bar
@@ -437,9 +437,9 @@ static void title_update() {
 
 static void title_draw_top() {
   draw_bg(false);
-  draw_logo(1.45f, 34);
-  text_c("Shattered Pixel Dungeon - 3DS", 0, TOP_W, TOP_H - 34,
-         C2D_Color32(255, 210, 120, 255), 1.0f);
+  draw_logo(1.0f, 44);
+  text_c("Shattered Pixel Dungeon - 3DS", 0, TOP_W, 118,
+         C2D_Color32(255, 210, 120, 255), 2.0f);
   draw_top_hint("十字键 / 摇杆 选择    A 确认");
 }
 
@@ -465,7 +465,7 @@ static void rankings_draw_top() {
 }
 static void rankings_draw_bottom() {
   draw_bg(true);
-  draw_panel(8, 8, BOT_W - 16, BOT_H - 40, 1.6f);
+  draw_panel(8, 8, BOT_W - 16, BOT_H - 40, 1.0f);
   if (SCORES.empty()) {
     text_c("还没有冒险记录", 0, BOT_W, 100, CLR_GREY, 1.0f);
     return;
@@ -475,8 +475,8 @@ static void rankings_draw_bottom() {
     const ScoreEntry& e = SCORES[i];
     float y = 18 + shown * 32;
     textf(18, y, CLR_YELLOW, 1.0f, "#%d", (int)i + 1);
-    draw_hero_portrait(e.hero % 6, 52, y - 6, 0.5f);
-    text(HERO_NAMES[e.hero % 6], 76, y, CLR_WHITE, 1.0f);
+    draw_hero_portrait(e.hero % 6, 50, y - 6, 1.0f);
+    text(HERO_NAMES[e.hero % 6], 80, y, CLR_WHITE, 1.0f);
     textf(160, y, CLR_GREY, 1.0f, "第 %d 层", e.depth);
     textf(240, y, CLR_WHITE, 1.0f, "%d", e.score);
   }
@@ -603,8 +603,8 @@ static void heroes_update() {
     }
     for (int i = 0; i < 6; i++) {
       int c = i % 3, r = i / 3;
-      float x = 58 + c * 72, y = 52 + r * 60;
-      if (in_rect(IN.tap_x, IN.tap_y, x, y, 60, 60)) {
+      float x = 58 + c * 72, y = 48 + r * 68;
+      if (in_rect(IN.tap_x, IN.tap_y, x, y, 66, 66)) {
         if (g_hero_sel == i && g_hero_arm == i) { start_new_game(i); return; }
         g_hero_sel = i;
         g_hero_arm = i;
@@ -618,36 +618,36 @@ static void heroes_draw_top() {
   draw_bg(false);
   draw_img(A_art[g_hero_sel], 0, 8, 1, 1, 0, 0.3f);
   draw_box(0, 0, TOP_W, 34, C2D_Color32(0, 0, 0, 150), 0.4f);
-  text_c("选择一位英雄", 0, TOP_W, 6, CLR_YELLOW, 2.0f);
-  draw_top_hint("B 返回");
-
-  if (g_hero_info) {
+  if (!g_hero_info) {
+    text_c("选择一位英雄", 0, TOP_W, 6, CLR_YELLOW, 2.0f);
+    draw_top_hint("B 返回");
+  } else {
     draw_box(0, 0, TOP_W, TOP_H, C2D_Color32(0, 0, 0, 140), 0.55f);
     draw_panel(16, 24, 368, 176, 2.0f);
-    draw_hero_portrait(g_hero_sel, 28, 34, 1.6f);
-    text(HERO_NAMES[g_hero_sel], 74, 34, CLR_YELLOW, 2.0f);
-    text(HERO_TITLES[g_hero_sel], 74, 60, CLR_GREY, 1.0f);
-    text_wrap(HERO_DESC[g_hero_sel], 28, 84, 340, CLR_WHITE, 1.0f, 2.0f);
-    text_c("再点一次 i 关闭", 16, 368, 176, CLR_GREY, 1.0f);
+    draw_hero_portrait(g_hero_sel, 28, 36, 2.0f);
+    text(HERO_NAMES[g_hero_sel], 74, 36, CLR_YELLOW, 2.0f);
+    text(HERO_TITLES[g_hero_sel], 74, 66, CLR_GREY, 1.0f);
+    text_wrap(HERO_DESC[g_hero_sel], 28, 88, 340, CLR_WHITE, 1.0f, 2.0f);
+    text_c("再点一次 i 关闭", 16, 368, 168, CLR_GREY, 1.0f);
   }
 }
 
 static void heroes_draw_bottom() {
   draw_bg(true);
   // header row
-  draw_panel(6, 2, BOT_W - 12, 44, 1.6f);
-  text(HERO_NAMES[g_hero_sel], 14, 4, CLR_YELLOW, 1.1f);
-  text(HERO_TITLES[g_hero_sel], 14, 23, C2D_Color32(225, 225, 225, 255), 1.0f);
-  draw_button(276, 8, 34, 32, "", false, 1.6f);
-  draw_icon(16, 32, 14, 14, 286, 16, 2.0f, g_hero_info ? CLR_YELLOW : CLR_WHITE);
+  draw_panel(6, 2, BOT_W - 12, 44, 1.0f);
+  text(HERO_NAMES[g_hero_sel], 14, 6, CLR_YELLOW, 1.0f);
+  text(HERO_TITLES[g_hero_sel], 14, 22, C2D_Color32(225, 225, 225, 255), 1.0f);
+  draw_button(278, 8, 36, 32, "", false, 2.0f);
+  draw_icon(16, 32, 14, 14, 282, 10, 2.0f, g_hero_info ? CLR_YELLOW : CLR_WHITE);
 
   for (int i = 0; i < 6; i++) {
     int c = i % 3, r = i / 3;
-    float x = 58 + c * 72, y = 52 + r * 60;
-    draw_button(x, y, 60, 60, "", false, 1.6f);
-    draw_hero_portrait(i, x + 12, y + 6, 1.5f);
+    float x = 58 + c * 72, y = 48 + r * 68;
+    draw_button(x, y, 66, 66, "", false, 2.0f);
+    draw_hero_portrait(i, x + 9, y + 1, 2.0f);
     if (g_hero_sel == i)
-      draw_cursor(x, y, 60, 60, g_hero_arm == i ? CLR_GREEN : CLR_YELLOW);
+      draw_cursor(x, y, 66, 66, g_hero_arm == i ? CLR_GREEN : CLR_YELLOW);
   }
   text_c(g_hero_arm == g_hero_sel ? "再按一次 A 开始冒险" : "A 选择英雄   X 查看信息",
          0, BOT_W, 186, CLR_GREY, 1.0f);

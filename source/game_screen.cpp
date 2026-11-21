@@ -252,7 +252,7 @@ static void draw_dialog() {
 
   // left 3/4: portrait + name + text
   float lx = 20, ly = 20;
-  draw_button(lx, ly, 56, 56, "", false, 1.6f);
+  draw_button(lx, ly, 56, 56, "", false, 2.0f);
   if (G.dlg_type == 2 || G.dlg_type == 3) {
     draw_sprite(A_hero[G.hero], 12, 15, 0, lx + 22, ly + 12,
                 G.dlg_type == 2 ? 0xBBBBBBFF : 0);
@@ -272,11 +272,11 @@ static void draw_dialog() {
   static const char* keys[4] = {"A", "B", "X", "Y"};
   static const u32 kcol[4] = {CLR_GREEN, CLR_RED, CLR_BLUE, CLR_YELLOW};
   for (int i = 0; i < G.dlg_optn; i++) {
-    float by = 18 + i * 48;
-    draw_button(rx, by, 88, 42, "", false, 1.6f);
-    draw_box(rx + 6, by + 11, 20, 20, 0x33000000 | (kcol[i] & 0xFFFFFF), 0.56f);
-    text_c(keys[i], rx + 6, 20, by + 13, CLR_BLACK, 1.0f);
-    text_wrap(G.dlg_opt[i], rx + 30, by + 8, 54, CLR_WHITE, 1.0f, 0.5f);
+    float by = 20 + i * 44;
+    draw_button(rx, by, 88, 40, "", false, 2.0f);
+    draw_box(rx + 6, by + 10, 20, 20, 0x33000000 | (kcol[i] & 0xFFFFFF), 0.56f);
+    text_c(keys[i], rx + 6, 20, by + 12, CLR_BLACK, 1.0f);
+    text_wrap(G.dlg_opt[i], rx + 30, by + 7, 54, CLR_WHITE, 1.0f, 0.5f);
   }
   text_c("A / B / X / Y 选择", 8, TOP_W - 16, TOP_H - 30, CLR_GREY, 1.0f);
 }
@@ -309,7 +309,7 @@ static void draw_status() {
   draw_box(122, 16, 70 * xf, 6, C2D_Color32(80, 150, 240, 255), 0.41f);
   // depth (top right), keys + gold on the second line
   textf(196, 3, CLR_WHITE, 1.0f, "%s %d", REGIONS[G.region()].name, G.floor);
-  draw_item_icon(IT_KEY, 196, 15, 0.8f);
+  draw_item_icon(IT_KEY, 196, 15, 1.0f);
   textf(214, 17, CLR_WHITE, 1.0f, "x%d", G.keys);
   textf(252, 17, CLR_YELLOW, 1.0f, "%d 金", G.gold);
 }
@@ -339,7 +339,7 @@ static void draw_action_bar() {
   static const char* labels[4] = {"等待", "搜索", "背包", "菜单"};
   for (int i = 0; i < 4; i++) {
     float x = 3 + i * 78, y = 196, w = 74, h = 38;
-    draw_button(x, y, w, h, "", false, 1.6f);
+    draw_button(x, y, w, h, "", false, 2.0f);
     float ix = x + 25, iy = y + 5;
     if (i == 0) draw_icon(112, 32, 11, 11, ix + 2, iy + 2, 1.6f);
     else if (i == 1) draw_icon(32, 48, 14, 14, ix, iy + 1, 1.5f);
@@ -361,8 +361,8 @@ static void draw_messages() {
   textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
-static const float BAG_X = 17, BAG_Y = 84, BAG_W = 34, BAG_H = 24;
-static const float BAG_GX = 36, BAG_GY = 25;
+static const float BAG_X = 17, BAG_Y = 92, BAG_W = 34, BAG_H = 21;
+static const float BAG_GX = 36, BAG_GY = 22;
 
 static const char* BAG_TABS[6] = {"全部", "药水", "卷轴", "法杖", "装备", "其他"};
 
@@ -389,7 +389,7 @@ static void bag_clamp_sel() {
 
 static void draw_bag_tab(int i, float x, float y) {
   bool sel = g_bag_tab == i;
-  draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, 49, 22, 1.4f);
+  draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, 49, 22, 1.0f);
   if (sel) {
     draw_box(x + 2, y + 2, 45, 18, C2D_Color32(255, 226, 120, 56), 0.52f);
     draw_box(x + 2, y + 20, 45, 2, CLR_YELLOW, 0.55f);
@@ -409,8 +409,8 @@ static void draw_bag_action() {
   const ItemDef& d = item_def(G.inv[idx].id);
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.7f);
   draw_panel(16, 40, 288, 176, 2.0f);
-  draw_item_icon(G.inv[idx].id, 30, 52, 2.0f);
-  text(d.name, 72, 50, CLR_YELLOW, 2.0f);
+  draw_item_icon(G.inv[idx].id, 30, 54, 2.0f);
+  text(d.name, 72, 54, CLR_YELLOW, 2.0f);
   char extra[40] = "";
   if (d.kind == K_WEAPON || d.kind == K_ARMOR)
     snprintf(extra, sizeof(extra), "强化 +%d", G.inv[idx].level);
@@ -418,8 +418,8 @@ static void draw_bag_action() {
     snprintf(extra, sizeof(extra), "充能 %d", G.inv[idx].charges);
   else if (G.inv[idx].count > 1)
     snprintf(extra, sizeof(extra), "数量 %d", G.inv[idx].count);
-  if (extra[0]) text(extra, 72, 78, CLR_GREY, 1.0f);
-  text_wrap(d.desc, 30, 102, 260, CLR_WHITE, 1.0f, 2.0f);
+  if (extra[0]) text(extra, 72, 82, CLR_GREY, 1.0f);
+  text_wrap(d.desc, 30, 104, 260, CLR_WHITE, 1.0f, 2.0f);
 
   const char* primary = "使用 (A)";
   if (d.kind == K_WEAPON || d.kind == K_ARMOR || d.kind == K_RING)
@@ -427,41 +427,41 @@ static void draw_bag_action() {
   else if (d.kind == K_WAND || d.kind == K_BOMB) primary = "瞄准 (A)";
   else if (d.kind == K_QUEST) primary = "任务物品";
 
-  draw_button(30, 140, 120, 30, primary, false, 1.8f);
-  draw_button(170, 140, 120, 30, "丢弃 (X)", false, 1.8f);
-  draw_button(100, 176, 120, 26, "关闭 (B)", false, 1.8f);
+  draw_button(30, 140, 120, 30, primary, false, 2.0f);
+  draw_button(170, 140, 120, 30, "丢弃 (X)", false, 2.0f);
+  draw_button(100, 172, 120, 26, "关闭 (B)", false, 2.0f);
 }
 
 static void draw_backpack() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 210), 0.66f);
-  draw_panel(4, 4, BOT_W - 8, BOT_H - 8, 2.0f);
-  text("背包", 14, 8, CLR_YELLOW, 2.0f);
-  draw_item_icon(IT_GOLD, 210, 12, 1.0f);
-  textf(230, 14, CLR_YELLOW, 1.0f, "%d", G.gold);
-  textf(248, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, G.bag_capacity());
+  draw_panel(2, 2, BOT_W - 4, BOT_H - 4, 2.0f);
+  text("背包", 14, 14, CLR_YELLOW, 2.0f);
+  draw_item_icon(IT_GOLD, 210, 16, 1.0f);
+  textf(228, 18, CLR_YELLOW, 1.0f, "%d", G.gold);
+  textf(252, 18, CLR_GREY, 1.0f, "%d/%d", G.inv_n, G.bag_capacity());
 
-  textf(14, 32, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
-  if (G.weapon_level) textf(112, 32, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
-  textf(150, 32, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
-  if (G.armor_level) textf(250, 32, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+  textf(14, 44, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
+  if (G.weapon_level) textf(112, 44, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
+  textf(150, 44, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
+  if (G.armor_level) textf(244, 44, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
-  textf(14, 44, CLR_GREY, 1.0f, "戒指 %s", item_name(G.ring1));
-  if (G.ring1_level) textf(108, 44, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
-  textf(164, 44, CLR_GREY, 1.0f, " / %s", item_name(G.ring2));
-  if (G.ring2_level) textf(262, 44, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
+  textf(14, 58, CLR_GREY, 1.0f, "戒指一 %s", item_name(G.ring1));
+  if (G.ring1_level) textf(100, 58, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
+  textf(156, 58, CLR_GREY, 1.0f, "戒指二 %s", item_name(G.ring2));
+  if (G.ring2_level) textf(244, 58, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
 
-  for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 58);
+  for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 70);
 
   int vis[BAG_CAP];
   int n = bag_visible(vis);
   for (int i = 0; i < BAG_MAX; i++) {
     float x = BAG_X + (i % 8) * BAG_GX;
     float y = BAG_Y + (i / 8) * BAG_GY;
-    draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, BAG_W, BAG_H, 1.4f);
+    draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, BAG_W, BAG_H, 1.0f);
     if (i < n) {
       int idx = vis[i];
       const ItemDef& d = item_def(G.inv[idx].id);
-      draw_item_icon(G.inv[idx].id, x + 6, y + 2, 1.3f);
+      draw_item_icon(G.inv[idx].id, x + 9, y + 3, 1.0f);
       int num = d.kind == K_WAND ? G.inv[idx].charges : G.inv[idx].count;
       if (d.kind == K_WAND || num > 1)
         textf(x + BAG_W - 9, y + BAG_H - 12, CLR_WHITE, 1.0f, "%d", num);
@@ -470,7 +470,7 @@ static void draw_backpack() {
     }
     if (i == g_bag_sel) draw_cursor(x, y, BAG_W, BAG_H, CLR_YELLOW, 0.6f, false);
   }
-  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 212, CLR_GREY, 1.0f);
+  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
   if (g_bag_action) draw_bag_action();
 }
 
@@ -498,31 +498,31 @@ static int shop_list_price(int i) {
 static void draw_shop() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 220), 0.66f);
   draw_panel(4, 4, BOT_W - 8, BOT_H - 8, 2.0f);
-  text("商店", 14, 8, CLR_YELLOW, 2.0f);
-  draw_item_icon(IT_GOLD, 218, 14, 1.0f);
-  textf(238, 16, CLR_YELLOW, 1.0f, "%d", G.gold);
+  text("商店", 14, 16, CLR_YELLOW, 2.0f);
+  draw_item_icon(IT_GOLD, 218, 18, 1.0f);
+  textf(238, 20, CLR_YELLOW, 1.0f, "%d", G.gold);
 
   static const char* modes[3] = {"购买", "出售", "回购"};
   for (int i = 0; i < 3; i++) {
     float x = 10 + i * 102;
     bool sel = G.shop_mode == i;
-    draw_button(x, 34, 98, 22, modes[i], false, 1.6f);
+    draw_button(x, 46, 98, 22, modes[i], false, 2.0f);
     if (sel) {
-      draw_box(x + 2, 36, 94, 18, C2D_Color32(255, 226, 120, 60), 0.52f);
-      draw_box(x + 2, 54, 94, 2, CLR_YELLOW, 0.55f);
+      draw_box(x + 2, 48, 94, 18, C2D_Color32(255, 226, 120, 60), 0.52f);
+      draw_box(x + 2, 66, 94, 2, CLR_YELLOW, 0.55f);
     }
   }
   int size = shop_list_size();
   int pages = (size + 5) / 6;
   if (pages < 1) pages = 1;
   if (G.shop_page >= pages) G.shop_page = pages - 1;
-  textf(268, 16, CLR_GREY, 0.9f, "%d/%d", G.shop_page + 1, pages);
+  textf(264, 20, CLR_GREY, 1.0f, "%d/%d", G.shop_page + 1, pages);
 
   for (int row = 0; row < 6; row++) {
     int idx = G.shop_page * 6 + row;
-    float y = 62 + row * 24;
+    float y = 72 + row * 22;
     bool selected = idx == G.shop_page * 6 + G.shop_sel;
-    draw_button(10, y, BOT_W - 20, 22, "", selected, 1.6f);
+    draw_button(10, y, BOT_W - 20, 21, "", selected, 2.0f);
     if (idx >= size) continue;
     Item it = shop_list_item(idx);
     draw_item_icon(it.id, 16, y + 3, 1.0f);
@@ -539,7 +539,7 @@ static void draw_shop() {
          (G.shop_mode == 0 && G.shop_sold[idx]) ? CLR_GREY : CLR_YELLOW, 1.0f);
   }
   if (size == 0) text_c("没有物品", 0, BOT_W, 120, CLR_GREY, 1.0f);
-  text_c("X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 214, CLR_GREY, 0.9f);
+  text_c("X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
 }
 
 static int count_item(uint8_t id) {
@@ -559,14 +559,14 @@ static void draw_alchemy() {
                                  IT_POTION_INVIS};
   for (int i = 0; i < 3; i++) {
     float y = 78 + i * 36;
-    draw_button(18, y, BOT_W - 36, 32, "", G.alchemy_sel == i, 1.6f);
+    draw_button(18, y, BOT_W - 36, 32, "", G.alchemy_sel == i, 2.0f);
     draw_item_icon(OUT[i], 24, y + 8, 1.0f);
     text(item_name(OUT[i]), 46, y + 5, CLR_WHITE, 1.0f);
     char b[40];
     snprintf(b, sizeof(b), "%s %d/3", item_name(NEED[i]), count_item(NEED[i]));
-    text(b, 46, y + 18, CLR_GREY, 0.8f);
+    text(b, 46, y + 18, CLR_GREY, 1.0f);
   }
-  text_c("A 炼金  B 关闭", 0, BOT_W, 202, CLR_GREY, 0.9f);
+  text_c("A 炼金  B 关闭", 0, BOT_W, 188, CLR_GREY, 1.0f);
 }
 
 static int transmute_list(int out[]) {
@@ -579,34 +579,34 @@ static int transmute_list(int out[]) {
 static void draw_transmute() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 190), 0.66f);
   draw_panel(8, 38, BOT_W - 16, 178, 2.0f);
-  text("嬗变：选择物品", 20, 44, CLR_YELLOW, 1.4f);
+  text("嬗变：选择物品", 20, 50, CLR_YELLOW, 2.0f);
   int list[BAG_MAX];
   int n = transmute_list(list);
-  int pages = (n + 6) / 7;
+  int pages = (n + 4) / 5;
   if (pages < 1) pages = 1;
   if (G.transmute_page >= pages) G.transmute_page = pages - 1;
-  for (int row = 0; row < 7; row++) {
-    int pos = G.transmute_page * 7 + row;
+  for (int row = 0; row < 5; row++) {
+    int pos = G.transmute_page * 5 + row;
     if (pos >= n) break;
     int idx = list[pos];
-    float y = 68 + row * 19;
-    draw_button(16, y, BOT_W - 32, 18, "", pos == G.transmute_sel, 1.4f);
-    draw_item_icon(G.inv[idx].id, 22, y + 2, 0.9f);
-    text(item_name(G.inv[idx].id), 42, y + 3, CLR_WHITE, 0.9f);
+    float y = 82 + row * 20;
+    draw_button(16, y, BOT_W - 32, 19, "", pos == G.transmute_sel, 1.0f);
+    draw_item_icon(G.inv[idx].id, 22, y + 1, 1.0f);
+    text(item_name(G.inv[idx].id), 42, y + 3, CLR_WHITE, 1.0f);
   }
-  textf(BOT_W - 52, 44, CLR_GREY, 0.8f, "%d/%d", G.transmute_page + 1, pages);
-  text_c("L/R 翻页  A 嬗变  B 取消", 0, BOT_W, 200, CLR_GREY, 0.9f);
+  textf(BOT_W - 50, 54, CLR_GREY, 1.0f, "%d/%d", G.transmute_page + 1, pages);
+  text_c("L/R 翻页  A 嬗变  B 取消", 0, BOT_W, 190, CLR_GREY, 1.0f);
 }
 
 static void draw_pause() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
-  draw_panel(60, 52, 200, 150, 2.0f);
-  text_c("暂停", 60, 200, 58, CLR_YELLOW, 2.0f);
-  draw_button(76, 84, 168, 30, "继续游戏", G.paused == 1, 1.8f);
-  draw_button(76, 118, 168, 30, "设置", G.paused == 2, 1.8f);
-  draw_button(76, 152, 168, 30, "返回主菜单", G.paused == 3, 1.8f);
-  textf(76, 186, CLR_GREY, 0.9f, "天赋 %d/4", G.talent_tier);
-  text_c("上下键 选择  A 确认  B 继续", 0, BOT_W, 210, CLR_GREY, 1.0f);
+  draw_panel(44, 40, 232, 176, 2.0f);
+  text_c("暂停", 44, 232, 46, CLR_YELLOW, 2.0f);
+  draw_button(72, 78, 176, 30, "继续游戏", G.paused == 1, 2.0f);
+  draw_button(72, 112, 176, 30, "设置", G.paused == 2, 2.0f);
+  draw_button(72, 146, 176, 30, "返回主菜单", G.paused == 3, 2.0f);
+  textf(72, 182, CLR_GREY, 1.0f, "天赋 %d/4", G.talent_tier);
+  text_c("上下键 选择  A 确认  B 继续", 0, BOT_W, 222, CLR_GREY, 1.0f);
 }
 
 void game_draw_bottom() {
@@ -714,12 +714,12 @@ void game_update() {
     }
     if (IN.tap) {
       for (int m = 0; m < 3; m++)
-        if (in_rect(IN.tap_x, IN.tap_y, 10 + m * 102, 34, 98, 22)) {
+        if (in_rect(IN.tap_x, IN.tap_y, 10 + m * 102, 46, 98, 22)) {
           G.shop_mode = m; G.shop_sel = 0; G.shop_page = 0;
           return;
         }
       for (int row = 0; row < 6; row++) {
-        float y = 62 + row * 24;
+        float y = 72 + row * 22;
         if (in_rect(IN.tap_x, IN.tap_y, 10, y, BOT_W - 20, 22)) {
           int id2 = G.shop_page * 6 + row;
           if (id2 >= size) return;
@@ -739,22 +739,24 @@ void game_update() {
     int list[BAG_MAX];
     int n = transmute_list(list);
     if (IN.pressed(KEY_B)) { G.transmute_open = false; return; }
-    int pages = (n + 6) / 7;
+    int pages = (n + 4) / 5;
     if (pages < 1) pages = 1;
-    if (IN.pressed(KEY_L) && G.transmute_page > 0) { G.transmute_page--; G.transmute_sel = G.transmute_page * 7; }
-    if (IN.pressed(KEY_R) && G.transmute_page + 1 < pages) { G.transmute_page++; G.transmute_sel = G.transmute_page * 7; }
-    if (IN.dy && n > 0)
+    if (IN.pressed(KEY_L) && G.transmute_page > 0) { G.transmute_page--; G.transmute_sel = G.transmute_page * 5; }
+    if (IN.pressed(KEY_R) && G.transmute_page + 1 < pages) { G.transmute_page++; G.transmute_sel = G.transmute_page * 5; }
+    if (IN.dy && n > 0) {
       G.transmute_sel = std::max(0, std::min(n - 1, G.transmute_sel + IN.dy));
+      G.transmute_page = G.transmute_sel / 5;
+    }
     if (IN.pressed(KEY_A) && n > 0)
       G.transmute_choose(list[G.transmute_sel]);
     if (IN.tap) {
       int list2[BAG_MAX];
       int n2 = transmute_list(list2);
-      for (int row = 0; row < 7; row++) {
-        int pos = G.transmute_page * 7 + row;
+      for (int row = 0; row < 5; row++) {
+        int pos = G.transmute_page * 5 + row;
         if (pos >= n2) break;
-        float y = 68 + row * 19;
-        if (in_rect(IN.tap_x, IN.tap_y, 16, y, BOT_W - 32, 18)) {
+        float y = 82 + row * 20;
+        if (in_rect(IN.tap_x, IN.tap_y, 16, y, BOT_W - 32, 19)) {
           G.transmute_sel = pos;
           G.transmute_choose(list2[pos]);
           return;
@@ -824,7 +826,7 @@ void game_update() {
       if (IN.tap) {
         if (in_rect(IN.tap_x, IN.tap_y, 30, 140, 120, 30)) bag_primary_action();
         else if (in_rect(IN.tap_x, IN.tap_y, 170, 140, 120, 30)) bag_drop_action();
-        else if (in_rect(IN.tap_x, IN.tap_y, 100, 176, 120, 26)) g_bag_action = false;
+        else if (in_rect(IN.tap_x, IN.tap_y, 100, 172, 120, 26)) g_bag_action = false;
       }
       return;
     }

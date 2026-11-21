@@ -39,10 +39,12 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Saves](docs/screens/saves.png) | ![Game](docs/screens/game.png) |
 | **NPC dialog (top screen)** | **Backpack (SPD-style grid)** |
 | ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
-| **Item details / actions** | **Bag tabs (药水 filter)** |
-| ![Item actions](docs/screens/bag_item.png) | ![Bag tabs](docs/screens/bag_tabs.png) |
+| **Item details / actions** | **Pause menu (talents)** |
+| ![Item actions](docs/screens/bag_item.png) | ![Pause](docs/screens/pause.png) |
 | **Alchemy** | **Shop** |
 | ![Alchemy](docs/screens/alchemy.png) | ![Shop](docs/screens/shop.png) |
+| **Transmutation picker** | **Hero info** |
+| ![Transmute](docs/screens/transmute.png) | ![Hero info](docs/screens/hero_info.png) |
 | **Prison (6–10)** | **Caves (11–15)** |
 | ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
 | **City (16–20)** | **Halls boss (21–25)** |
@@ -300,9 +302,13 @@ Readability rules used by the renderer:
 - only **integer scales** (1× body, 2× headings) — fractional downscaling with
   `GPU_NEAREST` drops pixel rows and makes CJK look broken;
 - every glyph is snapped to the integer pixel grid;
-- a 1 px dark shadow (2 px at 2×) is drawn behind text so it stays readable on the
-  dungeon background and on 9-patch panels;
+- the atlas is **1-bit alpha** (thresholded in `gen_font.py`) and text is drawn with
+  **no drop shadow**, so upscaled glyphs stay crisp instead of growing a grey halo;
 - body text uses high-contrast near-white instead of mid-grey.
+
+> If text looks soft in Azahar, make the emulator window an integer multiple of the
+> 3DS resolution (e.g. 4×: 1600×960 for the bottom screen) — non-integer window
+> scaling blurs the whole framebuffer, not just text.
 
 ## Debug
 
@@ -365,6 +371,7 @@ useful when the emulator shows an exception dialog.
 - [x] Full item table across all categories (weapons/armor/wands/potions/
       scrolls/rings/bombs/missiles/seeds) with gameplay effects
 - [x] Shopkeeper warn/flee, bags, alchemy UI, Stone of Augmentation, tipped darts
+- [x] Integer-scaled, shadow-free UI text; fixed multiline wrapping measurement
 - [x] Wandmaker wraith spawns, pickaxe/ore mine area, class-neutral talent tiers
 - [ ] True Old Mine sub-level (currently a sealed room on the same floor)
 - [ ] Full class-specific 3-way talent trees (currently 4 fixed talent tiers)

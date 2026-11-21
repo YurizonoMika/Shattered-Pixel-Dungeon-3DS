@@ -251,7 +251,7 @@ static void draw_glyph(const FontGlyph* g, float x, float y, float scale,
 void text(const char* s, float x, float y, u32 color, float scale) {
   if (!A_font.ok()) return;
   const u32 shadow = C2D_Color32(0, 0, 0, 170);
-  const float sh = (scale >= 1.5f) ? 2.0f : 1.0f;
+  const float sh = 0.0f;  // no drop shadow: keeps glyphs crisp when upscaled
   float pen = x;
   const char* p = s;
   while (*p) {
@@ -263,7 +263,7 @@ void text(const char* s, float x, float y, u32 color, float scale) {
       // Integer-snapped placement keeps every source pixel on the grid.
       float gx = roundf(pen + g->xoff * scale);
       float gy = roundf(y + g->yoff * scale);
-      draw_glyph(g, gx + sh, gy + sh, scale, shadow);
+      if (sh > 0) draw_glyph(g, gx + sh, gy + sh, scale, shadow);
       draw_glyph(g, gx, gy, scale, color);
     }
     pen += g->adv * scale;
@@ -297,6 +297,7 @@ float text_wrap(const char* s, float x, float y, float w, u32 color, float scale
                 float gap) {
   char line[256];
   int n = 0;
+  line[0] = 0;  // measure an empty line for the first character
   float cy = y;
   const char* p = s;
   while (*p) {
@@ -327,6 +328,7 @@ float text_wrap(const char* s, float x, float y, float w, u32 color, float scale
     if (n + len < (int)sizeof(line)) {
       memcpy(line + n, buf, len);
       n += len;
+      line[n] = 0;
     }
   }
   if (n > 0) {
