@@ -241,7 +241,7 @@ static void draw_map() {
 
   // bottom hint bar
   draw_box(0, TOP_H - 22, TOP_W, 22, C2D_Color32(0, 0, 0, 160), 0.55f);
-  text("B 返回主菜单", 8, TOP_H - 17, CLR_GREY, 1.0f);
+  text("B 菜单", 8, TOP_H - 17, CLR_GREY, 1.0f);
   text("A 移动   Y 交互", TOP_W - 138, TOP_H - 17, CLR_GREY, 1.0f);
   if (S.show_fps) textf(TOP_W - 96, 4, CLR_GREY, 1.0f, "FPS %.0f", FPS);
 }
@@ -807,7 +807,7 @@ void game_update() {
 
   if (IN.pressed(KEY_B)) {
     if (G.targeting) { G.targeting = false; G.message("取消瞄准。"); }
-    else { G.clear_path(); leave_game_to_saves(true); }
+    else { G.clear_path(); G.paused = 1; }
     return;
   }
 

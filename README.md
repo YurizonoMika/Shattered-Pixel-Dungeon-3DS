@@ -186,7 +186,7 @@ ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 | Settings | ← → switch tab, ↑ ↓ select, **A** change value |
 | Hero select | **A** select, **A** again on the same hero to start, **X** info popup |
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
-| Game actions | **B** back to save list (auto-save), **X** backpack, **L** wait, **R** search, **START** pause |
+| Game actions | **B** pause menu (exit via the menu), **X** backpack, **L** wait, **R** search, **START** pause |
 | Targeting | **A** cast/throw at cursor, **B** cancel |
 | Backpack | **L/R** switch tab (全部/药水/卷轴/法杖/装备/其他), D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; tabs and slots are touchable |
 | Dialog | **A / B / X / Y** pick the matching option |
