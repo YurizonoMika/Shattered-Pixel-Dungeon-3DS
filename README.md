@@ -88,7 +88,7 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   Search reveals traps and secret doors with SPD's blue `CheckedCell` pulse.
 - **Shops**: 3–4 stocked items per region (potions, food, tiered gear, wands) with
   gold prices, sold-out state and touch/keyboard buying.
-- **80 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
+- **84 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
   11 potions, 11 scrolls, 8 rings, 3 food types, 3 bombs, 3 throwing weapons,
   3 seeds, keys/gold/quest items.
 - **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
@@ -125,16 +125,48 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 ### Shops (ported from SPD)
 
-- One shopkeeper per region (floors 2/7/12/17/22), with **stock fixed per floor**:
-  a weapon and armor of the current tier, a wand, a healing potion, a scroll, food
-  and bombs (7 slots).
-- Price formula mirrors SPD: `value × quantity × 5 × (depth/5 + 1)`.
-- Bought items are marked sold and stay sold when revisiting the shop; stock, prices
-  and sold flags are part of the save file.
+- Shops spawn on **depths 6, 11, 16 and 20**. The floor-20 shop is run by the
+  Ambitious Imp and only appears if his quest has been completed.
+- Stock follows SPD's category list: current-tier melee weapon, matching armor,
+  a stack of throwing weapons, a healing potion + 2 random potions, magic mapping /
+  identify / remove curse + a random scroll, 2 rations, a bomb, an Ankh, and a
+  30% chance of a wand or ring.
+- Prices use SPD's formula `value × quantity × 5 × (depth/5 + 1)` — 10× value in
+  the first shop, 15× in the second, 20× in the third and 25× in the last.
+- Selling gives `value × quantity × (depth/5 + 1) / 2` (about 1/10 of the buy
+  price) and the last **3 sold items** can be bought back at the same price.
+- Shop UI has 购买 / 出售 / 回购 tabs, 6 rows per page, **X** switches tabs,
+  **L/R** pages, **A** trades and **B** closes.
+- The shopkeeper's warn-then-flee behaviour for damage/debuffs is not implemented
+  yet (shop AoE effects currently cannot hit him).
+
+### NPC quests (ported from SPD)
+
+| NPC | Floors | Task | Reward |
+| --- | --- | --- | --- |
+| Sad Ghost | 2–4 | Kill the floor's quest miniboss (Fetid Rat / Gnoll Trickster / Great Crab) | Choose a weapon or armor (tier 2–5, upgrade 0–3) |
+| Old Wandmaker | 6–9 | Retrieve corpse dust from behind barricades | Choose one of two wands (+1…+3) |
+| Troll Blacksmith | 11–14 | Collect 15 dark gold ore | Upgrade weapon or armor by +1 |
+| Ambitious Imp | 17–19 | Kill 5 monks or 4 golems | +2 ring, unlocks the depth-20 shop |
+
+Quest floors are rolled per run and stored in the save. Quest items are
+non-sellable; the ghost disappears after the reward, and the Imp reappears as the
+floor-20 shopkeeper.
+
+### Sources
+
+Implementation was cross-checked against:
+
+- [Shopkeeper (Pixel Dungeon Wiki)](https://pixeldungeon.fandom.com/wiki/Shopkeeper)
+- [Special Rooms / Shop](https://pixeldungeon.fandom.com/wiki/Shattered_Pixel_Dungeon/Special_Rooms)
+- [Shop (Pixel Dungeon Wiki)](https://pixeldungeon.wiki/Shop)
+- [NPCs and Quests](https://pixeldungeon.fandom.com/wiki/Shattered_Pixel_Dungeon/Quests)
+- [Quest](https://pixeldungeon.fandom.com/wiki/Quest)
+- [Sad Ghost](https://pixeldungeon.fandom.com/wiki/Sad_ghost)
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v7): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v8): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
 floor items (including gold amounts and chest contents), features/traps, shop stock
 and sold flags, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
@@ -297,7 +329,14 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 33 | Halls (floor 21) |
 | 34 | Blacksmith dialog (floor 12) |
 | 35 | Imp quest dialog (floor 17) |
-| 36 | Shop UI (floor 7) |
+| 36 | Shop UI (floor 6) |
+| 54 | Shop UI (floor 6, fresh run) |
+| 55–58 | Ghost / Wandmaker / Blacksmith / Imp dialogs |
+| 59 | Floor-20 Imp shop |
+| 60 | Ghost quest accepted (miniboss spawned) |
+| 61 | Ghost reward choice |
+| 62–64 | Wandmaker / Blacksmith / Imp quest accepted |
+| 65 | Generate all 25 floors (smoke test) |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |
 
@@ -314,7 +353,8 @@ useful when the emulator shows an exception dialog.
       interactables and area events
 - [x] Full item table across all categories (weapons/armor/wands/potions/
       scrolls/rings/bombs/missiles/seeds) with gameplay effects
-- [ ] Parity polish: SPD's talents, alchemy recipes, remaining special items
+- [ ] Parity polish: SPD's talents, alchemy recipes, bags, shopkeeper fleeing
+- [ ] Wandmaker wraith spawns and the blacksmith's Old Mine sub-level
 - [ ] Difficulty tuning across all 25 floors
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
 - [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)

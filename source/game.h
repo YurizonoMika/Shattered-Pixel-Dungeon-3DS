@@ -125,9 +125,17 @@ struct GameDisk {
   uint8_t boss_dead[5];
   uint8_t tokens, token_quest, smith_used, imp_state;
   uint8_t shop_n, shop_floor;
-  ItemDisk shop_items[8];
-  int16_t shop_prices[8];
-  uint8_t shop_sold[8];
+  ItemDisk shop_items[16];
+  int16_t shop_prices[16];
+  uint8_t shop_sold[16];
+  ItemDisk buyback_items[3];
+  int16_t buyback_prices[3];
+  uint8_t buyback_n;
+  uint8_t ghost_floor, ghost_state, ghost_boss_dead;
+  uint8_t wand_floor, wand_state, have_dust;
+  uint8_t smith_floor, smith_state, ore_count;
+  uint8_t imp_floor, imp_kills, imp_target;
+  uint8_t reward1, reward1_level, reward2, reward2_level;
 };
 
 struct Game {
@@ -151,9 +159,18 @@ struct Game {
   uint8_t imp_state = 0;
   bool shop_open = false;
   int shop_sel = 0, shop_n = 0, shop_floor = -1;
-  Item shop_items[8];
-  int shop_prices[8];
-  bool shop_sold[8];
+  int shop_mode = 0, shop_page = 0;  // 0 buy, 1 sell, 2 buyback
+  Item shop_items[16];
+  int shop_prices[16];
+  bool shop_sold[16];
+  Item buyback_items[3];
+  int buyback_prices[3];
+  int buyback_n = 0;
+  uint8_t ghost_floor = 0, ghost_state = 0, ghost_boss_dead = 0;
+  uint8_t wand_floor = 0, wand_state = 0, have_dust = 0;
+  uint8_t smith_floor = 0, smith_state = 0, ore_count = 0;
+  uint8_t imp_floor = 0, imp_kills = 0, imp_target = 0;
+  uint8_t reward1 = 0, reward1_level = 0, reward2 = 0, reward2_level = 0;
   Item inv[BAG_CAP];
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
@@ -228,6 +245,10 @@ struct Game {
   void trigger_tile_features();
   void open_shop();
   void shop_buy(int i);
+  void shop_sell(int i);
+  void shop_buyback(int i);
+  int shop_sell_price(uint8_t id, int count, int level) const;
+  void spawn_quest_miniboss();
   void talk_npc(int idx);
   void give_loot(int tier, bool chest);
   int weapon_bonus() const;

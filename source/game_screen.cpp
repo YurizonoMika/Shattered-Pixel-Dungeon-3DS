@@ -474,29 +474,72 @@ static void draw_backpack() {
   if (g_bag_action) draw_bag_action();
 }
 
+static int shop_list_size() {
+  if (G.shop_mode == 0) return G.shop_n;
+  if (G.shop_mode == 1) return G.inv_n;
+  return G.buyback_n;
+}
+
+static Item shop_list_item(int i) {
+  if (G.shop_mode == 1) return G.inv[i];
+  if (G.shop_mode == 2) return G.buyback_items[i];
+  return G.shop_items[i];
+}
+
+static int shop_list_price(int i) {
+  if (G.shop_mode == 1) {
+    Item it = G.inv[i];
+    return G.shop_sell_price(it.id, it.count, it.level);
+  }
+  if (G.shop_mode == 2) return G.buyback_prices[i];
+  return G.shop_prices[i];
+}
+
 static void draw_shop() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 220), 0.66f);
   draw_panel(4, 4, BOT_W - 8, BOT_H - 8, 2.0f);
   text("商店", 14, 8, CLR_YELLOW, 2.0f);
   draw_item_icon(IT_GOLD, 218, 14, 1.0f);
   textf(238, 16, CLR_YELLOW, 1.0f, "%d", G.gold);
-  for (int i = 0; i < G.shop_n; i++) {
-    float y = 34 + i * 26;
-    draw_button(12, y, BOT_W - 24, 24, "", i == G.shop_sel, 1.6f);
-    draw_item_icon(G.shop_items[i].id, 18, y + 4, 1.0f);
-    text(item_name(G.shop_items[i].id), 40, y + 6, CLR_WHITE, 1.0f);
-    if (G.shop_items[i].count > 1) {
+
+  static const char* modes[3] = {"购买", "出售", "回购"};
+  for (int i = 0; i < 3; i++) {
+    float x = 10 + i * 102;
+    bool sel = G.shop_mode == i;
+    draw_button(x, 34, 98, 22, modes[i], false, 1.6f);
+    if (sel) {
+      draw_box(x + 2, 36, 94, 18, C2D_Color32(255, 226, 120, 60), 0.52f);
+      draw_box(x + 2, 54, 94, 2, CLR_YELLOW, 0.55f);
+    }
+  }
+  int size = shop_list_size();
+  int pages = (size + 5) / 6;
+  if (pages < 1) pages = 1;
+  if (G.shop_page >= pages) G.shop_page = pages - 1;
+  textf(268, 16, CLR_GREY, 0.9f, "%d/%d", G.shop_page + 1, pages);
+
+  for (int row = 0; row < 6; row++) {
+    int idx = G.shop_page * 6 + row;
+    float y = 62 + row * 24;
+    bool selected = idx == G.shop_page * 6 + G.shop_sel;
+    draw_button(10, y, BOT_W - 20, 22, "", selected, 1.6f);
+    if (idx >= size) continue;
+    Item it = shop_list_item(idx);
+    draw_item_icon(it.id, 16, y + 3, 1.0f);
+    text(item_name(it.id), 38, y + 5, CLR_WHITE, 1.0f);
+    if (it.count > 1) {
       char cnt[16];
-      snprintf(cnt, sizeof(cnt), "x%d", G.shop_items[i].count);
-      text(cnt, 130, y + 6, CLR_GREY, 1.0f);
+      snprintf(cnt, sizeof(cnt), "x%d", it.count);
+      text(cnt, 132, y + 5, CLR_GREY, 1.0f);
     }
     char price[24];
-    if (G.shop_sold[i]) snprintf(price, sizeof(price), "已售");
-    else snprintf(price, sizeof(price), "%d 金", G.shop_prices[i]);
-    text(price, BOT_W - 24 - text_w(price, 1.0f), y + 6,
-         G.shop_sold[i] ? CLR_GREY : CLR_YELLOW, 1.0f);
+    if (G.shop_mode == 0 && G.shop_sold[idx]) snprintf(price, sizeof(price), "已售");
+    else snprintf(price, sizeof(price), "%d 金", shop_list_price(idx));
+    text(price, BOT_W - 22 - text_w(price, 1.0f), y + 5,
+         (G.shop_mode == 0 && G.shop_sold[idx]) ? CLR_GREY : CLR_YELLOW, 1.0f);
   }
-  text_c("A 购买   B 关闭", 0, BOT_W, 220, CLR_GREY, 1.0f);
+  if (size == 0) text_c("没有物品", 0, BOT_W, 120, CLR_GREY, 1.0f);
+  text_c("X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 214, CLR_GREY, 0.9f);
 }
 
 static void draw_pause() {
@@ -585,6 +628,53 @@ void game_update() {
   G.tick(dt);
   if (G.msg_timer > 0) G.msg_timer--;
   if (G.demo_lock) return;
+
+  if (G.shop_open) {
+    int size = shop_list_size();
+    int pages = (size + 5) / 6;
+    if (pages < 1) pages = 1;
+    if (IN.pressed(KEY_B)) { G.shop_open = false; return; }
+    if (IN.pressed(KEY_X)) {
+      G.shop_mode = (G.shop_mode + 1) % 3;
+      G.shop_sel = 0; G.shop_page = 0;
+      return;
+    }
+    if (IN.pressed(KEY_L) && G.shop_page > 0) { G.shop_page--; G.shop_sel = 0; }
+    if (IN.pressed(KEY_R) && G.shop_page + 1 < pages) { G.shop_page++; G.shop_sel = 0; }
+    if (IN.dy) {
+      int maxsel = std::min(5, size - G.shop_page * 6 - 1);
+      if (maxsel < 0) maxsel = 0;
+      G.shop_sel = std::max(0, std::min(maxsel, G.shop_sel + IN.dy));
+    }
+    int idx = G.shop_page * 6 + G.shop_sel;
+    if (IN.pressed(KEY_A)) {
+      if (G.shop_mode == 0) { if (idx < G.shop_n) G.shop_buy(idx); }
+      else if (G.shop_mode == 1) { if (idx < G.inv_n) G.shop_sell(idx); }
+      else if (idx < G.buyback_n) G.shop_buyback(idx);
+      return;
+    }
+    if (IN.tap) {
+      for (int m = 0; m < 3; m++)
+        if (in_rect(IN.tap_x, IN.tap_y, 10 + m * 102, 34, 98, 22)) {
+          G.shop_mode = m; G.shop_sel = 0; G.shop_page = 0;
+          return;
+        }
+      for (int row = 0; row < 6; row++) {
+        float y = 62 + row * 24;
+        if (in_rect(IN.tap_x, IN.tap_y, 10, y, BOT_W - 20, 22)) {
+          int id2 = G.shop_page * 6 + row;
+          if (id2 >= size) return;
+          G.shop_sel = row;
+          if (G.shop_mode == 0) G.shop_buy(id2);
+          else if (G.shop_mode == 1) G.shop_sell(id2);
+          else G.shop_buyback(id2);
+          return;
+        }
+      }
+      return;
+    }
+    return;
+  }
 
   if (G.dialog) {
     if (IN.pressed(KEY_A)) G.dialog_choose(0);

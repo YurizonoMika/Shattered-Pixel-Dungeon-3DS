@@ -16,6 +16,24 @@ static int absi(int v) { return v < 0 ? -v : v; }
 
 static bool is_npc(uint8_t t) { return t >= M_NPC_GHOST; }
 
+static bool is_quest_miniboss(uint8_t t) {
+  return t == M_FETID_RAT || t == M_TRICKSTER || t == M_GREAT_CRAB;
+}
+static uint8_t ghost_tier(Game& g) {
+  int r = ri(g, 0, 99);
+  if (r < 50) return 2;
+  if (r < 80) return 3;
+  if (r < 95) return 4;
+  return 5;
+}
+static uint8_t ghost_level(Game& g) {
+  int r = ri(g, 0, 99);
+  if (r < 50) return 0;
+  if (r < 80) return 1;
+  if (r < 95) return 2;
+  return 3;
+}
+
 static void gain_gold(Game& g, int amount) {
   if (g.ring_has(IT_RING_WEALTH)) amount += amount / 4;
   g.gold += amount;
@@ -475,10 +493,14 @@ void Game::gen_level() {
     }
     spawn(type, x, y);
   };
-  if (floor == 1) place_npc(M_NPC_GHOST, 1);
-  if (floor % 5 == 2) place_npc(M_NPC_SHOP, (int)rooms.size() - 1);
-  if (floor == 12) place_npc(M_NPC_SMITH, 1);
-  if (floor == 17) place_npc(M_NPC_IMP, 2);
+  if (floor == ghost_floor) place_npc(M_NPC_GHOST, 1);
+  if (floor == wand_floor) place_npc(M_NPC_WANDMAKER, 1);
+  if (floor == smith_floor) place_npc(M_NPC_SMITH, 1);
+  if (floor == imp_floor) place_npc(M_NPC_IMP, 2);
+  if (floor == 6 || floor == 11 || floor == 16)
+    place_npc(M_NPC_SHOP, (int)rooms.size() - 1);
+  if (floor == 20 && imp_state == 2)
+    place_npc(M_NPC_IMP, (int)rooms.size() - 1);
 
   // --- features -----------------------------------------------------------
   auto place_feature = [&](int type, int count) {
@@ -564,6 +586,15 @@ void Game::new_run(int hero_class, uint32_t s) {
   xpnext = 10;
   quest = 0;
   tokens = token_quest = smith_used = imp_state = 0;
+  ghost_floor = (uint8_t)(2 + ((seed >> 8) % 3));
+  wand_floor = (uint8_t)(6 + ((seed >> 12) % 4));
+  smith_floor = (uint8_t)(11 + ((seed >> 16) % 4));
+  imp_floor = (uint8_t)(17 + ((seed >> 20) % 3));
+  ghost_state = ghost_boss_dead = 0;
+  wand_state = have_dust = 0;
+  smith_state = ore_count = 0;
+  imp_kills = imp_target = 0;
+  buyback_n = 0;
   memset(boss_dead, 0, sizeof(boss_dead));
   static const int hp_base[6] = {25, 20, 18, 20, 22, 20};
   maxhp = hp_base[hero % 6];
@@ -655,6 +686,10 @@ void Game::use_item(int idx) {
   const ItemDef& d = item_def(it.id);
   switch (d.kind) {
     case K_USE:
+      if (it.id == IT_ANKH) {
+        message("安卡会在你死亡时自动生效。");
+        return;
+      }
       if (it.id == IT_POTION_HEAL) {
         if (hp >= maxhp) { message("生命值已满。"); return; }
         hp = std::min(maxhp, hp + d.power);
@@ -1058,34 +1093,52 @@ void Game::trigger_tile_features() {
 void Game::open_shop() {
   shop_open = true;
   shop_sel = 0;
+  shop_mode = 0;
+  shop_page = 0;
   if (shop_floor == floor) return;
   shop_floor = floor;
   shop_n = 0;
-  int tier = std::min(5, (floor - 1) / 5 + 1);
+  int tier = std::min(5, floor / 5 + 1);  // 6->2, 11->3, 16->4, 20->5
   int mult = floor / 5 + 1;
   auto add = [&](uint8_t id, int count, int level) {
-    if (shop_n >= 7) return;
+    if (shop_n >= 16) return;
     Item it;
     it.id = id; it.count = (uint8_t)count; it.level = (uint8_t)level;
     it.charges = item_def(id).kind == K_WAND ? item_def(id).max_charge : 0;
     shop_items[shop_n] = it;
-    int value = item_value(id) + level * 10;
-    shop_prices[shop_n] = value * count * 5 * mult;
+    shop_prices[shop_n] = item_value(id) * count * 5 * mult;
     shop_sold[shop_n] = false;
     shop_n++;
   };
   add(weapon_for_tier_rand(*this, tier), 1, 0);
   add(armor_for_tier(tier), 1, 0);
-  add(random_wand(*this, tier), 1, 0);
+  add((uint8_t)ri(*this, IT_KNIFE, IT_JAVELIN), 3, 0);
   add(IT_POTION_HEAL, 1, 0);
-  int p = ri(*this, 0, 99);
-  add(p < 50 ? IT_SCROLL_MAP : (p < 80 ? IT_SCROLL_UP : IT_SCROLL_TELE), 1, 0);
+  for (int i = 0; i < 2; i++) {
+    static const uint8_t P[11] = {
+        IT_POTION_HEAL, IT_POTION_STR, IT_POTION_SHIELD, IT_POTION_HASTE,
+        IT_POTION_INVIS, IT_POTION_LEVITATE, IT_POTION_MIND, IT_POTION_XP,
+        IT_POTION_MIGHT, IT_POTION_TOXIC, IT_POTION_FLAME};
+    add(P[ri(*this, 0, 10)], 1, 0);
+  }
+  add(IT_SCROLL_MAP, 1, 0);
+  add(IT_SCROLL_IDENTIFY, 1, 0);
+  add(IT_SCROLL_CURSE, 1, 0);
+  static const uint8_t S[8] = {IT_SCROLL_UP, IT_SCROLL_TELE, IT_SCROLL_TERROR,
+                               IT_SCROLL_LULLABY, IT_SCROLL_RECHARGE,
+                               IT_SCROLL_RAGE, IT_SCROLL_CHALLENGE,
+                               IT_SCROLL_TRANSMUTE};
+  add(S[ri(*this, 0, 7)], 1, 0);
   add(IT_FOOD_RATION, 2, 0);
-  add(IT_BOMB, 2, 0);
-  if (tier >= 3) add(IT_POTION_STR, 1, 0);
+  int roll = ri(*this, 0, 99);
+  add(roll < 55 ? IT_BOMB : (roll < 80 ? IT_BOMB_FIRE : IT_BOMB_FROST), 1, 0);
+  add(IT_ANKH, 1, 0);
+  if (ri(*this, 0, 99) < 30)
+    add(ri(*this, 0, 1) ? random_wand(*this, tier)
+                        : (uint8_t)ri(*this, IT_RING_MIGHT, IT_RING_ELEMENTS),
+        1, 0);
   message("店主：看看有什么需要的吧。");
 }
-
 void Game::shop_buy(int i) {
   if (!shop_open || i < 0 || i >= shop_n || shop_sold[i]) return;
   if (gold < shop_prices[i]) { message("金币不够。"); return; }
@@ -1097,46 +1150,154 @@ void Game::shop_buy(int i) {
   message(b);
 }
 
-void Game::talk_npc(int idx) {
-  Mob& m = mobs[idx];
-  if (m.type == M_NPC_GHOST) {
-    if (quest == 0)
-      open_dialog(1, "幽魂", "旅行者，这座地牢里有无数亡魂。\n你愿意替我找回我的护符吗？",
-                  "接受任务", "暂时离开");
-    else if (quest == 1)
-      open_dialog(1, "幽魂", "护符应该在第 2 层的某个角落。", "继续寻找");
-    else if (quest == 2)
-      open_dialog(1, "幽魂", "这就是我的护符……谢谢你。\n收下这些吧。", "收下奖励");
-    else
-      open_dialog(1, "幽魂", "愿灯火指引你，旅行者。", "离开");
-  } else if (m.type == M_NPC_SHOP) {
-    open_shop();
-  } else if (m.type == M_NPC_SMITH) {
-    if (smith_used)
-      open_dialog(4, "铁匠", "你的武器已经强化过了。\n继续往下走吧。", "离开");
-    else
-      open_dialog(4, "铁匠", "给我 40 金币，我帮你强化一次武器。",
-                  "强化 (40金)", "离开");
-  } else if (m.type == M_NPC_IMP) {
-    if (tokens >= 3)
-      open_dialog(5, "小鬼", "你集齐了徽记！\n这些金币和法杖归你了。", "收下奖励");
-    else if (token_quest == 1)
-      open_dialog(5, "小鬼", "还差几枚徽记，去 16-19 层找找。", "继续寻找");
-    else
-      open_dialog(5, "小鬼", "帮我收集 3 枚徽记，我就给你报酬。",
-                  "接受委托", "拒绝");
+int Game::shop_sell_price(uint8_t id, int count, int level) const {
+  int mult = floor / 5 + 1;
+  int price = (item_value(id) + level * 10) * count * mult / 2;
+  return std::max(1, price);
+}
+
+void Game::shop_sell(int i) {
+  if (i < 0 || i >= inv_n) return;
+  if (item_def(inv[i].id).kind == K_QUEST) {
+    message("这是任务物品，不能出售。");
+    return;
+  }
+  int price = shop_sell_price(inv[i].id, inv[i].count, inv[i].level);
+  Item sold = inv[i];
+  remove_item(i, inv[i].count);
+  gold += price;
+  for (int k = 2; k > 0; k--) {
+    buyback_items[k] = buyback_items[k - 1];
+    buyback_prices[k] = buyback_prices[k - 1];
+  }
+  buyback_items[0] = sold;
+  buyback_prices[0] = price;
+  if (buyback_n < 3) buyback_n++;
+  char b[96];
+  snprintf(b, sizeof(b), "卖出了 %s，得到 %d 金", item_name(sold.id), price);
+  message(b);
+}
+
+void Game::shop_buyback(int i) {
+  if (i < 0 || i >= buyback_n) return;
+  if (gold < buyback_prices[i]) { message("金币不够。"); return; }
+  gold -= buyback_prices[i];
+  add_item(buyback_items[i].id, buyback_items[i].count, buyback_items[i].level);
+  for (int k = i; k < buyback_n - 1; k++) {
+    buyback_items[k] = buyback_items[k + 1];
+    buyback_prices[k] = buyback_prices[k + 1];
+  }
+  buyback_n--;
+  message("你买回了物品。");
+}
+
+void Game::spawn_quest_miniboss() {
+  uint8_t type = ghost_floor == 2 ? M_FETID_RAT
+                 : ghost_floor == 3 ? M_TRICKSTER
+                                    : M_GREAT_CRAB;
+  for (int a = 0; a < 50; a++) {
+    int x = px + ri(*this, -4, 4), y = py + ri(*this, -4, 4);
+    if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
+    if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
+    Mob m;
+    m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+    m.type = type;
+    const MobDef& d = mob_def(type);
+    m.hp = m.maxhp = d.hp + floor * 2;
+    m.atk = d.atk + floor / 8;
+    m.def = d.def;
+    mobs.push_back(m);
+    message("幽灵的仇敌出现了！");
+    return;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Movement / combat
-// ---------------------------------------------------------------------------
+void Game::talk_npc(int idx) {
+  Mob& m = mobs[idx];
+  if (m.type == M_NPC_GHOST) {
+    if (ghost_state == 0)
+      open_dialog(1, "幽魂", "帮我复仇吧，地牢里有一个夺走我性命的怪物。\n它就在这附近。",
+                  "接受复仇", "以后再说");
+    else if (ghost_state == 1) {
+      if (ghost_boss_dead)
+        open_dialog(6, "幽魂", "你做到了……谢谢你。\n挑一件我生前的装备吧。",
+                    "武器 (A)", "护甲 (B)");
+      else
+        open_dialog(1, "幽魂", "凶手还没有倒下，就在这层地牢里。", "继续寻找");
+    } else
+      open_dialog(1, "幽魂", "愿灯火指引你，旅行者。", "离开");
+  } else if (m.type == M_NPC_WANDMAKER) {
+    if (wand_state == 0)
+      open_dialog(9, "制杖师", "我需要一份尸尘来制作法杖。\n它就在这层的某个路障后面。",
+                  "接受任务", "以后再说");
+    else if (wand_state == 1) {
+      if (have_dust) {
+        reward1 = random_wand(*this, 5);
+        reward1_level = ri(*this, 1, 3);
+        reward2 = random_wand(*this, 5);
+        reward2_level = ri(*this, 1, 3);
+        char o0[40], o1[40];
+        snprintf(o0, sizeof(o0), "%s +%d", item_name(reward1), reward1_level);
+        snprintf(o1, sizeof(o1), "%s +%d", item_name(reward2), reward2_level);
+        open_dialog(7, "制杖师", "你把尸尘带来了！\n挑一根法杖吧。", o0, o1);
+      } else
+        open_dialog(9, "制杖师", "尸尘在路障后面，小心那些怨灵。", "继续寻找");
+    } else
+      open_dialog(9, "制杖师", "愿你的法杖永远充能。", "离开");
+  } else if (m.type == M_NPC_SMITH) {
+    if (smith_state == 0)
+      open_dialog(10, "铁匠", "帮我挖 15 块暗金矿石，我就帮你强化装备。",
+                  "接受任务", "以后再说");
+    else if (smith_state == 1) {
+      if (ore_count >= 15)
+        open_dialog(8, "铁匠", "矿石够了！要强化哪一件？",
+                    "强化武器 (A)", "强化护甲 (B)");
+      else {
+        char b[80];
+        snprintf(b, sizeof(b), "还差 %d 块暗金矿石。", 15 - ore_count);
+        open_dialog(10, "铁匠", b, "继续寻找");
+      }
+    } else
+      open_dialog(10, "铁匠", "我已经帮你强化过了，走吧。", "离开");
+  } else if (m.type == M_NPC_IMP) {
+    if (floor == 20 && imp_state == 2) {
+      open_shop();
+    } else if (imp_state == 0)
+      open_dialog(11, "小鬼", "帮我清理一下这层的僧侣/魔像，\n我就把传家宝指环送给你。",
+                  "接受委托", "拒绝");
+    else if (imp_state == 1) {
+      if (imp_kills >= imp_target)
+        open_dialog(12, "小鬼", "干得漂亮！这枚指环归你了。", "收下奖励");
+      else {
+        char b[96];
+        snprintf(b, sizeof(b), "还差 %d 个目标。", imp_target - imp_kills);
+        open_dialog(11, "小鬼", b, "继续");
+      }
+    } else
+      open_dialog(11, "小鬼", "我的商店在 20 层，欢迎光临。", "离开");
+  } else if (m.type == M_NPC_SHOP) {
+    open_shop();
+  }
+}
+
 void Game::pick_item(int idx) {
   FloorItem fi = items[idx];
   items.erase(items.begin() + idx);
   if (fi.id == IT_GOLD) {
     gain_gold(*this, fi.level);
     message("你拾取了一堆金币。");
+    return;
+  }
+  if (fi.id == IT_CORPSE_DUST) {
+    have_dust = 1;
+    message("一股寒意顺着脊背爬上来。");
+    return;
+  }
+  if (fi.id == IT_DARK_ORE) {
+    ore_count++;
+    char b[64];
+    snprintf(b, sizeof(b), "暗金矿石 %d/15", ore_count);
+    message(b);
     return;
   }
   if (fi.id == IT_AMULET) {
@@ -1198,6 +1359,10 @@ void Game::damage_mob(int idx, int raw) {
   message(b);
   if (m.hp > 0) return;
   m.alive = false;
+  if (is_quest_miniboss(m.type)) ghost_boss_dead = 1;
+  if (imp_state == 1 && (m.type == M_MONK || m.type == M_GOLEM)) {
+    if (imp_kills < 99) imp_kills++;
+  }
   xp += mob_def(m.type).xp;
   snprintf(b, sizeof(b), "%s被击败了！", mob_def(m.type).name);
   message(b);
@@ -1525,6 +1690,16 @@ void Game::advance_turn() {
   recompute_fov();
   if (fx_t > 0) fx_t--;
   if (hp <= 0) {
+    int ankh = -1;
+    for (int i = 0; i < inv_n; i++)
+      if (inv[i].id == IT_ANKH) { ankh = i; break; }
+    if (ankh >= 0) {
+      remove_item(ankh, 1);
+      hp = std::max(1, maxhp / 2);
+      shield = 0;
+      message("安卡碎裂，你从死亡边缘被拉了回来！");
+      return;
+    }
     hp = 0;
     dead = true;
     open_dialog(2, "你死了", "你的冒险到此为止。\n要回到主菜单吗？", "结束 (A)");
@@ -1583,45 +1758,89 @@ void Game::dialog_choose(int i) {
     else dialog = false;
   } else if (dlg_type == 1) {
     dialog = false;
-    if (quest == 0 && i == 0) {
-      quest = 1;
-      message("幽魂：谢谢你，护符应该在第 2 层。");
-    } else if (quest == 2 && i == 0) {
-      quest = 3;
-      add_item(IT_POTION_HEAL, 2);
-      gain_gold(*this, 30);
-      message("幽魂：收下这些药水和金币吧。");
+    if (ghost_state == 0 && i == 0) {
+      ghost_state = 1;
+      spawn_quest_miniboss();
     }
-  } else if (dlg_type == 4) {  // smith
+  } else if (dlg_type == 6) {  // ghost reward
     dialog = false;
-    if (i == 0) {
-      if (gold < 40) message("金币不够，需要 40 金币。");
-      else {
-        gold -= 40;
-        weapon_level++;
-        smith_used = 1;
-        message("铁匠强化了你的武器。");
-      }
-    }
-  } else if (dlg_type == 5) {  // imp
+    ghost_state = 2;
+    uint8_t tier = ghost_tier(*this);
+    uint8_t lvl = ghost_level(*this);
+    if (i == 0) add_item(weapon_for_tier_rand(*this, tier), 1, lvl);
+    else add_item(armor_for_tier(tier), 1, lvl);
+    for (Mob& m : mobs)
+      if (m.type == M_NPC_GHOST) m.alive = false;
+    message("幽魂消失了，留下了一件遗物。");
+  } else if (dlg_type == 7) {  // wandmaker reward
     dialog = false;
-    if (tokens >= 3) {
-      gain_gold(*this, 80);
-      add_item(IT_WAND_LIGHTNING, 1, 0);
-      tokens = 0;
-      token_quest = 2;
-      message("小鬼：报酬归你了！");
-    } else if (token_quest == 0 && i == 0) {
-      token_quest = 1;
+    wand_state = 2;
+    if (i == 0) add_item(reward1, 1, reward1_level);
+    else add_item(reward2, 1, reward2_level);
+    for (Mob& m : mobs)
+      if (m.type == M_NPC_WANDMAKER) m.alive = false;
+    message("制杖师消失了。");
+  } else if (dlg_type == 8) {  // smith reward
+    dialog = false;
+    smith_state = 2;
+    if (i == 0) weapon_level++;
+    else armor_level++;
+    for (Mob& m : mobs)
+      if (m.type == M_NPC_SMITH) m.alive = false;
+    message("铁匠完成了强化。");
+  } else if (dlg_type == 9) {  // wand quest accept
+    dialog = false;
+    if (i == 0 && wand_state == 0) {
+      wand_state = 1;
       for (int t = 0; t < 200; t++) {
         int x = ri(*this, 1, MW - 2), y = ri(*this, 1, MH - 2);
         if (tiles[y][x] != T_FLOOR || feature_at(x, y) >= 0) continue;
         if (x == px && y == py) continue;
-        features.push_back({x, y, F_TOKEN, 0, 0});
+        items.push_back({x, y, IT_CORPSE_DUST, 0});
+        for (int k = 0; k < 2; k++) {
+          int bx = x + (k ? 1 : -1), by = y;
+          if (bx < 1 || bx >= MW - 1 || tiles[by][bx] != T_FLOOR) continue;
+          Feature f;
+          f.x = bx; f.y = by; f.type = F_BARRICADE; f.aux = 2;
+          features.push_back(f);
+        }
         break;
       }
-      message("小鬼：去 16-19 层收集 3 枚徽记吧。");
+      message("制杖师：尸尘就在路障后面。");
     }
+  } else if (dlg_type == 10) {  // smith quest accept
+    dialog = false;
+    if (i == 0 && smith_state == 0) {
+      smith_state = 1;
+      for (int n = 0; n < 15; n++) {
+        for (int t = 0; t < 100; t++) {
+          int x = ri(*this, 1, MW - 2), y = ri(*this, 1, MH - 2);
+          if (tiles[y][x] != T_FLOOR || item_at(x, y) >= 0 ||
+              feature_at(x, y) >= 0 || (x == px && y == py))
+            continue;
+          items.push_back({x, y, IT_DARK_ORE, 0});
+          break;
+        }
+      }
+      message("铁匠：去挖 15 块暗金矿石吧。");
+    }
+  } else if (dlg_type == 11) {  // imp quest accept
+    dialog = false;
+    if (i == 0 && imp_state == 0) {
+      imp_state = 1;
+      imp_kills = 0;
+      imp_target = (imp_floor == 17) ? 5 : 4;
+      message(imp_floor == 17 ? "小鬼：去杀 5 个武僧。"
+                              : "小鬼：去杀 4 个石魔像。");
+    }
+  } else if (dlg_type == 12) {  // imp reward
+    dialog = false;
+    imp_state = 2;
+    uint8_t ring = (uint8_t)ri(*this, IT_RING_MIGHT, IT_RING_ELEMENTS);
+    add_item(ring, 1, 2);
+    for (Mob& m : mobs)
+      if (m.type == M_NPC_IMP && floor != 20) m.alive = false;
+    message("小鬼：20 层的商店归我管了！");
   } else {
     dialog = false;
   }
@@ -1671,7 +1890,7 @@ void Game::cast_or_throw(int x, int y) {
 }
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 7;
+static const uint16_t SAVE_VERSION = 8;
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -1738,7 +1957,20 @@ bool Game::save(int slot) const {
   memcpy(d.boss_dead, boss_dead, sizeof(boss_dead));
   d.tokens = tokens; d.token_quest = token_quest;
   d.smith_used = smith_used; d.imp_state = imp_state;
-  d.shop_n = (uint8_t)std::min(shop_n, 8);
+  d.ghost_floor = ghost_floor; d.ghost_state = ghost_state;
+  d.ghost_boss_dead = ghost_boss_dead;
+  d.wand_floor = wand_floor; d.wand_state = wand_state; d.have_dust = have_dust;
+  d.smith_floor = smith_floor; d.smith_state = smith_state; d.ore_count = ore_count;
+  d.imp_floor = imp_floor; d.imp_kills = imp_kills; d.imp_target = imp_target;
+  d.reward1 = reward1; d.reward1_level = reward1_level;
+  d.reward2 = reward2; d.reward2_level = reward2_level;
+  d.buyback_n = (uint8_t)buyback_n;
+  for (int i = 0; i < buyback_n && i < 3; i++) {
+    d.buyback_items[i] = {buyback_items[i].id, buyback_items[i].count,
+                          buyback_items[i].level, buyback_items[i].charges};
+    d.buyback_prices[i] = (int16_t)buyback_prices[i];
+  }
+  d.shop_n = (uint8_t)std::min(shop_n, 16);
   d.shop_floor = (uint8_t)std::max(0, std::min(shop_floor, 25));
   for (int i = 0; i < d.shop_n; i++) {
     d.shop_items[i] = {shop_items[i].id, shop_items[i].count,
@@ -1810,7 +2042,20 @@ bool Game::load(int slot) {
   memcpy(boss_dead, d.boss_dead, sizeof(boss_dead));
   tokens = d.tokens; token_quest = d.token_quest;
   smith_used = d.smith_used; imp_state = d.imp_state;
-  shop_n = std::min((int)d.shop_n, 8);
+  ghost_floor = d.ghost_floor; ghost_state = d.ghost_state;
+  ghost_boss_dead = d.ghost_boss_dead;
+  wand_floor = d.wand_floor; wand_state = d.wand_state; have_dust = d.have_dust;
+  smith_floor = d.smith_floor; smith_state = d.smith_state; ore_count = d.ore_count;
+  imp_floor = d.imp_floor; imp_kills = d.imp_kills; imp_target = d.imp_target;
+  reward1 = d.reward1; reward1_level = d.reward1_level;
+  reward2 = d.reward2; reward2_level = d.reward2_level;
+  buyback_n = std::min((int)d.buyback_n, 3);
+  for (int i = 0; i < buyback_n; i++) {
+    buyback_items[i] = {d.buyback_items[i].id, d.buyback_items[i].count,
+                        d.buyback_items[i].level, d.buyback_items[i].charges};
+    buyback_prices[i] = d.buyback_prices[i];
+  }
+  shop_n = std::min((int)d.shop_n, 16);
   shop_floor = d.shop_floor ? d.shop_floor : -1;
   for (int i = 0; i < shop_n; i++) {
     shop_items[i] = {d.shop_items[i].id, d.shop_items[i].count,

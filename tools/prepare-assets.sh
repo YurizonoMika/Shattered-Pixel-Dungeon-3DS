@@ -47,7 +47,7 @@ done
 
 for m in rat gnoll crab skeleton thief guard bat brute shaman spinner golem monk \
          warlock succubus eye ripper wraith goo tengu dm300 king yog \
-         ghost shopkeeper blacksmith imp; do
+         ghost shopkeeper blacksmith imp wandmaker; do
   copy "sprites/$m.png" "mob_$m.png"
 done
 

@@ -69,6 +69,7 @@ bool assets_load() {
       {"mob_king", 256, 16},     {"mob_yog", 256, 32},
       {"mob_ghost", 128, 16},    {"mob_shopkeeper", 32, 16},
       {"mob_blacksmith", 64, 16},{"mob_imp", 64, 16},
+      {"mob_wandmaker", 64, 16},
   };
   char mpath[64];
   for (int i = 0; i < MA_COUNT; i++) {

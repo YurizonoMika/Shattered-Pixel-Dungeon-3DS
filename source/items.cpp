@@ -93,6 +93,10 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"阳草种子", "种下后恢复生命。", K_SEED, CAT_MISC, 10, 0, 387},
     {"火焰花种子", "种下后造成火焰伤害。", K_SEED, CAT_MISC, 8, 0, 385},
     {"致盲草种子", "种下后催眠附近敌人。", K_SEED, CAT_MISC, 10, 0, 390},
+    {"安卡", "死亡时自动复活并恢复一半生命。", K_USE, CAT_MISC, 50, 0, 48},
+    {"尸尘", "制杖师需要的诅咒骨灰。", K_QUEST, CAT_MISC, 0, 0, 61},
+    {"暗金矿石", "铁匠需要的矿石，熔于日光。", K_QUEST, CAT_MISC, 0, 0, 18},
+    {"矮人徽记", "僧侣与魔像携带的金属徽记。", K_QUEST, CAT_MISC, 0, 0, 61},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
@@ -109,6 +113,7 @@ int item_value(uint8_t id) {
     case K_FOOD: return 20;
     case K_BOMB: return 30;
     case K_KEY: return 10;
+    case K_QUEST: return 0;
     case K_WEAPON: return 40 + d.power * 10;
     case K_ARMOR: return 35 + d.power * 10;
     case K_WAND: return 80 + d.power * 10;

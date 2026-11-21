@@ -741,6 +741,64 @@ int main() {
           G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
         }
+        else if (want >= 60 && want <= 64) {
+          start_new_game(0);
+          if (want == 60 || want == 61) G.floor = G.ghost_floor;
+          else if (want == 62) G.floor = G.wand_floor;
+          else if (want == 63) G.floor = G.smith_floor;
+          else G.floor = G.imp_floor;
+          G.gen_level();
+          for (int i = 0; i < (int)G.mobs.size(); i++) {
+            uint8_t t2 = G.mobs[i].type;
+            if (t2 >= M_NPC_GHOST) {
+              G.px = G.mobs[i].x - 1; G.py = G.mobs[i].y;
+              G.talk_npc(i);
+              G.dialog_choose(0);
+              if (want == 61) {
+                G.ghost_boss_dead = 1;
+                G.talk_npc(i);
+              }
+              break;
+            }
+          }
+          G.pvx = (float)G.px; G.pvy = (float)G.py;
+          G.recompute_fov();
+          G.demo_lock = true;
+        }
+        else if (want == 65) {
+          start_new_game(0);
+          for (int f = 1; f <= 25; f++) { G.floor = f; G.gen_level(); }
+          dlog("all 25 floors generated");
+        }
+        else if (want == 54) {
+          start_new_game(0); G.floor = 6; G.gen_level();
+          G.open_shop(); G.demo_lock = true;
+        }
+        else if (want == 59) {
+          start_new_game(0); G.imp_state = 2; G.floor = 20; G.gen_level();
+          G.open_shop(); G.demo_lock = true;
+        }
+        else if (want >= 55 && want <= 58) {
+          start_new_game(0);
+          static const uint8_t fl[4] = {0, 0, 0, 0};
+          (void)fl;
+          if (want == 55) G.floor = G.ghost_floor;
+          else if (want == 56) G.floor = G.wand_floor;
+          else if (want == 57) G.floor = G.smith_floor;
+          else G.floor = G.imp_floor;
+          G.gen_level();
+          for (int i = 0; i < (int)G.mobs.size(); i++) {
+            uint8_t t2 = G.mobs[i].type;
+            if (t2 == M_NPC_GHOST || t2 == M_NPC_WANDMAKER ||
+                t2 == M_NPC_SMITH || t2 == M_NPC_IMP) {
+              G.px = G.mobs[i].x - 1; G.py = G.mobs[i].y;
+              G.talk_npc(i);
+              break;
+            }
+          }
+          G.pvx = (float)G.px; G.pvy = (float)G.py;
+          G.recompute_fov();
+        }
         else if (want == 40 || want == 41) {
           start_new_game(0);
           G.add_item(IT_RING_MIGHT, 1, 1);
@@ -796,7 +854,7 @@ int main() {
           G.pvx = (float)G.px; G.pvy = (float)G.py; G.recompute_fov();
         }
         else if (want == 36) {
-          start_new_game(0); G.floor = 7; G.gen_level();
+          start_new_game(0); G.floor = 6; G.gen_level();
           G.open_shop(); G.demo_lock = true;
         }
         else if (want == 24) {

@@ -25,6 +25,8 @@ enum MobType : uint8_t {
   M_EYE,
   M_RIPPER,
   M_WRAITH,
+  // quest minibosses
+  M_FETID_RAT, M_TRICKSTER, M_GREAT_CRAB,
   // bosses
   M_GOO,
   M_TENGU,
@@ -35,6 +37,7 @@ enum MobType : uint8_t {
   M_NPC_GHOST,
   M_NPC_SHOP,
   M_NPC_SMITH,
+  M_NPC_WANDMAKER,
   M_NPC_IMP,
   M_COUNT
 };
