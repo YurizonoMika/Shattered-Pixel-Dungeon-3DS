@@ -311,9 +311,19 @@ static void draw_map() {
       uint32_t tint = 0;
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
-      draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
-                      (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                      tint);
+      bool wall_up = (y > 0 && wall_like(G.tiles[y - 1][x]));
+      bool wall_dn = (y + 1 < MH && wall_like(G.tiles[y + 1][x]));
+      bool wall_lf = (x > 0 && wall_like(G.tiles[y][x - 1]));
+      bool wall_rt = (x + 1 < MW && wall_like(G.tiles[y][x + 1]));
+      bool sideways = (wall_up || wall_dn) && !(wall_lf && wall_rt);
+      if (sideways) {
+        draw_cell_rot(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                      16, 16, tx, ty, z, (float)M_PI * 0.5f, tint);
+      } else {
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
+      }
     }
   }
 
