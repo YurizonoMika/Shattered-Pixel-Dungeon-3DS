@@ -88,8 +88,15 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   Search reveals traps and secret doors with SPD's blue `CheckedCell` pulse.
 - **Shops**: 3–4 stocked items per region (potions, food, tiered gear, wands) with
   gold prices, sold-out state and touch/keyboard buying.
-- **Equipment tiers** 1–5 for weapons and armor, six wands (magic/fire/frost/
-  lightning), plus potions, scrolls, food, bombs and keys.
+- **80 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
+  11 potions, 11 scrolls, 8 rings, 3 food types, 3 bombs, 3 throwing weapons,
+  3 seeds, keys/gold/quest items.
+- **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
+  energy, force and elements, each with passive combat/economy effects.
+- **Status effects**: haste, invisibility, levitation, mind vision, might, rage,
+  sleep and terror are applied by potions, scrolls, wands, seeds and bombs.
+- **Wands**: 13 types (single-target, AoE, beam, root, knockback, shield, heal,
+  lifesteal, prismatic) with charges, recharge and per-wand behaviour.
 - **Search** reproduces SPD's visual: per-tile blue square shrinking with distance
   delay, hero `operate` animation and a floating “搜索中” label.
 - **SPD-style backpack**: 5×5 (25-slot) grid, gold/capacity, equipped gear, item
@@ -106,7 +113,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 - Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**, plus one guaranteed
   food drop (`Level.createItems()`).
 - Category weights follow SPD's combined generator deck: weapons 4, armor 3,
-  thrown/bombs 5, wands 4, potions 16, scrolls 16, food 2, gold 20, keys 1.
+  thrown/bombs 5, wands 4, potions 16, scrolls 16, food 2, gold 20, keys 1,
+  rings 2, throwing weapons 3, seeds 2.
 - Item tiers use SPD's per-floor-set table
   `{0,75,20,4,1} / {0,25,50,20,5} / {0,0,40,50,10} / {0,0,20,40,40} / {0,0,0,20,80}`,
   so early floors mostly drop tier 2 and late floors tier 4–5.
@@ -126,7 +134,7 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v6): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v7): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
 floor items (including gold amounts and chest contents), features/traps, shop stock
 and sold flags, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
@@ -290,6 +298,8 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 34 | Blacksmith dialog (floor 12) |
 | 35 | Imp quest dialog (floor 17) |
 | 36 | Shop UI (floor 7) |
+| 40 | Backpack with rings/missiles/seeds |
+| 41 | Ring detail panel |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.
@@ -302,7 +312,9 @@ useful when the emulator shows an exception dialog.
 - [x] Full save/load (map, mobs, inventory, equipment, quest/boss state)
 - [x] All 25 floors and 5 regions with region mobs, bosses, NPCs, shops,
       interactables and area events
-- [ ] Parity polish: SPD's full item/mob/spell tables, talents, alchemy recipes
+- [x] Full item table across all categories (weapons/armor/wands/potions/
+      scrolls/rings/bombs/missiles/seeds) with gameplay effects
+- [ ] Parity polish: SPD's talents, alchemy recipes, remaining special items
 - [ ] Difficulty tuning across all 25 floors
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
 - [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)

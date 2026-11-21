@@ -33,6 +33,39 @@ int Game::armor_bonus() const {
   if (armor == IT_NONE) return 0;
   return item_def(armor).power + armor_level;
 }
+bool Game::ring_has(uint8_t id) const {
+  return ring1 == id || ring2 == id;
+}
+int Game::ring_atk() const {
+  int b = 0;
+  if (ring1 == IT_RING_MIGHT) b += 2 + ring1_level;
+  if (ring2 == IT_RING_MIGHT) b += 2 + ring2_level;
+  if (ring1 == IT_RING_ACCURACY) b += 1 + ring1_level;
+  if (ring2 == IT_RING_ACCURACY) b += 1 + ring2_level;
+  return b;
+}
+int Game::ring_def() const {
+  int b = 0;
+  if (ring1 == IT_RING_EVASION) b += 1 + ring1_level;
+  if (ring2 == IT_RING_EVASION) b += 1 + ring2_level;
+  return b;
+}
+void Game::equip_ring(int idx) {
+  if (idx < 0 || idx >= inv_n) return;
+  Item& it = inv[idx];
+  if (ring1 == IT_NONE) {
+    ring1 = it.id; ring1_level = it.level;
+    remove_item(idx, 1);
+  } else if (ring2 == IT_NONE) {
+    ring2 = it.id; ring2_level = it.level;
+    remove_item(idx, 1);
+  } else {
+    uint8_t old = ring1, oldl = ring1_level;
+    ring1 = it.id; ring1_level = it.level;
+    inv[idx].id = old; inv[idx].level = oldl; inv[idx].count = 1;
+  }
+  message("你戴上了一枚指环。");
+}
 
 // ---------------------------------------------------------------------------
 // Map queries
@@ -155,10 +188,26 @@ static uint8_t armor_for_tier(int t) {
   }
 }
 static uint8_t random_wand(Game& g, int tier) {
+  static const uint8_t WANDS[13] = {
+      IT_WAND_MAGIC, IT_WAND_FIRE, IT_WAND_FROST, IT_WAND_LIGHTNING,
+      IT_WAND_DISINTEGRATION, IT_WAND_CORROSION, IT_WAND_EARTH,
+      IT_WAND_BLAST, IT_WAND_CORRUPTION, IT_WAND_WARDING,
+      IT_WAND_REGROWTH, IT_WAND_TRANSFUSION, IT_WAND_PRISMATIC};
   int roll = ri(g, 0, 99);
-  if (tier >= 4 && roll < 25) return IT_WAND_LIGHTNING;
-  if (tier >= 2 && roll < 45) return IT_WAND_FROST;
-  return (roll & 1) ? IT_WAND_FIRE : IT_WAND_MAGIC;
+  if (tier >= 4 && roll < 30) return WANDS[12];       // prismatic
+  if (tier >= 3 && roll < 45) return WANDS[ri(g, 4, 10)];
+  return WANDS[ri(g, 0, tier >= 2 ? 5 : 3)];
+}
+
+static uint8_t weapon_for_tier_rand(Game& g, int t) {
+  static const uint8_t T[5][3] = {
+      {IT_DAGGER, IT_SHORTSWORD, IT_CUDGEL},
+      {IT_LONGSWORD, IT_HAND_AXE, IT_SPEAR},
+      {IT_WARHAMMER, IT_SCIMITAR, IT_WHIP},
+      {IT_GREATAXE, IT_GREATSWORD, IT_HALBERD},
+      {IT_RUNEBLADE, IT_BATTLEAXE, IT_GIANT_HAMMER}};
+  t = t < 1 ? 1 : (t > 5 ? 5 : t);
+  return T[t - 1][ri(g, 0, 2)];
 }
 
 struct LootRoll {
@@ -185,17 +234,18 @@ static int tier_for_floor(Game& g, int floor) {
 
 // Category weights (combined first/second deck from SPD's Generator).
 static LootRoll roll_loot(Game& g, bool allowGold = true) {
-  static const int W[9] = {4, 3, 5, 4, 16, 16, 2, 20, 1};
-  enum { C_WEP, C_ARMOR, C_BOMB, C_WAND, C_POTION, C_SCROLL, C_FOOD, C_GOLD, C_KEY };
+  static const int W[12] = {4, 3, 5, 4, 16, 16, 2, 20, 1, 2, 3, 2};
+  enum { C_WEP, C_ARMOR, C_BOMB, C_WAND, C_POTION, C_SCROLL,
+         C_FOOD, C_GOLD, C_KEY, C_RING, C_MISSILE, C_SEED };
   int total = 0;
-  int weights[9];
-  for (int i = 0; i < 9; i++) {
+  int weights[12];
+  for (int i = 0; i < 12; i++) {
     weights[i] = (i == C_GOLD && !allowGold) ? 0 : W[i];
     total += weights[i];
   }
   int roll = ri(g, 0, total - 1);
   int cat = 0, acc = 0;
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < 12; i++) {
     acc += weights[i];
     if (roll < acc) { cat = i; break; }
   }
@@ -204,7 +254,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
   switch (cat) {
     case C_WEP: {
       int t = tier_for_floor(g, floor);
-      r.id = weapon_for_tier(t);
+      r.id = weapon_for_tier_rand(g, t);
       r.level = ri(g, 0, t >= 3 ? 1 : 0);
       break;
     }
@@ -214,20 +264,34 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
       r.level = ri(g, 0, t >= 3 ? 1 : 0);
       break;
     }
-    case C_BOMB: r.id = IT_BOMB; break;
+    case C_BOMB: {
+      int p = ri(g, 0, 99);
+      r.id = p < 55 ? IT_BOMB : (p < 80 ? IT_BOMB_FIRE : IT_BOMB_FROST);
+      break;
+    }
     case C_WAND: r.id = random_wand(g, (floor - 1) / 5 + 1); break;
     case C_POTION: {
-      int p = ri(g, 0, 99);
-      r.id = p < 45 ? IT_POTION_HEAL : (p < 60 ? IT_POTION_STR : IT_POTION_SHIELD);
+      static const uint8_t P[11] = {
+          IT_POTION_HEAL, IT_POTION_STR, IT_POTION_SHIELD, IT_POTION_HASTE,
+          IT_POTION_INVIS, IT_POTION_LEVITATE, IT_POTION_MIND, IT_POTION_XP,
+          IT_POTION_MIGHT, IT_POTION_TOXIC, IT_POTION_FLAME};
+      r.id = P[ri(g, 0, 10)];
       break;
     }
     case C_SCROLL: {
-      int p = ri(g, 0, 99);
-      r.id = p < 40 ? IT_SCROLL_MAP : (p < 75 ? IT_SCROLL_UP : IT_SCROLL_TELE);
+      static const uint8_t S[11] = {
+          IT_SCROLL_MAP, IT_SCROLL_UP, IT_SCROLL_TELE, IT_SCROLL_IDENTIFY,
+          IT_SCROLL_CURSE, IT_SCROLL_TERROR, IT_SCROLL_LULLABY,
+          IT_SCROLL_RECHARGE, IT_SCROLL_RAGE, IT_SCROLL_CHALLENGE,
+          IT_SCROLL_TRANSMUTE};
+      r.id = S[ri(g, 0, 10)];
       break;
     }
     case C_FOOD: r.id = (ri(g, 0, 2) == 0) ? IT_FOOD_MEAT : IT_FOOD_RATION; break;
     case C_KEY: r.id = IT_KEY; break;
+    case C_RING: r.id = (uint8_t)ri(g, IT_RING_MIGHT, IT_RING_ELEMENTS); break;
+    case C_MISSILE: r.id = (uint8_t)ri(g, IT_KNIFE, IT_JAVELIN); break;
+    case C_SEED: r.id = (uint8_t)ri(g, IT_SEED_SUNGRASS, IT_SEED_BLINDWEED); break;
     default:
       r.id = IT_GOLD;
       r.gold = ri(g, 30 + floor * 10, 60 + floor * 20);
@@ -591,12 +655,42 @@ void Game::use_item(int idx) {
         hp = std::min(maxhp, hp + d.power);
         message("你喝下治疗药水。");
       } else if (it.id == IT_POTION_STR) {
-        maxhp += 2;
-        hp = std::min(maxhp, hp + 2);
+        maxhp += 2; hp = std::min(maxhp, hp + 2);
         message("力量涌入身体，最大生命 +2。");
       } else if (it.id == IT_POTION_SHIELD) {
         shield += d.power;
         message("一层护盾包围了你。");
+      } else if (it.id == IT_POTION_HASTE) {
+        haste_t = d.power;
+        message("你感到行动变得迅捷。");
+      } else if (it.id == IT_POTION_INVIS) {
+        invis_t = d.power;
+        message("你的身影逐渐消失。");
+      } else if (it.id == IT_POTION_LEVITATE) {
+        levit_t = d.power;
+        message("你的身体漂浮起来。");
+      } else if (it.id == IT_POTION_MIND) {
+        mind_t = d.power;
+        for (int y = 0; y < MH; y++)
+          for (int x = 0; x < MW; x++) seen[y][x] = true;
+        message("你感知到了整层地牢。");
+      } else if (it.id == IT_POTION_XP) {
+        xp += d.power + floor;
+        while (xp >= xpnext) {
+          xp -= xpnext; level++; xpnext = level * 10;
+          maxhp += 5; hp = std::min(maxhp, hp + 5);
+        }
+        message("经验涌入你的身体。");
+      } else if (it.id == IT_POTION_MIGHT) {
+        might_t = d.power;
+        message("你的攻击变得更有力。");
+      } else if (it.id == IT_POTION_TOXIC || it.id == IT_POTION_FLAME) {
+        int dmg = d.power + floor / 3;
+        for (size_t i = 0; i < mobs.size(); i++)
+          if (mobs[i].alive && !is_npc(mobs[i].type) &&
+              absi(mobs[i].x - px) <= 3 && absi(mobs[i].y - py) <= 3)
+            damage_mob((int)i, dmg);
+        message(it.id == IT_POTION_TOXIC ? "毒气弥漫开来。" : "烈焰席卷四周。");
       } else if (it.id == IT_SCROLL_MAP) {
         for (int y = 0; y < MH; y++)
           for (int x = 0; x < MW; x++) seen[y][x] = true;
@@ -613,11 +707,73 @@ void Game::use_item(int idx) {
         pvx = (float)px; pvy = (float)py;
         recompute_fov();
         message("你被传送到本层的另一个角落。");
+      } else if (it.id == IT_SCROLL_IDENTIFY || it.id == IT_SCROLL_CURSE) {
+        message(it.id == IT_SCROLL_IDENTIFY ? "所有物品都已被鉴定。"
+                                           : "装备上的诅咒被驱散了。");
+      } else if (it.id == IT_SCROLL_TERROR || it.id == IT_SCROLL_LULLABY) {
+        for (Mob& m : mobs) {
+          if (!m.alive || is_npc(m.type)) continue;
+          if (absi(m.x - px) > 6 || absi(m.y - py) > 6) continue;
+          if (it.id == IT_SCROLL_TERROR) m.terror_t = 15;
+          else m.sleep_t = 15;
+        }
+        message(it.id == IT_SCROLL_TERROR ? "敌人陷入恐惧！" : "敌人陷入沉睡。");
+      } else if (it.id == IT_SCROLL_RECHARGE) {
+        for (int i = 0; i < inv_n; i++)
+          if (item_def(inv[i].id).kind == K_WAND)
+            inv[i].charges = std::min<int>(item_def(inv[i].id).max_charge,
+                                           inv[i].charges + 2);
+        message("法杖的充能被补满了。");
+      } else if (it.id == IT_SCROLL_RAGE) {
+        rage_t = 10;
+        message("敌人陷入狂暴，开始互相攻击。");
+      } else if (it.id == IT_SCROLL_CHALLENGE) {
+        int made = 0;
+        for (int t = 0; t < 20 && made < 3; t++) {
+          int x = px + ri(*this, -2, 2), y = py + ri(*this, -2, 2);
+          if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
+          if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
+          Mob m;
+          m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+          m.type = REGIONS[region()].mobs[ri(*this, 0, 3)];
+          const MobDef& md = mob_def(m.type);
+          m.maxhp = md.hp + floor * 2; m.atk = md.atk + floor / 8;
+          m.def = md.def + floor / 10; m.hp = m.maxhp;
+          mobs.push_back(m); made++;
+        }
+        message("更多敌人被召唤了出来！");
+      } else if (it.id == IT_SCROLL_TRANSMUTE) {
+        if (inv_n > 0) {
+          int i = ri(*this, 0, inv_n - 1);
+          char b[96];
+          snprintf(b, sizeof(b), "%s 被转化了。", item_name(inv[i].id));
+          remove_item(i, 1);
+          grant_loot(*this, roll_loot(*this, true));
+          message(b);
+        }
       }
       break;
     case K_FOOD:
       hp = std::min(maxhp, hp + d.power);
       message("你吃了一些食物。");
+      break;
+    case K_SEED:
+      if (it.id == IT_SEED_SUNGRASS) {
+        hp = std::min(maxhp, hp + d.power);
+        message("阳草治愈了你的伤口。");
+      } else if (it.id == IT_SEED_FIREBLOOM) {
+        for (size_t i = 0; i < mobs.size(); i++)
+          if (mobs[i].alive && !is_npc(mobs[i].type) &&
+              absi(mobs[i].x - px) <= 2 && absi(mobs[i].y - py) <= 2)
+            damage_mob((int)i, d.power + floor / 3);
+        message("火焰花在脚下爆开！");
+      } else if (it.id == IT_SEED_BLINDWEED) {
+        for (Mob& m : mobs)
+          if (m.alive && !is_npc(m.type) && absi(m.x - px) <= 4 &&
+              absi(m.y - py) <= 4)
+            m.sleep_t = 12;
+        message("致盲花粉让敌人昏昏欲睡。");
+      }
       break;
     case K_WAND:
       if (it.charges == 0) { message("法杖还没有充能。"); return; }
@@ -626,9 +782,13 @@ void Game::use_item(int idx) {
       message(targeting ? "选择施法目标（B 取消）。" : "取消施法。");
       return;
     case K_BOMB:
+    case K_MISSILE:
       targeting = !targeting;
       target_item = idx;
       message(targeting ? "选择投掷目标（B 取消）。" : "取消投掷。");
+      return;
+    case K_RING:
+      equip_ring(idx);
       return;
     case K_WEAPON:
     case K_ARMOR:
@@ -652,28 +812,123 @@ void Game::cast_wand(int idx, int tx, int ty) {
     return;
   }
   int dmg = d.power + it.level * 2 + ri(*this, 0, 2);
-  int hits = 0;
-  bool aoe = it.id == IT_WAND_FIRE || it.id == IT_WAND_LIGHTNING;
-  for (size_t i = 0; i < mobs.size(); i++) {
-    Mob& m = mobs[i];
-    if (!m.alive || is_npc(m.type)) continue;
-    if (absi(m.x - tx) > (aoe ? 1 : 0) || absi(m.y - ty) > (aoe ? 1 : 0))
-      continue;
-    if (it.id == IT_WAND_MAGIC && hits > 0) break;
-    damage_mob((int)i, dmg);
-    hits++;
+  auto hit_area = [&](int radius, int bonus) {
+    int hits = 0;
+    for (size_t i = 0; i < mobs.size(); i++) {
+      Mob& m = mobs[i];
+      if (!m.alive || is_npc(m.type)) continue;
+      if (absi(m.x - tx) > radius || absi(m.y - ty) > radius) continue;
+      if (!los(px, py, m.x, m.y)) continue;
+      damage_mob((int)i, dmg + bonus);
+      hits++;
+    }
+    return hits;
+  };
+  auto hit_one = [&](int bonus) {
+    for (size_t i = 0; i < mobs.size(); i++) {
+      Mob& m = mobs[i];
+      if (!m.alive || is_npc(m.type)) continue;
+      if (absi(m.x - tx) > 1 || absi(m.y - ty) > 1) continue;
+      if (!los(px, py, m.x, m.y)) continue;
+      damage_mob((int)i, dmg + bonus);
+      return (int)i;
+    }
+    return -1;
+  };
+
+  switch (it.id) {
+    case IT_WAND_WARDING:
+      shield += 8 + it.level * 2;
+      message("守护法杖为你附上了护盾。");
+      break;
+    case IT_WAND_REGROWTH:
+      hp = std::min(maxhp, hp + 10 + it.level * 2);
+      message("再生法杖治愈了你的伤口。");
+      break;
+    case IT_WAND_TRANSFUSION: {
+      int before = 0;
+      (void)before;
+      int mi = hit_one(0);
+      if (mi >= 0) {
+        hp = std::min(maxhp, hp + dmg / 2 + 2);
+        (void)mi;
+        message("你吸取了目标的生命。");
+      }
+      break;
+    }
+    case IT_WAND_DISINTEGRATION:
+      for (size_t i = 0; i < mobs.size(); i++) {
+        Mob& m = mobs[i];
+        if (!m.alive || is_npc(m.type)) continue;
+        if (absi(m.x - tx) <= 1 && absi(m.y - ty) <= 1 &&
+            los(px, py, m.x, m.y))
+          damage_mob((int)i, dmg + 3);
+      }
+      message("瓦解射线贯穿了目标区域。");
+      break;
+    case IT_WAND_FIRE:
+    case IT_WAND_LIGHTNING:
+      if (hit_area(1, 2) == 0) message("法术击中了空处。");
+      break;
+    case IT_WAND_PRISMATIC:
+      hit_area(1, 5);
+      break;
+    case IT_WAND_BLAST: {
+      for (size_t i = 0; i < mobs.size(); i++) {
+        Mob& m = mobs[i];
+        if (!m.alive || is_npc(m.type)) continue;
+        if (absi(m.x - tx) > 1 || absi(m.y - ty) > 1) continue;
+        damage_mob((int)i, dmg);
+        if (m.alive) {
+          int dx = (m.x > tx) - (m.x < tx), dy = (m.y > ty) - (m.y < ty);
+          for (int step = 0; step < 2; step++) {
+            int nx = m.x + dx, ny = m.y + dy;
+            if (walkable(nx, ny) && mob_at(nx, ny) < 0) { m.x = nx; m.y = ny; }
+          }
+          m.vx = (float)m.x; m.vy = (float)m.y;
+        }
+      }
+      message("冲击波把敌人推开了。");
+      break;
+    }
+    case IT_WAND_CORROSION:
+      for (size_t i = 0; i < mobs.size(); i++) {
+        Mob& m = mobs[i];
+        if (!m.alive || is_npc(m.type)) continue;
+        if (absi(m.x - tx) > 1 || absi(m.y - ty) > 1) continue;
+        if (m.def > 0) m.def--;
+        damage_mob((int)i, dmg);
+      }
+      break;
+    case IT_WAND_EARTH: {
+      int mi = hit_one(0);
+      if (mi >= 0) mobs[mi].sleep_t = 10;
+      message("藤蔓缠住了目标。");
+      break;
+    }
+    case IT_WAND_FROST:
+      for (size_t i = 0; i < mobs.size(); i++) {
+        Mob& m = mobs[i];
+        if (!m.alive || is_npc(m.type)) continue;
+        if (absi(m.x - tx) > 1 || absi(m.y - ty) > 1) continue;
+        damage_mob((int)i, dmg);
+        if (m.alive) m.sleep_t = 8;
+      }
+      break;
+    case IT_WAND_CORRUPTION:
+      hit_area(1, 0);
+      break;
+    default:
+      if (hit_one(0) < 0) message("法术击中了空处。");
+      break;
   }
   it.charges--;
   fx_x = tx; fx_y = ty; fx_t = 8;
-  if (hits == 0) message("法术击中了空处。");
   targeting = false;
   target_item = -1;
   advance_turn();
 }
 
-// ---------------------------------------------------------------------------
-// Features
-// ---------------------------------------------------------------------------
 void Game::use_feature(int idx) {
   if (idx < 0 || idx >= (int)features.size()) return;
   Feature& f = features[idx];
@@ -777,6 +1032,8 @@ void Game::trigger_tile_features() {
   Feature& f = features[idx];
   if (f.type == F_TRAP) {
     int dmg = 3 + floor / 4;
+    if (levit_t > 0) dmg = 0;
+    if (ring_has(IT_RING_ELEMENTS)) dmg /= 2;
     if (shield > 0) {
       int a = std::min(shield, dmg);
       shield -= a;
@@ -809,7 +1066,7 @@ void Game::open_shop() {
     shop_sold[shop_n] = false;
     shop_n++;
   };
-  add(weapon_for_tier(tier), 1, 0);
+  add(weapon_for_tier_rand(*this, tier), 1, 0);
   add(armor_for_tier(tier), 1, 0);
   add(random_wand(*this, tier), 1, 0);
   add(IT_POTION_HEAL, 1, 0);
@@ -962,7 +1219,8 @@ void Game::attack(int idx, bool ranged, int bonus) {
   Mob& m = mobs[idx];
   if (!m.alive) return;
   if (is_npc(m.type)) { talk_npc(idx); return; }
-  int raw = hero_atk() + weapon_bonus() + ri(*this, 0, 2) + bonus;
+  int raw = hero_atk() + weapon_bonus() + ring_atk() + ri(*this, 0, 2) + bonus;
+  if (might_t > 0) raw += 3;
   if (ranged) raw += 1;
   damage_mob(idx, raw);
 }
@@ -1121,9 +1379,30 @@ void Game::tick(int dt_ms) {
 
 void Game::mob_turn(Mob& m) {
   if (!m.alive || is_npc(m.type)) return;
+  if (m.sleep_t > 0) { m.sleep_t--; return; }
   int dx = px - m.x, dy = py - m.y;
   int dist = absi(dx) + absi(dy);
-  bool sees = dist <= 8 && los(m.x, m.y, px, py);
+  if (m.terror_t > 0) {
+    m.terror_t--;
+    int ax = (dx > 0) ? -1 : 1, ay = (dy > 0) ? -1 : 1;
+    if (walkable(m.x + ax, m.y) && mob_at(m.x + ax, m.y) < 0) {
+      m.vx = (float)m.x; m.vy = (float)m.y; m.x += ax;
+    } else if (walkable(m.x, m.y + ay) && mob_at(m.x, m.y + ay) < 0) {
+      m.vx = (float)m.x; m.vy = (float)m.y; m.y += ay;
+    }
+    return;
+  }
+  if (rage_t > 0) {
+    for (size_t i = 0; i < mobs.size(); i++) {
+      Mob& o = mobs[i];
+      if (!o.alive || &o == &m || is_npc(o.type)) continue;
+      if (absi(o.x - m.x) <= 1 && absi(o.y - m.y) <= 1) {
+        damage_mob((int)i, m.atk + ri(*this, 0, 2));
+        return;
+      }
+    }
+  }
+  bool sees = dist <= 8 && los(m.x, m.y, px, py) && invis_t == 0;
   if (!sees) {
     if ((rnd(*this) % 100) < 15) {
       int d = ri(*this, 0, 3);
@@ -1136,7 +1415,7 @@ void Game::mob_turn(Mob& m) {
     return;
   }
   if (dist == 1) {
-    int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus());
+    int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus() - ring_def());
     if (shield > 0) {
       int a = std::min(shield, dmg);
       shield -= a; dmg -= a;
@@ -1165,7 +1444,8 @@ void Game::mob_turn(Mob& m) {
 }
 
 void Game::recharge_wands() {
-  if (turns % 15 != 0) return;
+  int period = ring_has(IT_RING_ENERGY) ? 10 : 15;
+  if (turns % period != 0) return;
   for (int i = 0; i < inv_n; i++)
     if (item_def(inv[i].id).kind == K_WAND) {
       uint8_t maxc = item_def(inv[i].id).max_charge;
@@ -1219,10 +1499,20 @@ void Game::advance_turn() {
   if (dead) return;
   turns++;
   if (turns % 12 == 0 && hp < maxhp) hp++;
+  if (haste_t > 0) haste_t--;
+  if (invis_t > 0) invis_t--;
+  if (might_t > 0) might_t--;
+  if (levit_t > 0) levit_t--;
+  if (mind_t > 0) mind_t--;
+  if (rage_t > 0) rage_t--;
+  if (ring_has(IT_RING_FORCE) && turns % 10 == 0) shield += 3;
   recharge_wands();
-  for (Mob& m : mobs) {
-    if (dead) break;
-    mob_turn(m);
+  bool skip = (haste_t > 0 || ring_has(IT_RING_HASTE)) && (turns % 2 == 0);
+  if (!skip) {
+    for (Mob& m : mobs) {
+      if (dead) break;
+      mob_turn(m);
+    }
   }
   recompute_fov();
   if (fx_t > 0) fx_t--;
@@ -1332,13 +1622,37 @@ void Game::dialog_choose(int i) {
 void Game::cast_or_throw(int x, int y) {
   if (target_item < 0 || target_item >= inv_n) { targeting = false; return; }
   Item& it = inv[target_item];
-  if (item_def(it.id).kind != K_BOMB) { targeting = false; return; }
+  uint8_t kind = item_def(it.id).kind;
+  if (kind != K_BOMB && kind != K_MISSILE) { targeting = false; return; }
   if (absi(x - px) + absi(y - py) > 6) { message("太远了，够不到。"); return; }
-  message("炸弹爆炸了！");
-  for (size_t i = 0; i < mobs.size(); i++) {
-    Mob& m = mobs[i];
-    if (!m.alive || is_npc(m.type)) continue;
-    if (absi(m.x - x) <= 1 && absi(m.y - y) <= 1) attack((int)i, true, 6);
+
+  if (kind == K_MISSILE) {
+    int mi = -1;
+    for (size_t i = 0; i < mobs.size(); i++) {
+      Mob& m = mobs[i];
+      if (!m.alive || is_npc(m.type)) continue;
+      if (absi(m.x - x) > 1 || absi(m.y - y) > 1) continue;
+      mi = (int)i;
+      break;
+    }
+    if (mi < 0) { message("投掷物没有命中。"); }
+    else {
+      damage_mob(mi, item_def(it.id).power + it.level * 2 + ri(*this, 0, 2));
+      message("投掷物命中了目标。");
+    }
+  } else {
+    int base = item_def(it.id).power;
+    if (it.id == IT_BOMB_FIRE) base += 3;
+    if (it.id == IT_BOMB_FROST) base += 1;
+    for (size_t i = 0; i < mobs.size(); i++) {
+      Mob& m = mobs[i];
+      if (!m.alive || is_npc(m.type)) continue;
+      if (absi(m.x - x) <= 1 && absi(m.y - y) <= 1) {
+        damage_mob((int)i, base + floor / 4);
+        if (it.id == IT_BOMB_FROST && m.alive) m.sleep_t = 10;
+      }
+    }
+    message("炸弹爆炸了！");
   }
   it.count--;
   if (it.count <= 0) remove_item(target_item, 1);
@@ -1348,11 +1662,8 @@ void Game::cast_or_throw(int x, int y) {
   advance_turn();
 }
 
-// ---------------------------------------------------------------------------
-// Save / load
-// ---------------------------------------------------------------------------
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 6;
+static const uint16_t SAVE_VERSION = 7;
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -1390,6 +1701,10 @@ bool Game::save(int slot) const {
   d.shield = (int16_t)shield;
   d.weapon = weapon; d.weapon_level = weapon_level;
   d.armor = armor; d.armor_level = armor_level;
+  d.ring1 = ring1; d.ring1_level = ring1_level;
+  d.ring2 = ring2; d.ring2_level = ring2_level;
+  d.haste_t = haste_t; d.invis_t = invis_t; d.might_t = might_t;
+  d.levit_t = levit_t; d.mind_t = mind_t; d.rage_t = rage_t;
   d.quest = quest;
   memcpy(d.tiles, tiles, sizeof(tiles));
   memcpy(d.seen, seen, sizeof(seen));
@@ -1397,11 +1712,12 @@ bool Game::save(int slot) const {
   for (int i = 0; i < d.mob_n; i++)
     d.mobs[i] = {(int16_t)mobs[i].x, (int16_t)mobs[i].y, (int16_t)mobs[i].hp,
                  (int16_t)mobs[i].maxhp, (int16_t)mobs[i].atk,
-                 (int16_t)mobs[i].def, mobs[i].type, (uint8_t)mobs[i].alive};
+                 (int16_t)mobs[i].def, mobs[i].type, (uint8_t)mobs[i].alive,
+                 mobs[i].sleep_t, mobs[i].terror_t};
   d.item_n = (uint16_t)std::min((int)items.size(), 48);
   for (int i = 0; i < d.item_n; i++)
-    d.items[i] = {(int16_t)items[i].x, (int16_t)items[i].y, items[i].id,
-                  items[i].level};
+    d.items[i] = {(int16_t)items[i].x, (int16_t)items[i].y,
+                  (int16_t)items[i].level, items[i].id};
   d.inv_n = (uint8_t)std::min(inv_n, BAG_CAP);
   for (int i = 0; i < d.inv_n; i++)
     d.inv[i] = {inv[i].id, inv[i].count, inv[i].level, inv[i].charges};
@@ -1448,6 +1764,10 @@ bool Game::load(int slot) {
   keys = d.keys; gold = d.gold; turns = d.turns; shield = d.shield;
   weapon = d.weapon; weapon_level = d.weapon_level;
   armor = d.armor; armor_level = d.armor_level;
+  ring1 = d.ring1; ring1_level = d.ring1_level;
+  ring2 = d.ring2; ring2_level = d.ring2_level;
+  haste_t = d.haste_t; invis_t = d.invis_t; might_t = d.might_t;
+  levit_t = d.levit_t; mind_t = d.mind_t; rage_t = d.rage_t;
   quest = d.quest;
   memcpy(tiles, d.tiles, sizeof(tiles));
   memcpy(seen, d.seen, sizeof(seen));
@@ -1458,6 +1778,7 @@ bool Game::load(int slot) {
     m.hp = d.mobs[i].hp; m.maxhp = d.mobs[i].maxhp;
     m.atk = d.mobs[i].atk; m.def = d.mobs[i].def;
     m.type = d.mobs[i].type; m.alive = d.mobs[i].alive != 0;
+    m.sleep_t = d.mobs[i].sleep_t; m.terror_t = d.mobs[i].terror_t;
     m.vx = (float)m.x; m.vy = (float)m.y;
     mobs.push_back(m);
   }

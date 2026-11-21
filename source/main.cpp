@@ -741,6 +741,21 @@ int main() {
           G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
         }
+        else if (want == 40 || want == 41) {
+          start_new_game(0);
+          G.add_item(IT_RING_MIGHT, 1, 1);
+          G.add_item(IT_RING_EVASION, 1, 0);
+          G.add_item(IT_KNIFE, 3, 0);
+          G.add_item(IT_SEED_SUNGRASS, 2, 0);
+          G.add_item(IT_POTION_HASTE, 1, 0);
+          G.add_item(IT_WAND_PRISMATIC, 1, 0);
+          G.add_item(IT_SCROLL_CHALLENGE, 1, 0);
+          G.backpack = true;
+          G.demo_lock = true;
+          g_bag_sel = (want == 41) ? 2 : 0;
+          g_bag_tab = 0;
+          g_bag_action = (want == 41);
+        }
         else if (want >= 25 && want <= 29) {
           int f = (want - 25) * 5 + 5;
           start_new_game(0);

@@ -59,6 +59,7 @@ struct Mob {
   uint8_t type = M_RAT;
   int hp = 1, maxhp = 1, atk = 1, def = 0;
   bool alive = true;
+  uint8_t sleep_t = 0, terror_t = 0;
 };
 
 struct FloorItem {
@@ -77,7 +78,7 @@ struct Item {
 // Binary save layout. Fixed-size on purpose: 3DS homebrew, no protobuf.
 struct MobDisk {
   int16_t x, y, hp, maxhp, atk, def;
-  uint8_t type, alive;
+  uint8_t type, alive, sleep_t, terror_t;
 };
 struct FloorItemDisk {
   int16_t x, y, level;
@@ -108,6 +109,8 @@ struct GameDisk {
   int16_t px, py, hp, maxhp, level, xp, xpnext;
   int16_t keys, gold, turns, shield;
   uint8_t weapon, weapon_level, armor, armor_level;
+  uint8_t ring1, ring1_level, ring2, ring2_level;
+  uint8_t haste_t, invis_t, might_t, levit_t, mind_t, rage_t;
   uint8_t quest;
   uint8_t tiles[MH][MW];
   uint8_t seen[MH][MW];
@@ -155,6 +158,9 @@ struct Game {
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
   uint8_t armor = IT_CLOTH_ARMOR, armor_level = 0;
+  uint8_t ring1 = IT_NONE, ring1_level = 0;
+  uint8_t ring2 = IT_NONE, ring2_level = 0;
+  uint8_t haste_t = 0, invis_t = 0, might_t = 0, levit_t = 0, mind_t = 0, rage_t = 0;
   uint8_t quest = 0;     // 0 none, 1 accepted, 2 complete
   int cursor_x = 1, cursor_y = 1;
   bool targeting = false;
@@ -226,6 +232,10 @@ struct Game {
   void give_loot(int tier, bool chest);
   int weapon_bonus() const;
   int armor_bonus() const;
+  int ring_atk() const;
+  int ring_def() const;
+  bool ring_has(uint8_t id) const;
+  void equip_ring(int idx);
   int hero_atk() const;
   int hero_def() const;
   void recharge_wands();

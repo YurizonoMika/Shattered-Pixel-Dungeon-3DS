@@ -64,7 +64,7 @@ static void draw_mob(const Mob& m, int camx, int camy) {
 }
 
 static void draw_feature(const Feature& f, int camx, int camy) {
-  if (!G.vis[f.y][f.x]) return;
+  if (!G.vis[f.y][f.x] && G.mind_t == 0) return;
   float x = (float)(f.x * 16 - camx);
   float y = (float)(f.y * 16 - camy);
   switch (f.type) {
@@ -194,7 +194,7 @@ static void draw_map() {
 
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
-    if (!G.vis[it.y][it.x]) continue;
+    if (!G.vis[it.y][it.x] && G.mind_t == 0) continue;
     float ix = (float)(it.x * 16 - camx);
     float iy = (float)(it.y * 16 - camy);
     float bob = sinf(TIME_S * 3.2f + it.x * 0.9f + it.y * 1.7f) * 1.5f;
@@ -207,7 +207,7 @@ static void draw_map() {
 
   // mobs
   for (const Mob& m : G.mobs) {
-    if (!m.alive || !G.vis[m.y][m.x]) continue;
+    if (!m.alive || (!G.vis[m.y][m.x] && G.mind_t == 0)) continue;
     draw_mob(m, camx, camy);
   }
 
@@ -361,8 +361,8 @@ static void draw_messages() {
   textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
-static const float BAG_X = 66, BAG_Y = 72, BAG_W = 36, BAG_H = 27;
-static const float BAG_GX = 38, BAG_GY = 28;
+static const float BAG_X = 66, BAG_Y = 84, BAG_W = 36, BAG_H = 24;
+static const float BAG_GX = 38, BAG_GY = 25;
 
 static const char* BAG_TABS[6] = {"全部", "药水", "卷轴", "法杖", "装备", "其他"};
 
@@ -422,7 +422,8 @@ static void draw_bag_action() {
   text_wrap(d.desc, 30, 102, 260, CLR_WHITE, 1.0f, 2.0f);
 
   const char* primary = "使用 (A)";
-  if (d.kind == K_WEAPON || d.kind == K_ARMOR) primary = "装备 (A)";
+  if (d.kind == K_WEAPON || d.kind == K_ARMOR || d.kind == K_RING)
+    primary = "装备 (A)";
   else if (d.kind == K_WAND || d.kind == K_BOMB) primary = "瞄准 (A)";
   else if (d.kind == K_QUEST) primary = "任务物品";
 
@@ -444,7 +445,12 @@ static void draw_backpack() {
   textf(150, 32, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
   if (G.armor_level) textf(250, 32, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
-  for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 46);
+  textf(14, 44, CLR_GREY, 1.0f, "戒指 %s", item_name(G.ring1));
+  if (G.ring1_level) textf(108, 44, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
+  textf(164, 44, CLR_GREY, 1.0f, " / %s", item_name(G.ring2));
+  if (G.ring2_level) textf(262, 44, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
+
+  for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 58);
 
   int vis[BAG_CAP];
   int n = bag_visible(vis);
@@ -455,16 +461,16 @@ static void draw_backpack() {
     if (i < n) {
       int idx = vis[i];
       const ItemDef& d = item_def(G.inv[idx].id);
-      draw_item_icon(G.inv[idx].id, x + 7, y + 2, 1.4f);
+      draw_item_icon(G.inv[idx].id, x + 8, y + 2, 1.3f);
       int num = d.kind == K_WAND ? G.inv[idx].charges : G.inv[idx].count;
       if (d.kind == K_WAND || num > 1)
-        textf(x + BAG_W - 11, y + BAG_H - 13, CLR_WHITE, 1.0f, "%d", num);
+        textf(x + BAG_W - 10, y + BAG_H - 12, CLR_WHITE, 1.0f, "%d", num);
       if (d.kind == K_WAND || d.kind == K_WEAPON || d.kind == K_ARMOR)
         draw_box(x + 2, y + 2, 3, 3, CLR_YELLOW, 0.55f);
     }
     if (i == g_bag_sel) draw_cursor(x, y, BAG_W, BAG_H, CLR_YELLOW, 0.6f, false);
   }
-  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 216, CLR_GREY, 1.0f);
+  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 212, CLR_GREY, 1.0f);
   if (g_bag_action) draw_bag_action();
 }
 
@@ -538,6 +544,10 @@ static void bag_primary_action() {
     g_bag_action = false;
   } else if (d.kind == K_WEAPON || d.kind == K_ARMOR) {
     G.equip_item(i);
+    g_bag_action = false;
+  } else if (d.kind == K_RING) {
+    G.equip_ring(i);
+    bag_clamp_sel();
     g_bag_action = false;
   } else {
     G.use_item(i);
@@ -634,7 +644,7 @@ void game_update() {
     if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dy * 5));
     if (IN.pressed(KEY_A) && bag_sel_inv() >= 0) g_bag_action = true;
     if (IN.tap) {
-      if (IN.tap_y >= 46 && IN.tap_y < 68 && IN.tap_x >= 10 && IN.tap_x < 310) {
+      if (IN.tap_y >= 58 && IN.tap_y < 80 && IN.tap_x >= 10 && IN.tap_x < 310) {
         int tab = (int)((IN.tap_x - 10) / 50);
         if (tab >= 0 && tab < 6) {
           g_bag_tab = tab;
