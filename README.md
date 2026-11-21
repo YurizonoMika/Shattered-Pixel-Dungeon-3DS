@@ -38,8 +38,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Saves](docs/screens/saves.png) | ![Game](docs/screens/game.png) |
 | **NPC dialog (top screen)** | **Backpack (SPD-style grid)** |
 | ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
-| **Item details / actions** | **Search effect (CheckedCell pulse)** |
-| ![Item actions](docs/screens/bag_item.png) | ![Search](docs/screens/search.png) |
+| **Item details / actions** | **Bag tabs (药水 filter)** |
+| ![Item actions](docs/screens/bag_item.png) | ![Bag tabs](docs/screens/bag_tabs.png) |
+| **Search effect (CheckedCell pulse)** | |
+| ![Search](docs/screens/search.png) | |
 
 ## Features
 
@@ -77,6 +79,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 - **SPD-style backpack**: a 5×5 (25-slot) grid with gold, capacity, equipped gear,
   item quantity/charge badges, a selection cursor, and a detail panel with
   name/description plus **使用 / 装备 / 丢弃 / 关闭** actions.
+- **Bag tabs** like SPD's bag types: 全部 / 药水 / 卷轴 / 法杖 / 装备 / 其他,
+  with item icons, **L/R** switching and direct touch on the tab bar.
 - Quick slots show stack counts or wand charges; extra items live in the bag.
 - **Targeting mode** for bombs and wands: cursor turns yellow, **A** uses, **B** cancels.
 - Bottom HUD: HP/shield, level/XP, floor, keys, gold, 2×4 quick slots, and four
@@ -103,7 +107,7 @@ ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
 | Game actions | **B** back to save list (auto-save), **X** backpack, **L** wait, **R** search, **START** pause |
 | Targeting | **A** cast/throw at cursor, **B** cancel |
-| Backpack | D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; touch supported |
+| Backpack | **L/R** switch tab (全部/药水/卷轴/法杖/装备/其他), D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; tabs and slots are touchable |
 | Dialog | **A / B / X / Y** pick the matching option |
 
 ## Building
@@ -241,6 +245,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 21 | Frozen mid-walk pose (animation check) |
 | 22 | Frozen search effect (CheckedCell + operate pose) |
 | 23 | Backpack with the item-detail panel open |
+| 24 | Backpack on the 药水 tab (filter demo) |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.

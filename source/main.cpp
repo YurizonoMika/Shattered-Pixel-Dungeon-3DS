@@ -741,12 +741,30 @@ int main() {
           G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
         }
+        else if (want == 24) {
+          start_new_game(0);
+          G.add_item(IT_SHORTSWORD, 1, 1);
+          G.add_item(IT_LEATHER_ARMOR, 1, 0);
+          G.add_item(IT_WAND_MAGIC, 1, 0);
+          G.add_item(IT_WAND_FIRE, 1, 0);
+          G.add_item(IT_SCROLL_UP, 2);
+          G.add_item(IT_POTION_HEAL, 3);
+          G.add_item(IT_BOMB, 2);
+          G.keys += 2;
+          G.gold += 40;
+          G.backpack = true;
+          G.demo_lock = true;
+          g_bag_sel = 0;
+          g_bag_tab = 1;
+          g_bag_action = false;
+        }
         else if (want == 23) {
           start_new_game(0);
           G.add_item(IT_WAND_FIRE, 1, 0);
           G.backpack = true;
           G.demo_lock = true;
           g_bag_sel = 0;
+          g_bag_tab = 0;
           g_bag_action = true;
         }
         else if (want == 22) {

@@ -38,10 +38,20 @@ enum ItemKind : uint8_t {
   K_QUEST,
 };
 
+// Bag tabs: 0 = all, 1..5 match ItemDef::cat.
+enum ItemCat : uint8_t {
+  CAT_POTION = 1,
+  CAT_SCROLL = 2,
+  CAT_WAND = 3,
+  CAT_GEAR = 4,
+  CAT_MISC = 5,
+};
+
 struct ItemDef {
   const char* name;
   const char* desc;
   uint8_t kind;
+  uint8_t cat;
   int8_t power;       // heal amount / weapon or armor bonus / wand damage
   uint8_t max_charge; // wands
   int16_t sprite;     // index into items.png (16x16 grid)

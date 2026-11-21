@@ -14,6 +14,7 @@ extern float TIME_S;
 extern float FPS;
 extern Scene SETTINGS_BACK;
 extern int g_bag_sel;
+extern int g_bag_tab;
 extern bool g_bag_action;
 
 void dlog(const char* fmt, ...);

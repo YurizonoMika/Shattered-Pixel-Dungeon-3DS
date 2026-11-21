@@ -3,6 +3,7 @@
 #include <algorithm>
 
 int g_bag_sel = 0;
+int g_bag_tab = 0;
 bool g_bag_action = false;
 
 static void tile_cell(uint8_t t, int& cx, int& cy) {
@@ -291,23 +292,63 @@ static void draw_messages() {
   textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
-static const float BAG_X = 66, BAG_Y = 58, BAG_W = 36, BAG_H = 29;
-static const float BAG_GX = 38, BAG_GY = 31;
+static const float BAG_X = 66, BAG_Y = 72, BAG_W = 36, BAG_H = 27;
+static const float BAG_GX = 38, BAG_GY = 28;
+
+static const char* BAG_TABS[6] = {"全部", "药水", "卷轴", "法杖", "装备", "其他"};
+
+static int bag_visible(int out[BAG_CAP]) {
+  int n = 0;
+  for (int i = 0; i < G.inv_n && i < BAG_CAP; i++) {
+    if (g_bag_tab == 0 || item_def(G.inv[i].id).cat == g_bag_tab)
+      out[n++] = i;
+  }
+  return n;
+}
+
+static int bag_sel_inv() {
+  int out[BAG_CAP];
+  int n = bag_visible(out);
+  return (g_bag_sel >= 0 && g_bag_sel < n) ? out[g_bag_sel] : -1;
+}
+
+static void bag_clamp_sel() {
+  int out[BAG_CAP];
+  int n = bag_visible(out);
+  if (g_bag_sel >= n) g_bag_sel = n > 0 ? n - 1 : 0;
+}
+
+static void draw_bag_tab(int i, float x, float y) {
+  bool sel = g_bag_tab == i;
+  draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, 49, 22, 1.4f);
+  if (sel) {
+    draw_box(x + 2, y + 2, 45, 18, C2D_Color32(255, 226, 120, 56), 0.52f);
+    draw_box(x + 2, y + 20, 45, 2, CLR_YELLOW, 0.55f);
+  }
+  if (i == 0) draw_icon(0, 48, 16, 16, x + 3, y + 3, 1.0f);
+  else if (i == 1) draw_item_icon(IT_POTION_HEAL, x + 3, y + 3, 1.0f);
+  else if (i == 2) draw_item_icon(IT_SCROLL_MAP, x + 3, y + 3, 1.0f);
+  else if (i == 3) draw_item_icon(IT_WAND_MAGIC, x + 3, y + 3, 1.0f);
+  else if (i == 4) draw_item_icon(IT_LEATHER_ARMOR, x + 3, y + 3, 1.0f);
+  else draw_item_icon(IT_BOMB, x + 3, y + 3, 1.0f);
+  text(BAG_TABS[i], x + 21, y + 5, sel ? CLR_YELLOW : CLR_WHITE, 1.0f);
+}
 
 static void draw_bag_action() {
-  if (g_bag_sel < 0 || g_bag_sel >= G.inv_n) return;
-  const ItemDef& d = item_def(G.inv[g_bag_sel].id);
+  int idx = bag_sel_inv();
+  if (idx < 0) return;
+  const ItemDef& d = item_def(G.inv[idx].id);
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.7f);
   draw_panel(16, 40, 288, 176, 2.0f);
-  draw_item_icon(G.inv[g_bag_sel].id, 30, 52, 2.0f);
+  draw_item_icon(G.inv[idx].id, 30, 52, 2.0f);
   text(d.name, 72, 50, CLR_YELLOW, 2.0f);
   char extra[40] = "";
   if (d.kind == K_WEAPON || d.kind == K_ARMOR)
-    snprintf(extra, sizeof(extra), "强化 +%d", G.inv[g_bag_sel].level);
+    snprintf(extra, sizeof(extra), "强化 +%d", G.inv[idx].level);
   else if (d.kind == K_WAND)
-    snprintf(extra, sizeof(extra), "充能 %d", G.inv[g_bag_sel].charges);
-  else if (G.inv[g_bag_sel].count > 1)
-    snprintf(extra, sizeof(extra), "数量 %d", G.inv[g_bag_sel].count);
+    snprintf(extra, sizeof(extra), "充能 %d", G.inv[idx].charges);
+  else if (G.inv[idx].count > 1)
+    snprintf(extra, sizeof(extra), "数量 %d", G.inv[idx].count);
   if (extra[0]) text(extra, 72, 78, CLR_GREY, 1.0f);
   text_wrap(d.desc, 30, 102, 260, CLR_WHITE, 1.0f, 2.0f);
 
@@ -327,29 +368,34 @@ static void draw_backpack() {
   text("背包", 14, 8, CLR_YELLOW, 2.0f);
   draw_item_icon(IT_GOLD, 210, 12, 1.0f);
   textf(230, 14, CLR_YELLOW, 1.0f, "%d", G.gold);
-  textf(258, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, BAG_CAP);
+  textf(260, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, BAG_CAP);
 
-  textf(14, 34, CLR_GREY, 1.0f, "武器: %s", item_name(G.weapon));
-  if (G.weapon_level) textf(120, 34, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
-  textf(164, 34, CLR_GREY, 1.0f, "护甲: %s", item_name(G.armor));
-  if (G.armor_level) textf(270, 34, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+  textf(14, 32, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
+  if (G.weapon_level) textf(112, 32, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
+  textf(150, 32, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
+  if (G.armor_level) textf(250, 32, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
+  for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 46);
+
+  int vis[BAG_CAP];
+  int n = bag_visible(vis);
   for (int i = 0; i < BAG_CAP; i++) {
     float x = BAG_X + (i % 5) * BAG_GX;
     float y = BAG_Y + (i / 5) * BAG_GY;
     draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, BAG_W, BAG_H, 1.4f);
-    if (i < G.inv_n) {
-      const ItemDef& d = item_def(G.inv[i].id);
-      draw_item_icon(G.inv[i].id, x + 6, y + 2, 1.5f);
-      int num = d.kind == K_WAND ? G.inv[i].charges : G.inv[i].count;
+    if (i < n) {
+      int idx = vis[i];
+      const ItemDef& d = item_def(G.inv[idx].id);
+      draw_item_icon(G.inv[idx].id, x + 7, y + 2, 1.4f);
+      int num = d.kind == K_WAND ? G.inv[idx].charges : G.inv[idx].count;
       if (d.kind == K_WAND || num > 1)
-        textf(x + BAG_W - 12, y + BAG_H - 13, CLR_WHITE, 1.0f, "%d", num);
+        textf(x + BAG_W - 11, y + BAG_H - 13, CLR_WHITE, 1.0f, "%d", num);
       if (d.kind == K_WAND || d.kind == K_WEAPON || d.kind == K_ARMOR)
         draw_box(x + 2, y + 2, 3, 3, CLR_YELLOW, 0.55f);
     }
     if (i == g_bag_sel) draw_cursor(x, y, BAG_W, BAG_H, CLR_YELLOW, 0.6f, false);
   }
-  text_c("方向键选择   A 查看/使用   B 关闭", 0, BOT_W, 214, CLR_GREY, 1.0f);
+  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 216, CLR_GREY, 1.0f);
   if (g_bag_action) draw_bag_action();
 }
 
@@ -385,8 +431,8 @@ static bool in_rect(float x, float y, float rx, float ry, float rw, float rh) {
 static void do_search() { G.search(); }
 
 static void bag_primary_action() {
-  int i = g_bag_sel;
-  if (i < 0 || i >= G.inv_n) return;
+  int i = bag_sel_inv();
+  if (i < 0) return;
   const ItemDef& d = item_def(G.inv[i].id);
   if (d.kind == K_QUEST) {
     G.message("这是任务物品，不能使用。");
@@ -401,12 +447,15 @@ static void bag_primary_action() {
   } else {
     G.use_item(i);
     g_bag_action = false;
+    bag_clamp_sel();
   }
 }
 
 static void bag_drop_action() {
-  if (G.drop_item(g_bag_sel)) {
-    if (g_bag_sel >= G.inv_n && g_bag_sel > 0) g_bag_sel--;
+  int i = bag_sel_inv();
+  if (i < 0) return;
+  if (G.drop_item(i)) {
+    bag_clamp_sel();
     g_bag_action = false;
   }
 }
@@ -418,7 +467,7 @@ static void activate_action(int i) {
   switch (i) {
     case 0: G.wait_turns(1); G.message("你等待了一回合。"); break;
     case 1: do_search(); break;
-    case 2: G.clear_path(); G.backpack = !G.backpack; g_bag_sel = 0; g_bag_action = false; break;
+    case 2: G.clear_path(); G.backpack = !G.backpack; g_bag_sel = 0; g_bag_tab = 0; g_bag_action = false; break;
     case 3: G.clear_path(); G.paused = 1; break;
   }
 }
@@ -480,16 +529,33 @@ void game_update() {
       return;
     }
     if (IN.pressed(KEY_B)) { G.backpack = false; return; }
+    if (IN.pressed(KEY_L) || IN.pressed(KEY_R)) {
+      g_bag_tab = (g_bag_tab + (IN.pressed(KEY_R) ? 1 : 5)) % 6;
+      g_bag_sel = 0;
+      g_bag_action = false;
+      return;
+    }
     if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dx));
     if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dy * 5));
-    if (IN.pressed(KEY_A) && g_bag_sel < G.inv_n) g_bag_action = true;
+    if (IN.pressed(KEY_A) && bag_sel_inv() >= 0) g_bag_action = true;
     if (IN.tap) {
+      if (IN.tap_y >= 46 && IN.tap_y < 68 && IN.tap_x >= 10 && IN.tap_x < 310) {
+        int tab = (int)((IN.tap_x - 10) / 50);
+        if (tab >= 0 && tab < 6) {
+          g_bag_tab = tab;
+          g_bag_sel = 0;
+          g_bag_action = false;
+        }
+        return;
+      }
+      int vis[BAG_CAP];
+      int n = bag_visible(vis);
       for (int i = 0; i < BAG_CAP; i++) {
         float x = BAG_X + (i % 5) * BAG_GX;
         float y = BAG_Y + (i / 5) * BAG_GY;
         if (in_rect(IN.tap_x, IN.tap_y, x, y, BAG_W, BAG_H)) {
           g_bag_sel = i;
-          if (i < G.inv_n) g_bag_action = true;
+          if (i < n) g_bag_action = true;
           return;
         }
       }
@@ -511,7 +577,7 @@ void game_update() {
 
   if (IN.pressed(KEY_A)) G.act_at(G.cursor_x, G.cursor_y, false);
   if (IN.pressed(KEY_Y)) G.act_at(G.cursor_x, G.cursor_y, true);
-  if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; g_bag_sel = 0; g_bag_action = false; }
+  if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; g_bag_sel = 0; g_bag_tab = 0; g_bag_action = false; }
   if (IN.pressed(KEY_L)) { G.wait_turns(1); G.message("你等待了一回合。"); }
   if (IN.pressed(KEY_R)) do_search();
 
