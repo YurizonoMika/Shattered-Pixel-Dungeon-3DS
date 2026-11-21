@@ -2067,6 +2067,16 @@ void Game::pick_item(int idx) {
   message(b);
 }
 
+void Game::close_door_if_clear(int x, int y) {
+  if (x < 0 || y < 0 || x >= MW || y >= MH) return;
+  if (tiles[y][x] != T_DOOR_OPEN) return;
+  if (x == px && y == py) return;
+  for (const Mob& m : mobs)
+    if (m.alive && m.x == x && m.y == y) return;
+  if (item_at(x, y) >= 0) return;  // SPD keeps doors open under heaps
+  tiles[y][x] = T_DOOR;
+}
+
 void Game::move_player(int dx, int dy) {
   int nx = px + dx, ny = py + dy;
   if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
@@ -2092,8 +2102,10 @@ void Game::move_player(int dx, int dy) {
     return;
   }
   pvx = (float)px; pvy = (float)py;
+  int ox = px, oy = py;
   px = nx;
   py = ny;
+  close_door_if_clear(ox, oy);
   recompute_fov();
   int it = item_at(px, py);
   if (it >= 0) pick_item(it);
@@ -2335,9 +2347,13 @@ void Game::mob_turn(Mob& m) {
     m.terror_t--;
     int ax = (dx > 0) ? -1 : 1, ay = (dy > 0) ? -1 : 1;
     if (walkable(m.x + ax, m.y) && mob_at(m.x + ax, m.y) < 0) {
+      int ox = m.x, oy = m.y;
       m.vx = (float)m.x; m.vy = (float)m.y; m.x += ax;
+      close_door_if_clear(ox, oy);
     } else if (walkable(m.x, m.y + ay) && mob_at(m.x, m.y + ay) < 0) {
+      int ox = m.x, oy = m.y;
       m.vx = (float)m.x; m.vy = (float)m.y; m.y += ay;
+      close_door_if_clear(ox, oy);
     }
     return;
   }
@@ -2360,7 +2376,9 @@ void Game::mob_turn(Mob& m) {
       if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
       if (tiles[ny][nx] == T_DOOR) tiles[ny][nx] = T_DOOR_OPEN;
       if (walkable(nx, ny) && mob_at(nx, ny) < 0 && !(nx == px && ny == py)) {
+        int ox = m.x, oy = m.y;
         m.vx = (float)m.x; m.vy = (float)m.y; m.x = nx; m.y = ny;
+        close_door_if_clear(ox, oy);
       }
     }
     return;
@@ -2385,7 +2403,9 @@ void Game::mob_turn(Mob& m) {
     if (!walkable(nx, ny) || mob_at(nx, ny) >= 0 || (nx == px && ny == py))
       return false;
     m.vx = (float)m.x; m.vy = (float)m.y;
+    int ox = m.x, oy = m.y;
     m.x = nx; m.y = ny;
+    close_door_if_clear(ox, oy);
     return true;
   };
   if (absi(dx) >= absi(dy)) {

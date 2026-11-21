@@ -766,6 +766,26 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 79) {
+          start_new_game(0);
+          int dx = -1, dy = -1;
+          for (int y = 1; y < MH - 1 && dx < 0; y++)
+            for (int x = 1; x < MW - 1; x++)
+              if (G.tiles[y][x] == T_DOOR) { dx = x; dy = y; break; }
+          if (dx >= 0) {
+            G.tiles[dy][dx] = T_DOOR_OPEN;
+            G.px = dx; G.py = dy; G.pvx = (float)dx; G.pvy = (float)dy;
+            int ex = dx, ey = dy;
+            if (G.walkable(dx + 1, dy)) ex = dx + 1;
+            else if (G.walkable(dx - 1, dy)) ex = dx - 1;
+            else if (G.walkable(dx, dy + 1)) ey = dy + 1;
+            else if (G.walkable(dx, dy - 1)) ey = dy - 1;
+            G.move_player(ex - dx, ey - dy);
+            dlog("[door] opened at %d,%d then moved to %d,%d -> tile %d",
+                 dx, dy, ex, ey, (int)G.tiles[dy][dx]);
+          }
+          G.demo_lock = true;
+        }
         else if (want == 78) {
           start_new_game(0);
           for (int y = 0; y < MH; y++)

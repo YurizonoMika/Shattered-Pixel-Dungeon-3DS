@@ -264,6 +264,7 @@ struct Game {
                    const char* o2 = nullptr, const char* o3 = nullptr);
   void dialog_choose(int i);
   void add_item(uint8_t id, int count = 1, int level = 0);
+  void close_door_if_clear(int x, int y);
   bool remove_item(int idx, int count = 1);
   int region() const { return region_of_floor(floor); }
   bool boss_alive() const;

@@ -108,6 +108,11 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   sleep and terror are applied by potions, scrolls, wands, seeds and bombs.
 - **Wands**: 13 types (single-target, AoE, beam, root, knockback, shield, heal,
   lifesteal, prismatic) with charges, recharge and per-wand behaviour.
+- **Doors auto-close**: entering opens a door; leaving closes it again only
+  when no character or floor item remains on the tile (SPD `Door.leave`).
+- **Wall occlusion**: wall tops, side-door faces and bottom-wall overhangs are
+  drawn **above characters**, so the bottom wall lip covers the part of a
+  character standing in front of it; characters can never occupy a wall tile.
 - **Fog of war**: SPD-style visible / visited / mapped / invisible states.
   Visited cells use the 0x99 black veil, scroll-mapped cells the blue
   `0x99193366` veil, unseen cells are black. Internal walls use SPD's split
@@ -455,6 +460,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 76 | Clean enemy gallery (no items/features) |
 | 77 | Jump next to a locked side door |
 | 78 | Visited / mapped fog test |
+| 79 | Door auto-close self-test (writes to log) |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |
