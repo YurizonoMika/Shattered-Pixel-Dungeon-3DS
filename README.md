@@ -101,11 +101,35 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 - ABXY dialog overlay with NPC portrait, name, text and four key actions.
 - Floor 25 victory screen after Yog-Dzewa.
 
+### Loot generation (ported from SPD)
+
+- Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**, plus one guaranteed
+  food drop (`Level.createItems()`).
+- Category weights follow SPD's combined generator deck: weapons 4, armor 3,
+  thrown/bombs 5, wands 4, potions 16, scrolls 16, food 2, gold 20, keys 1.
+- Item tiers use SPD's per-floor-set table
+  `{0,75,20,4,1} / {0,25,50,20,5} / {0,0,40,50,10} / {0,0,20,40,40} / {0,0,0,20,80}`,
+  so early floors mostly drop tier 2 and late floors tier 4–5.
+- Heap presentation: 1/20 skeleton, 5/20 chest, otherwise a floor heap; upgradable
+  items have a chance to become a **locked chest with a key** placed elsewhere.
+- Gold piles use SPD's range `30 + 10×depth … 60 + 20×depth`.
+- Mob drops are rare gold only (10%); bosses drop tier+1 equipment and a large purse.
+
+### Shops (ported from SPD)
+
+- One shopkeeper per region (floors 2/7/12/17/22), with **stock fixed per floor**:
+  a weapon and armor of the current tier, a wand, a healing potion, a scroll, food,
+  bombs, and a strength potion on tier 3+.
+- Price formula mirrors SPD: `value × quantity × 5 × (depth/5 + 1)`.
+- Bought items are marked sold and stay sold when revisiting the shop; stock, prices
+  and sold flags are part of the save file.
+
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v5): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v6): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
-floor items, features/traps, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
+floor items (including gold amounts and chest contents), features/traps, shop stock
+and sold flags, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
 run; leaving the game auto-saves. Slot files from older save formats are detected and
 ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 

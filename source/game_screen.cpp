@@ -475,17 +475,22 @@ static void draw_shop() {
   draw_item_icon(IT_GOLD, 218, 14, 1.0f);
   textf(238, 16, CLR_YELLOW, 1.0f, "%d", G.gold);
   for (int i = 0; i < G.shop_n; i++) {
-    float y = 40 + i * 32;
-    draw_button(14, y, BOT_W - 28, 28, "", i == G.shop_sel, 1.6f);
-    draw_item_icon(G.shop_items[i].id, 22, y + 6, 1.0f);
-    text(item_name(G.shop_items[i].id), 44, y + 8, CLR_WHITE, 1.0f);
+    float y = 34 + i * 26;
+    draw_button(12, y, BOT_W - 24, 24, "", i == G.shop_sel, 1.6f);
+    draw_item_icon(G.shop_items[i].id, 18, y + 4, 1.0f);
+    text(item_name(G.shop_items[i].id), 40, y + 6, CLR_WHITE, 1.0f);
+    if (G.shop_items[i].count > 1) {
+      char cnt[16];
+      snprintf(cnt, sizeof(cnt), "x%d", G.shop_items[i].count);
+      text(cnt, 130, y + 6, CLR_GREY, 1.0f);
+    }
     char price[24];
     if (G.shop_sold[i]) snprintf(price, sizeof(price), "已售");
     else snprintf(price, sizeof(price), "%d 金", G.shop_prices[i]);
-    text(price, BOT_W - 30 - text_w(price, 1.0f), y + 8,
+    text(price, BOT_W - 24 - text_w(price, 1.0f), y + 6,
          G.shop_sold[i] ? CLR_GREY : CLR_YELLOW, 1.0f);
   }
-  text_c("A 购买   B 关闭", 0, BOT_W, 214, CLR_GREY, 1.0f);
+  text_c("A 购买   B 关闭", 0, BOT_W, 220, CLR_GREY, 1.0f);
 }
 
 static void draw_pause() {

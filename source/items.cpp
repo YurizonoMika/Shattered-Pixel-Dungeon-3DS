@@ -37,6 +37,21 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
 
+// Base value in coins, loosely following SPD's item value scale.
+int item_value(uint8_t id) {
+  const ItemDef& d = item_def(id);
+  switch (d.kind) {
+    case K_USE: return id >= IT_SCROLL_MAP && id <= IT_SCROLL_TELE ? 40 : 30;
+    case K_FOOD: return 20;
+    case K_BOMB: return 30;
+    case K_KEY: return 10;
+    case K_WEAPON: return 40 + d.power * 10;
+    case K_ARMOR: return 35 + d.power * 10;
+    case K_WAND: return 80 + d.power * 10;
+    default: return 0;
+  }
+}
+
 void item_sprite_cell(uint8_t id, int& cx, int& cy) {
   int idx = item_def(id).sprite;
   if (idx < 0) { cx = 0; cy = 0; return; }

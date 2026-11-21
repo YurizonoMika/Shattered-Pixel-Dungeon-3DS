@@ -73,6 +73,7 @@ inline const ItemDef& item_def(uint8_t id) {
   return ITEM_DEFS[id < IT_COUNT ? id : 0];
 }
 const char* item_name(uint8_t id);
+int item_value(uint8_t id);
 void item_sprite_cell(uint8_t id, int& cx, int& cy);
 bool item_is_equipment(uint8_t id);
 bool item_is_stackable(uint8_t id);

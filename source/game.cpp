@@ -161,36 +161,100 @@ static uint8_t random_wand(Game& g, int tier) {
   return (roll & 1) ? IT_WAND_FIRE : IT_WAND_MAGIC;
 }
 
-void Game::give_loot(int tier, bool chest) {
-  int roll = ri(*this, 0, 99);
-  if (chest) roll = ri(*this, 0, 99);
-  if (roll < 22) {
-    add_item(IT_GOLD, ri(*this, 4, 10) + tier * 2);
-    message("你找到了金币。");
-  } else if (roll < 38) {
-    add_item(IT_POTION_HEAL, 1);
-    message("你找到了治疗药水。");
-  } else if (roll < 50) {
-    add_item(IT_SCROLL_MAP, 1);
-    message("你找到了探图卷轴。");
-  } else if (roll < 60) {
-    add_item(IT_FOOD_RATION, 1);
-    message("你找到了干粮。");
-  } else if (roll < 68) {
-    add_item(IT_BOMB, 1);
-    message("你找到了炸弹。");
-  } else if (roll < 76) {
-    add_item(IT_KEY, 1);
-    message("你找到了钥匙。");
-  } else if (roll < 87) {
-    add_item(weapon_for_tier(tier), 1, ri(*this, 0, tier - 1));
-    message("你找到了一件武器。");
-  } else if (roll < 95) {
-    add_item(armor_for_tier(tier), 1, ri(*this, 0, tier - 1));
-    message("你找到了一件护甲。");
+struct LootRoll {
+  uint8_t id = IT_GOLD;
+  uint8_t level = 0;
+  int gold = 0;
+};
+
+static int tier_for_floor(Game& g, int floor) {
+  static const int probs[5][5] = {
+      {0, 75, 20, 4, 1}, {0, 25, 50, 20, 5}, {0, 0, 40, 50, 10},
+      {0, 0, 20, 40, 40}, {0, 0, 0, 20, 80}};
+  int fs = (floor - 1) / 5;
+  if (fs < 0) fs = 0;
+  if (fs > 4) fs = 4;
+  int roll = ri(g, 0, 99);
+  int acc = 0;
+  for (int tier = 1; tier <= 5; tier++) {
+    acc += probs[fs][tier - 1];
+    if (roll < acc) return tier;
+  }
+  return 5;
+}
+
+// Category weights (combined first/second deck from SPD's Generator).
+static LootRoll roll_loot(Game& g, bool allowGold = true) {
+  static const int W[9] = {4, 3, 5, 4, 16, 16, 2, 20, 1};
+  enum { C_WEP, C_ARMOR, C_BOMB, C_WAND, C_POTION, C_SCROLL, C_FOOD, C_GOLD, C_KEY };
+  int total = 0;
+  int weights[9];
+  for (int i = 0; i < 9; i++) {
+    weights[i] = (i == C_GOLD && !allowGold) ? 0 : W[i];
+    total += weights[i];
+  }
+  int roll = ri(g, 0, total - 1);
+  int cat = 0, acc = 0;
+  for (int i = 0; i < 9; i++) {
+    acc += weights[i];
+    if (roll < acc) { cat = i; break; }
+  }
+  LootRoll r;
+  int floor = g.floor;
+  switch (cat) {
+    case C_WEP: {
+      int t = tier_for_floor(g, floor);
+      r.id = weapon_for_tier(t);
+      r.level = ri(g, 0, t >= 3 ? 1 : 0);
+      break;
+    }
+    case C_ARMOR: {
+      int t = tier_for_floor(g, floor);
+      r.id = armor_for_tier(t);
+      r.level = ri(g, 0, t >= 3 ? 1 : 0);
+      break;
+    }
+    case C_BOMB: r.id = IT_BOMB; break;
+    case C_WAND: r.id = random_wand(g, (floor - 1) / 5 + 1); break;
+    case C_POTION: {
+      int p = ri(g, 0, 99);
+      r.id = p < 45 ? IT_POTION_HEAL : (p < 60 ? IT_POTION_STR : IT_POTION_SHIELD);
+      break;
+    }
+    case C_SCROLL: {
+      int p = ri(g, 0, 99);
+      r.id = p < 40 ? IT_SCROLL_MAP : (p < 75 ? IT_SCROLL_UP : IT_SCROLL_TELE);
+      break;
+    }
+    case C_FOOD: r.id = (ri(g, 0, 2) == 0) ? IT_FOOD_MEAT : IT_FOOD_RATION; break;
+    case C_KEY: r.id = IT_KEY; break;
+    default:
+      r.id = IT_GOLD;
+      r.gold = ri(g, 30 + floor * 10, 60 + floor * 20);
+      break;
+  }
+  return r;
+}
+
+static void grant_loot(Game& g, const LootRoll& r) {
+  if (r.id == IT_GOLD) {
+    g.gold += r.gold;
+    g.message("你找到了金币。");
   } else {
-    add_item(random_wand(*this, tier), 1, 0);
-    message("你找到了一根法杖。");
+    g.add_item(r.id, 1, r.level);
+    char b[96];
+    snprintf(b, sizeof(b), "你找到了 %s", item_name(r.id));
+    g.message(b);
+  }
+}
+
+void Game::give_loot(int tier, bool chest) {
+  (void)tier;
+  LootRoll r = roll_loot(*this, true);
+  grant_loot(*this, r);
+  if (chest && ri(*this, 0, 2) == 0) {
+    LootRoll extra = roll_loot(*this, false);
+    grant_loot(*this, extra);
   }
 }
 
@@ -354,8 +418,6 @@ void Game::gen_level() {
       if (p.first >= 0) add_feature(type, p.first, p.second);
     }
   };
-  place_feature(F_CHEST, floor <= 3 ? 2 : 1);
-  if (reg == 1) place_feature(F_CHEST_LOCKED, 1);
   place_feature(F_WELL, 1);
   place_feature(F_BOOKSHELF, 1);
   place_feature(F_ALCHEMY, 1);
@@ -373,27 +435,45 @@ void Game::gen_level() {
     if (p.first >= 0) add_feature(F_TOKEN, p.first, p.second);
   }
 
-  // --- loot ---------------------------------------------------------------
-  int nloot = 5 + floor / 2;
-  for (int i = 0; i < nloot; i++) {
+  // --- loot (SPD createItems: 3/4/5 items at 60/30/10%, plus one food) ---
+  auto add_floor_item = [&](const LootRoll& r) {
     auto p = random_floor(false);
-    if (p.first < 0) continue;
+    if (p.first < 0) return;
+    items.push_back({p.first, p.second, r.id,
+                     (int16_t)(r.id == IT_GOLD ? r.gold : r.level)});
+  };
+  {
+    LootRoll food{IT_FOOD_RATION, 0, 0};
+    add_floor_item(food);
     int roll = ri(*this, 0, 99);
-    uint8_t id = IT_GOLD;
-    int lvl = 0;
-    if (roll < 22) id = IT_GOLD;
-    else if (roll < 34) id = IT_POTION_HEAL;
-    else if (roll < 44) id = IT_SCROLL_MAP;
-    else if (roll < 54) id = IT_FOOD_RATION;
-    else if (roll < 62) id = IT_BOMB;
-    else if (roll < 68) id = IT_KEY;
-    else if (roll < 78) { id = weapon_for_tier(reg + 1); lvl = ri(*this, 0, reg); }
-    else if (roll < 86) { id = armor_for_tier(reg + 1); lvl = ri(*this, 0, reg); }
-    else if (roll < 93) id = random_wand(*this, reg + 1);
-    else if (roll < 96) id = IT_POTION_STR;
-    else if (roll < 98) id = IT_SCROLL_UP;
-    else id = IT_SCROLL_TELE;
-    items.push_back({p.first, p.second, id, (uint8_t)lvl});
+    int nItems = 3 + (roll < 60 ? 0 : (roll < 90 ? 1 : 2));
+    for (int i = 0; i < nItems; i++) {
+      LootRoll lr = roll_loot(*this, true);
+      auto p = random_floor(false);
+      if (p.first < 0) continue;
+      bool locked = false;
+      uint8_t kind = item_def(lr.id).kind;
+      if ((kind == K_WEAPON || kind == K_ARMOR || kind == K_WAND) &&
+          ri(*this, 0, 3 - std::min<int>(lr.level, 3)) == 0)
+        locked = true;
+      int heap = ri(*this, 0, 19);
+      bool inChest = locked || heap <= 5;  // 1/20 skeleton, 5/20 chest
+      if (inChest) {
+        Feature f;
+        f.x = p.first; f.y = p.second;
+        f.type = locked ? F_CHEST_LOCKED : F_CHEST;
+        f.loot_id = lr.id; f.loot_level = lr.level; f.loot_gold = lr.gold;
+        features.push_back(f);
+        if (locked) {
+          auto kp = random_floor(false);
+          if (kp.first >= 0)
+            items.push_back({kp.first, kp.second, IT_KEY, 0});
+        }
+      } else {
+        items.push_back({p.first, p.second, lr.id,
+                         (int16_t)(lr.id == IT_GOLD ? lr.gold : lr.level)});
+      }
+    }
   }
 
   cursor_x = px;
@@ -451,7 +531,7 @@ bool Game::remove_item(int idx, int count) {
 }
 
 void Game::add_item(uint8_t id, int count, int level) {
-  if (id == IT_GOLD) { gold += count * 7; return; }
+  if (id == IT_GOLD) { gold += count; return; }
   if (id == IT_KEY) { keys += count; return; }
   const ItemDef& d = item_def(id);
   if (item_is_stackable(id)) {
@@ -600,19 +680,28 @@ void Game::use_feature(int idx) {
   int tier = region() + 1;
   switch (f.type) {
     case F_CHEST:
-      give_loot(tier, true);
+    case F_CHEST_LOCKED: {
+      if (f.type == F_CHEST_LOCKED) {
+        if (keys <= 0) { message("箱子锁住了，需要一把钥匙。"); return; }
+        keys--;
+      }
+      if (f.loot_id == IT_GOLD) {
+        gold += f.loot_gold;
+        message("箱子里装满了金币。");
+      } else if (f.loot_id != IT_NONE) {
+        add_item(f.loot_id, 1, f.loot_level);
+        char b[96];
+        snprintf(b, sizeof(b), "你找到了 %s", item_name(f.loot_id));
+        message(b);
+      } else {
+        give_loot(tier, true);
+      }
+      f.loot_id = IT_NONE;
+      f.loot_gold = 0;
       f.type = F_CHEST_OPEN;
-      message("你打开了箱子。");
       advance_turn();
       break;
-    case F_CHEST_LOCKED:
-      if (keys <= 0) { message("箱子锁住了，需要一把钥匙。"); return; }
-      keys--;
-      give_loot(tier + 1, true);
-      f.type = F_CHEST_OPEN;
-      message("你用钥匙打开了箱子。");
-      advance_turn();
-      break;
+    }
     case F_WELL:
       hp = maxhp;
       f.type = F_WELL_USED;
@@ -704,19 +793,31 @@ void Game::trigger_tile_features() {
 void Game::open_shop() {
   shop_open = true;
   shop_sel = 0;
-  int tier = region() + 1;
-  shop_items[0] = {IT_POTION_HEAL, 2, 0, 0};
-  shop_prices[0] = 20;
-  shop_items[1] = {IT_FOOD_RATION, 2, 0, 0};
-  shop_prices[1] = 14;
-  bool gear = (floor / 5) % 2 == 0;
-  uint8_t id = gear ? weapon_for_tier(tier) : armor_for_tier(tier);
-  shop_items[2] = {id, 1, 0, 0};
-  shop_prices[2] = 45 + tier * 10;
-  shop_items[3] = {random_wand(*this, tier), 1, 0, 0};
-  shop_prices[3] = 60 + tier * 12;
-  shop_n = (tier >= 2) ? 4 : 3;
-  for (int i = 0; i < 4; i++) shop_sold[i] = false;
+  if (shop_floor == floor) return;
+  shop_floor = floor;
+  shop_n = 0;
+  int tier = std::min(5, (floor - 1) / 5 + 1);
+  int mult = floor / 5 + 1;
+  auto add = [&](uint8_t id, int count, int level) {
+    if (shop_n >= 8) return;
+    Item it;
+    it.id = id; it.count = (uint8_t)count; it.level = (uint8_t)level;
+    it.charges = item_def(id).kind == K_WAND ? item_def(id).max_charge : 0;
+    shop_items[shop_n] = it;
+    int value = item_value(id) + level * 10;
+    shop_prices[shop_n] = value * count * 5 * mult;
+    shop_sold[shop_n] = false;
+    shop_n++;
+  };
+  add(weapon_for_tier(tier), 1, 0);
+  add(armor_for_tier(tier), 1, 0);
+  add(random_wand(*this, tier), 1, 0);
+  add(IT_POTION_HEAL, 1, 0);
+  int p = ri(*this, 0, 99);
+  add(p < 50 ? IT_SCROLL_MAP : (p < 80 ? IT_SCROLL_UP : IT_SCROLL_TELE), 1, 0);
+  add(IT_FOOD_RATION, 2, 0);
+  add(IT_BOMB, 2, 0);
+  if (tier >= 3) add(IT_POTION_STR, 1, 0);
   message("店主：看看有什么需要的吧。");
 }
 
@@ -768,6 +869,11 @@ void Game::talk_npc(int idx) {
 void Game::pick_item(int idx) {
   FloorItem fi = items[idx];
   items.erase(items.begin() + idx);
+  if (fi.id == IT_GOLD) {
+    gold += fi.level;
+    message("你拾取了一堆金币。");
+    return;
+  }
   if (fi.id == IT_AMULET) {
     add_item(IT_AMULET, 1);
     if (quest == 1) quest = 2;
@@ -835,12 +941,12 @@ void Game::damage_mob(int idx, int raw) {
     int tier = region() + 1;
     uint8_t drop = ((rnd(*this) & 1) ? weapon_for_tier(tier + 1)
                                      : armor_for_tier(tier + 1));
-    items.push_back({m.x, m.y, drop, (uint8_t)tier});
-    gold += 40 + tier * 20;
+    items.push_back({m.x, m.y, drop, (int16_t)tier});
+    gold += 150 + region() * 100;
     message("首领倒下了，掉落了强力装备。");
-  } else if ((rnd(*this) % 100) < 20) {
-    items.push_back({m.x, m.y,
-                     (uint8_t)((rnd(*this) & 1) ? IT_POTION_HEAL : IT_GOLD), 0});
+  } else if ((rnd(*this) % 100) < 10) {
+    items.push_back({m.x, m.y, IT_GOLD,
+                     (int16_t)ri(*this, 10 + floor * 5, 20 + floor * 8)});
   }
   while (xp >= xpnext) {
     xp -= xpnext;
@@ -1246,7 +1352,7 @@ void Game::cast_or_throw(int x, int y) {
 // Save / load
 // ---------------------------------------------------------------------------
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 5;
+static const uint16_t SAVE_VERSION = 6;
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -1302,10 +1408,20 @@ bool Game::save(int slot) const {
   d.feature_n = (uint8_t)std::min((int)features.size(), 64);
   for (int i = 0; i < d.feature_n; i++)
     d.features[i] = {(int16_t)features[i].x, (int16_t)features[i].y,
-                     features[i].aux, features[i].type, features[i].state};
+                     features[i].aux, features[i].loot_gold, features[i].type,
+                     features[i].state, features[i].loot_id,
+                     features[i].loot_level};
   memcpy(d.boss_dead, boss_dead, sizeof(boss_dead));
   d.tokens = tokens; d.token_quest = token_quest;
   d.smith_used = smith_used; d.imp_state = imp_state;
+  d.shop_n = (uint8_t)std::min(shop_n, 8);
+  d.shop_floor = (uint8_t)std::max(0, std::min(shop_floor, 25));
+  for (int i = 0; i < d.shop_n; i++) {
+    d.shop_items[i] = {shop_items[i].id, shop_items[i].count,
+                       shop_items[i].level, shop_items[i].charges};
+    d.shop_prices[i] = (int16_t)shop_prices[i];
+    d.shop_sold[i] = shop_sold[i] ? 1 : 0;
+  }
   char path[64];
   slot_path(slot, path, sizeof(path));
   FILE* f = fopen(path, "wb");
@@ -1352,12 +1468,27 @@ bool Game::load(int slot) {
   for (int i = 0; i < inv_n; i++)
     inv[i] = {d.inv[i].id, d.inv[i].count, d.inv[i].level, d.inv[i].charges};
   features.clear();
-  for (int i = 0; i < d.feature_n && i < 64; i++)
-    features.push_back({d.features[i].x, d.features[i].y, d.features[i].type,
-                        d.features[i].state, d.features[i].aux});
+  for (int i = 0; i < d.feature_n && i < 64; i++) {
+    Feature f;
+    f.x = d.features[i].x; f.y = d.features[i].y;
+    f.type = d.features[i].type; f.state = d.features[i].state;
+    f.aux = d.features[i].aux;
+    f.loot_id = d.features[i].loot_id;
+    f.loot_level = d.features[i].loot_level;
+    f.loot_gold = d.features[i].loot_gold;
+    features.push_back(f);
+  }
   memcpy(boss_dead, d.boss_dead, sizeof(boss_dead));
   tokens = d.tokens; token_quest = d.token_quest;
   smith_used = d.smith_used; imp_state = d.imp_state;
+  shop_n = std::min((int)d.shop_n, 8);
+  shop_floor = d.shop_floor ? d.shop_floor : -1;
+  for (int i = 0; i < shop_n; i++) {
+    shop_items[i] = {d.shop_items[i].id, d.shop_items[i].count,
+                     d.shop_items[i].level, d.shop_items[i].charges};
+    shop_prices[i] = d.shop_prices[i];
+    shop_sold[i] = d.shop_sold[i] != 0;
+  }
   memset(vis, 0, sizeof(vis));
   search_fx.clear();
   search_ms = 0;

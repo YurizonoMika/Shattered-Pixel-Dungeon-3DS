@@ -47,6 +47,9 @@ struct Feature {
   uint8_t type = F_CHEST;
   uint8_t state = 0;
   int16_t aux = 0;
+  uint8_t loot_id = 0;
+  uint8_t loot_level = 0;
+  int16_t loot_gold = 0;
 };
 
 struct Mob {
@@ -61,7 +64,7 @@ struct Mob {
 struct FloorItem {
   int x = 0, y = 0;
   uint8_t id = IT_NONE;
-  uint8_t level = 0;
+  int16_t level = 0;  // upgrade level, or coin amount for IT_GOLD
 };
 
 struct Item {
@@ -77,16 +80,16 @@ struct MobDisk {
   uint8_t type, alive;
 };
 struct FloorItemDisk {
-  int16_t x, y;
-  uint8_t id, level;
+  int16_t x, y, level;
+  uint8_t id;
 };
 struct ItemDisk {
   uint8_t id, count, level, charges;
 };
 
 struct FeatureDisk {
-  int16_t x, y, aux;
-  uint8_t type, state;
+  int16_t x, y, aux, loot_gold;
+  uint8_t type, state, loot_id, loot_level;
 };
 
 struct SearchFx {
@@ -118,6 +121,10 @@ struct GameDisk {
   FeatureDisk features[64];
   uint8_t boss_dead[5];
   uint8_t tokens, token_quest, smith_used, imp_state;
+  uint8_t shop_n, shop_floor;
+  ItemDisk shop_items[8];
+  int16_t shop_prices[8];
+  uint8_t shop_sold[8];
 };
 
 struct Game {
@@ -140,10 +147,10 @@ struct Game {
   uint8_t smith_used = 0;
   uint8_t imp_state = 0;
   bool shop_open = false;
-  int shop_sel = 0, shop_n = 0;
-  Item shop_items[4];
-  int shop_prices[4];
-  bool shop_sold[4];
+  int shop_sel = 0, shop_n = 0, shop_floor = -1;
+  Item shop_items[8];
+  int shop_prices[8];
+  bool shop_sold[8];
   Item inv[BAG_CAP];
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
