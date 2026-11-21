@@ -93,6 +93,9 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   3 seeds, keys/gold/quest items.
 - **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
   energy, force and elements, each with passive combat/economy effects.
+- **Scroll of Transmutation** now opens an inventory selector and changes the
+  chosen item into a random item of the same category (weapon tier is preserved),
+  instead of rolling a random inventory item.
 - **Status effects**: haste, invisibility, levitation, mind vision, might, rage,
   sleep and terror are applied by potions, scrolls, wands, seeds and bombs.
 - **Wands**: 13 types (single-target, AoE, beam, root, knockback, shield, heal,
@@ -343,6 +346,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 62–64 | Wandmaker / Blacksmith / Imp quest accepted |
 | 65 | Generate all 25 floors (smoke test) |
 | 70 | Alchemy UI |
+| 72 | Scroll of Transmutation item selector |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |

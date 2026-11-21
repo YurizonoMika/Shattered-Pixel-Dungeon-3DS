@@ -168,6 +168,9 @@ struct Game {
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
   int alchemy_sel = 0;
+  bool transmute_open = false;
+  int transmute_sel = 0;
+  int transmute_page = 0;
   bool shop_open = false;
   int shop_sel = 0, shop_n = 0, shop_floor = -1;
   int shop_mode = 0, shop_page = 0;  // 0 buy, 1 sell, 2 buyback
@@ -260,6 +263,8 @@ struct Game {
   void shop_buyback(int i);
   void harm_shopkeeper();
   void alchemy_brew(int recipe);
+  bool can_transmute(int idx) const;
+  void transmute_choose(int idx);
   void check_talents();
   int shop_sell_price(uint8_t id, int count, int level) const;
   void spawn_quest_miniboss();

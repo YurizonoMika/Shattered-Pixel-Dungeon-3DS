@@ -765,6 +765,17 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 72) {
+          start_new_game(0);
+          G.add_item(IT_SCROLL_TRANSMUTE, 1, 0);
+          G.add_item(IT_RING_MIGHT, 1, 1);
+          G.add_item(IT_POTION_HEAL, 2, 0);
+          G.add_item(IT_WAND_FIRE, 1, 0);
+          G.add_item(IT_KNIFE, 3, 0);
+          for (int i = 0; i < G.inv_n; i++)
+            if (G.inv[i].id == IT_SCROLL_TRANSMUTE) { G.use_item(i); break; }
+          G.demo_lock = true;
+        }
         else if (want == 70) {
           start_new_game(0);
           G.add_item(IT_SEED_SUNGRASS, 3, 0);

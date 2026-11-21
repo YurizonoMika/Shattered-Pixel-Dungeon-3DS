@@ -569,6 +569,35 @@ static void draw_alchemy() {
   text_c("A 炼金  B 关闭", 0, BOT_W, 202, CLR_GREY, 0.9f);
 }
 
+static int transmute_list(int out[]) {
+  int n = 0;
+  for (int i = 0; i < G.inv_n; i++)
+    if (G.can_transmute(i)) out[n++] = i;
+  return n;
+}
+
+static void draw_transmute() {
+  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 190), 0.66f);
+  draw_panel(8, 38, BOT_W - 16, 178, 2.0f);
+  text("嬗变：选择物品", 20, 44, CLR_YELLOW, 1.4f);
+  int list[BAG_MAX];
+  int n = transmute_list(list);
+  int pages = (n + 6) / 7;
+  if (pages < 1) pages = 1;
+  if (G.transmute_page >= pages) G.transmute_page = pages - 1;
+  for (int row = 0; row < 7; row++) {
+    int pos = G.transmute_page * 7 + row;
+    if (pos >= n) break;
+    int idx = list[pos];
+    float y = 68 + row * 19;
+    draw_button(16, y, BOT_W - 32, 18, "", pos == G.transmute_sel, 1.4f);
+    draw_item_icon(G.inv[idx].id, 22, y + 2, 0.9f);
+    text(item_name(G.inv[idx].id), 42, y + 3, CLR_WHITE, 0.9f);
+  }
+  textf(BOT_W - 52, 44, CLR_GREY, 0.8f, "%d/%d", G.transmute_page + 1, pages);
+  text_c("L/R 翻页  A 嬗变  B 取消", 0, BOT_W, 200, CLR_GREY, 0.9f);
+}
+
 static void draw_pause() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
   draw_panel(60, 52, 200, 150, 2.0f);
@@ -592,6 +621,7 @@ void game_draw_bottom() {
   if (G.paused) draw_pause();
   if (G.shop_open) draw_shop();
   if (G.alchemy_open) draw_alchemy();
+  if (G.transmute_open) draw_transmute();
 }
 
 // ---------------------------------------------------------------------------
@@ -701,6 +731,36 @@ void game_update() {
         }
       }
       return;
+    }
+    return;
+  }
+
+  if (G.transmute_open) {
+    int list[BAG_MAX];
+    int n = transmute_list(list);
+    if (IN.pressed(KEY_B)) { G.transmute_open = false; return; }
+    int pages = (n + 6) / 7;
+    if (pages < 1) pages = 1;
+    if (IN.pressed(KEY_L) && G.transmute_page > 0) { G.transmute_page--; G.transmute_sel = G.transmute_page * 7; }
+    if (IN.pressed(KEY_R) && G.transmute_page + 1 < pages) { G.transmute_page++; G.transmute_sel = G.transmute_page * 7; }
+    if (IN.dy && n > 0)
+      G.transmute_sel = std::max(0, std::min(n - 1, G.transmute_sel + IN.dy));
+    if (IN.pressed(KEY_A) && n > 0)
+      G.transmute_choose(list[G.transmute_sel]);
+    if (IN.tap) {
+      int list2[BAG_MAX];
+      int n2 = transmute_list(list2);
+      for (int row = 0; row < 7; row++) {
+        int pos = G.transmute_page * 7 + row;
+        if (pos >= n2) break;
+        float y = 68 + row * 19;
+        if (in_rect(IN.tap_x, IN.tap_y, 16, y, BOT_W - 32, 18)) {
+          G.transmute_sel = pos;
+          G.transmute_choose(list2[pos]);
+          return;
+        }
+      }
+      G.transmute_open = false;
     }
     return;
   }

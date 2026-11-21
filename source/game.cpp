@@ -804,16 +804,12 @@ void Game::use_item(int idx) {
         }
         message("更多敌人被召唤了出来！");
       } else if (it.id == IT_SCROLL_TRANSMUTE) {
-        remove_item(idx, 1);  // consume the scroll first
-        if (inv_n > 0) {
-          int i = ri(*this, 0, inv_n - 1);
-          char b[96];
-          snprintf(b, sizeof(b), "%s 被转化了。", item_name(inv[i].id));
-          remove_item(i, 1);
-          grant_loot(*this, roll_loot(*this, true));
-          message(b);
-        }
-        advance_turn();
+        int n = 0;
+        for (int i = 0; i < inv_n; i++) if (can_transmute(i)) n++;
+        if (n == 0) { message("没有可以嬗变的物品。"); return; }
+        transmute_open = true;
+        transmute_sel = 0;
+        transmute_page = 0;
         return;
       }
       break;
@@ -1753,6 +1749,100 @@ bool Game::drop_item(int idx) {
   message(b);
   remove_item(idx, 1);
   return true;
+}
+
+static uint8_t transmute_result(Game& g, uint8_t id) {
+  static const uint8_t WEP[5][3] = {
+      {IT_DAGGER, IT_SHORTSWORD, IT_CUDGEL},
+      {IT_LONGSWORD, IT_HAND_AXE, IT_SPEAR},
+      {IT_WARHAMMER, IT_SCIMITAR, IT_WHIP},
+      {IT_GREATAXE, IT_GREATSWORD, IT_HALBERD},
+      {IT_RUNEBLADE, IT_BATTLEAXE, IT_GIANT_HAMMER}};
+  static const uint8_t ARM[6] = {IT_CLOTH_ARMOR, IT_LEATHER_ARMOR, IT_MAIL,
+                                 IT_SCALE, IT_PLATE, IT_RUNE_ARMOR};
+  static const uint8_t WANDS[13] = {
+      IT_WAND_MAGIC, IT_WAND_FIRE, IT_WAND_FROST, IT_WAND_LIGHTNING,
+      IT_WAND_DISINTEGRATION, IT_WAND_CORROSION, IT_WAND_EARTH,
+      IT_WAND_BLAST, IT_WAND_CORRUPTION, IT_WAND_WARDING,
+      IT_WAND_REGROWTH, IT_WAND_TRANSFUSION, IT_WAND_PRISMATIC};
+  static const uint8_t RINGS[8] = {
+      IT_RING_MIGHT, IT_RING_ACCURACY, IT_RING_EVASION, IT_RING_HASTE,
+      IT_RING_WEALTH, IT_RING_ENERGY, IT_RING_FORCE, IT_RING_ELEMENTS};
+  static const uint8_t POTS[11] = {
+      IT_POTION_HEAL, IT_POTION_STR, IT_POTION_SHIELD, IT_POTION_HASTE,
+      IT_POTION_INVIS, IT_POTION_LEVITATE, IT_POTION_MIND, IT_POTION_XP,
+      IT_POTION_MIGHT, IT_POTION_TOXIC, IT_POTION_FLAME};
+  static const uint8_t SCRS[10] = {
+      IT_SCROLL_MAP, IT_SCROLL_UP, IT_SCROLL_TELE, IT_SCROLL_IDENTIFY,
+      IT_SCROLL_CURSE, IT_SCROLL_TERROR, IT_SCROLL_LULLABY,
+      IT_SCROLL_RECHARGE, IT_SCROLL_RAGE, IT_SCROLL_CHALLENGE};
+  static const uint8_t SEEDS[3] = {IT_SEED_SUNGRASS, IT_SEED_FIREBLOOM,
+                                   IT_SEED_BLINDWEED};
+  static const uint8_t MISS[4] = {IT_KNIFE, IT_DART, IT_JAVELIN, IT_DART_TIPPED};
+  static const uint8_t BOMBS[3] = {IT_BOMB, IT_BOMB_FIRE, IT_BOMB_FROST};
+  uint8_t kind = item_def(id).kind;
+  if (kind == K_WEAPON) {
+    int tier = (id == IT_RUNEBLADE || id == IT_BATTLEAXE ||
+                id == IT_GIANT_HAMMER) ? 5
+             : (id == IT_GREATAXE || id == IT_GREATSWORD ||
+                id == IT_HALBERD) ? 4
+             : (id == IT_WARHAMMER || id == IT_SCIMITAR || id == IT_WHIP) ? 3
+             : (id == IT_LONGSWORD || id == IT_HAND_AXE ||
+                id == IT_SPEAR) ? 2 : 1;
+    if (id == IT_PICKAXE) tier = 1;
+    return WEP[tier - 1][ri(g, 0, 2)];
+  }
+  if (kind == K_ARMOR) {
+    int idx = 0;
+    for (int i = 0; i < 6; i++) if (ARM[i] == id) idx = i;
+    int pick = ri(g, 0, 5);
+    if (pick == idx) pick = (pick + 1) % 6;
+    return ARM[pick];
+  }
+  if (kind == K_WAND) return WANDS[ri(g, 0, 12)];
+  if (kind == K_RING) return RINGS[ri(g, 0, 7)];
+  if (kind == K_USE) {
+    if (id >= IT_SCROLL_MAP && id <= IT_SCROLL_TRANSMUTE) {
+      int idx = ri(g, 0, 9);
+      return SCRS[idx];
+    }
+    return POTS[ri(g, 0, 10)];
+  }
+  if (kind == K_SEED) return SEEDS[ri(g, 0, 2)];
+  if (kind == K_MISSILE) return MISS[ri(g, 0, 3)];
+  if (kind == K_BOMB) return BOMBS[ri(g, 0, 2)];
+  return id;
+}
+
+bool Game::can_transmute(int idx) const {
+  if (idx < 0 || idx >= inv_n) return false;
+  uint8_t id = inv[idx].id;
+  if (id == IT_NONE || id == IT_KEY || id == IT_GOLD || id == IT_AMULET ||
+      id == IT_PICKAXE || id == IT_ANKH || id == IT_SCROLL_TRANSMUTE ||
+      item_def(id).kind == K_QUEST || item_def(id).kind == K_BAG)
+    return false;
+  uint8_t k = item_def(id).kind;
+  return k == K_WEAPON || k == K_ARMOR || k == K_WAND || k == K_RING ||
+         k == K_USE || k == K_SEED || k == K_MISSILE || k == K_BOMB;
+}
+
+void Game::transmute_choose(int idx) {
+  if (idx < 0 || idx >= inv_n || !can_transmute(idx)) return;
+  uint8_t old = inv[idx].id;
+  uint8_t nw = old;
+  for (int tries = 0; tries < 10 && nw == old; tries++)
+    nw = transmute_result(*this, old);
+  Item& item = inv[idx];
+  item.id = nw;
+  item.charges = item_def(nw).kind == K_WAND ? item_def(nw).max_charge : 0;
+  // consume one transmutation scroll
+  for (int i = 0; i < inv_n; i++)
+    if (inv[i].id == IT_SCROLL_TRANSMUTE) { remove_item(i, 1); break; }
+  transmute_open = false;
+  char b[96];
+  snprintf(b, sizeof(b), "%s 变成了 %s", item_name(old), item_name(nw));
+  message(b);
+  advance_turn();
 }
 
 void Game::check_talents() {
