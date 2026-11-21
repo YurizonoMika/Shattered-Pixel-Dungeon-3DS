@@ -259,12 +259,11 @@ static void draw_map() {
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
         int lb = (x > 0 && y + 1 < MH && wall_like(G.tiles[y + 1][x - 1])) ? 1 : 0;
         int idx = 192 + (rb ? 0 : 1) + (lb ? 0 : 2);
-        // Use only the 4px shadow strip at the bottom of the overhang tile so
-        // walls get contact shading without painting a black bar on the floor.
-        u32 otint = G.vis[y][x] ? 0x90FFFFFF : 0x90606060;
-        int cy = (idx / 16) * 16 + 12;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, cy, 16, 4, tx, ty + 12,
-                  1, 1, otint);
+        // Full wall-overhang material: brick lip + contact shadow, drawn on
+        // the floor cell above a wall (this is what makes the bottom wall
+        // visible from inside the room).
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                  16, 16, tx, ty, 1, 1, tint);
       } else if (!wall_like(tt) && (below == T_DOOR || below == T_DOOR_OPEN ||
                                     below == T_DOOR_LOCKED)) {
         int idx = below == T_DOOR_OPEN ? 225 : 224;

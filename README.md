@@ -379,8 +379,9 @@ Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
 
 - wall cells with floor **below** use the raised front face (`80..83`); cells
   with another wall below use the **internal-wall top material** (`144..159`).
-  Nothing is rotated: these are separate SPD tiles for front faces vs. wall
-  tops. Wall/floor joins get a 4px contact shadow (`192..207`),
+  The **bottom wall seen from inside a room** is the separate **overhang
+  material** (`192..207`) drawn on the floor cell above the wall; nothing is
+  rotated,
 - doors in horizontal walls use `112/113/114`; doors in vertical walls use the
   separate **side-door** material (`116` threshold plus `227/228` above), also
   no rotation,
