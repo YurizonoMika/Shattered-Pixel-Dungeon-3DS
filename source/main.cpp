@@ -801,12 +801,16 @@ int main() {
           SCENE = Scene::GAME;
           int bad = 0;
           int rule_failures = 0;
+          int variable_maps = 0, largest_width = 0, largest_height = 0;
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
             int strength = 0, upgrades = 0;
             for (int floor = 1; floor <= 25; ++floor) {
               G.floor = floor;
               G.gen_level();
+              if (floor % 5 != 0 && (G.map_width != LEGACY_MAP_SIZE || G.map_height != LEGACY_MAP_SIZE)) ++variable_maps;
+              largest_width = std::max(largest_width, G.map_width);
+              largest_height = std::max(largest_height, G.map_height);
               bool reached[MH][MW]{};
               std::vector<int> pending{G.py * MW + G.px};
               reached[G.py][G.px] = true;
@@ -822,12 +826,19 @@ int main() {
                     pending.push_back(ny * MW + nx);
                   }
               }
-              int locks = 0, available = 0;
+              int doors = 0, chests = 0, crystal_chests = 0, iron = 0, golden = 0, crystal = 0;
               for (int y = 0; y < MH; ++y)
-                for (int x = 0; x < MW; ++x) locks += G.tiles[y][x] == T_DOOR_LOCKED;
-              for (const Feature& f : G.features) locks += f.type == F_CHEST_LOCKED;
-              for (const FloorItem& it : G.items)
-                if (it.id == IT_KEY && reached[it.y][it.x]) ++available;
+                for (int x = 0; x < MW; ++x) doors += G.tiles[y][x] == T_DOOR_LOCKED;
+              for (const Feature& f : G.features) {
+                chests += f.type == F_CHEST_LOCKED;
+                crystal_chests += f.type == F_CHEST_CRYSTAL;
+              }
+              for (const FloorItem& it : G.items) {
+                if (!reached[it.y][it.x]) continue;
+                iron += it.id == IT_KEY;
+                golden += it.id == IT_GOLDEN_KEY;
+                crystal += it.id == IT_CRYSTAL_KEY;
+              }
               int regular = 0, sleeping = 0, food = 0;
               bool overlapping = false;
               for (const Mob& m : G.mobs) {
@@ -849,16 +860,60 @@ int main() {
                      (unsigned long)G.seed, floor, regular, sleeping, food, strength, upgrades, overlapping);
               }
               if (floor % 5 == 0) strength = upgrades = 0;
-              if (!exit || available < locks) {
+              if (!exit || iron < doors || golden < chests || crystal * 2 != crystal_chests) {
                 ++bad;
-                dlog("[generation] seed=%lu floor=%d exit=%d keys=%d/%d",
-                     (unsigned long)G.seed, floor, exit, available, locks);
+                dlog("[generation] seed=%lu floor=%d exit=%d iron=%d/%d gold=%d/%d crystal=%d/%d",
+                     (unsigned long)G.seed, floor, exit, iron, doors, golden, chests,
+                     crystal, crystal_chests);
               }
             }
           }
           dlog("[generation] 800 maps, %d failures", bad);
           dlog("[floor rules] 800 maps, %d failures", rule_failures);
+          dlog("[layout] non-legacy dimensions=%d/640 max width=%d max height=%d", variable_maps, largest_width, largest_height);
           G.new_run(0, 0x12345678);
+          G.demo_lock = true;
+        }
+        else if (want == 92) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.map_width = 48; G.map_height = 14;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          G.pvx = G.px = 42; G.pvy = G.py = 8;
+          for (int y = 5; y < 12; ++y)
+            for (int x = 39; x < 47; ++x) G.tiles[y][x] = T_FLOOR;
+          G.tiles[8][43] = T_DOOR_LOCKED;
+          G.features.push_back({42, 7, F_CHEST_LOCKED, 0, 0, IT_GOLD, 0, 10});
+          G.features.push_back({41, 7, F_CHEST_CRYSTAL, 0, 0, IT_POTION_HEAL});
+          G.features.push_back({41, 8, F_CHEST_CRYSTAL, 0, 0, IT_SCROLL_MAP});
+          G.features.push_back({42, 9, F_TRAP});
+          G.keys = 1; G.golden_keys = 0; G.crystal_keys = 1;
+          G.recompute_fov();
+          int turn = G.turns;
+          G.interact_at(42, 7);
+          bool gold_lock = G.keys == 1 && G.turns == turn;
+          G.interact_at(43, 8);
+          bool door = G.tiles[8][43] == T_DOOR && G.px == 42 && G.keys == 0 && G.turns == turn + 1;
+          G.interact_at(41, 7);
+          G.interact_at(41, 8);
+          bool crystal = G.features[1].type == F_CHEST_OPEN && G.features[2].type == F_CHEST_CRYSTAL && !G.crystal_keys;
+          G.search();
+          bool revealed = G.features[3].type == F_TRAP_FOUND;
+          int before = G.hp;
+          G.move_player(0, 1);
+          bool trap = revealed && G.features[3].type == F_TRAP_DISARMED && G.hp < before;
+          G.golden_keys = 2;
+          G.loot_remaining[3] = 1;
+          // Isolated debug slot, outside the front-end's slot range.
+          bool saved = G.save(92);
+          G.map_width = G.map_height = LEGACY_MAP_SIZE;
+          bool loaded = saved && G.load(92) && G.map_width == 48 && G.map_height == 14 &&
+              G.px == 42 && G.golden_keys == 2 && G.crystal_keys == 0 &&
+              G.loot_remaining[3] == 1 && G.features[3].type == F_TRAP_DISARMED;
+          if (saved) remove(DATA_DIR "/slot92.bin");
+          dlog("[interactions] gold=%d iron=%d crystal=%d trap=%d save=%d", gold_lock, door, crystal, trap, loaded);
+          G.cursor_x = G.px; G.cursor_y = G.py;
           G.demo_lock = true;
         }
         else if (want == 91) {
@@ -866,6 +921,7 @@ int main() {
           SCENE = Scene::GAME;
           G.floor = 2;
           G.gen_level();
+          G.map_width = G.map_height = LEGACY_MAP_SIZE;
           G.mobs.clear(); G.items.clear(); G.features.clear();
           memset(G.tiles, T_WALL, sizeof(G.tiles));
           G.pvx = G.px = 2; G.pvy = G.py = 10;
@@ -889,6 +945,7 @@ int main() {
         }
         else if (want == 88) {
           G.new_run(0, 0x12345678);
+          G.map_width = G.map_height = LEGACY_MAP_SIZE;
           SCENE = Scene::GAME;
           G.mobs.clear(); G.items.clear(); G.features.clear();
           memset(G.tiles, T_WALL, sizeof(G.tiles));
@@ -915,12 +972,14 @@ int main() {
         }
         else if (want == 85 || want == 86) {
           // Same geometry for all three states, at native and fractional zoom.
-          start_new_game(0);
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.map_width = G.map_height = LEGACY_MAP_SIZE;
           G.mobs.clear(); G.items.clear(); G.features.clear();
-          const int cx = MW / 2, cy = MH / 2;
-          for (int y = 0; y < MH; y++) {
-            for (int x = 0; x < MW; x++) {
-              G.tiles[y][x] = (x == 0 || y == 0 || x == MW - 1 || y == MH - 1)
+          const int cx = G.map_width / 2, cy = G.map_height / 2;
+          for (int y = 0; y < G.map_height; y++) {
+            for (int x = 0; x < G.map_width; x++) {
+              G.tiles[y][x] = (x == 0 || y == 0 || x == G.map_width - 1 || y == G.map_height - 1)
                                  ? T_WALL : T_FLOOR;
               G.seen[y][x] = G.vis[y][x] = true;
             }

@@ -1,4 +1,5 @@
 #include "game.h"
+#include "floor_layout.h"
 #include "pathfinder.h"
 
 void dlog(const char* fmt, ...);
@@ -133,6 +134,7 @@ bool Game::feature_blocking(int x, int y) const {
     switch (f.type) {
       case F_CHEST:
       case F_CHEST_LOCKED:
+      case F_CHEST_CRYSTAL:
       case F_CHEST_MIMIC:
       case F_WELL:
       case F_BOOKSHELF:
@@ -165,14 +167,14 @@ bool Game::boss_alive() const {
 }
 
 bool Game::walkable(int x, int y) const {
-  if (x < 0 || y < 0 || x >= MW || y >= MH) return false;
+  if (!in_map(x, y)) return false;
   if (feature_blocking(x, y)) return false;
   uint8_t t = tiles[y][x];
   return t == T_FLOOR || t == T_DOOR || t == T_DOOR_OPEN || t == T_STAIRS || t == T_WATER ||
          t == T_GRASS;
 }
 bool Game::blocks_sight(int x, int y) const {
-  if (x < 0 || y < 0 || x >= MW || y >= MH) return true;
+  if (!in_map(x, y)) return true;
   uint8_t t = tiles[y][x];
   return t == T_WALL || t == T_SECRET || t == T_DOOR || t == T_DOOR_LOCKED;
 }
@@ -212,8 +214,8 @@ void Game::message(const char* s) {
 void Game::recompute_fov() {
   memset(vis, 0, sizeof(vis));
   const int R = fov_radius;
-  for (int y = 0; y < MH; y++) {
-    for (int x = 0; x < MW; x++) {
+  for (int y = 0; y < map_height; y++) {
+    for (int x = 0; x < map_width; x++) {
       int dx = x - px, dy = y - py;
       if (dx * dx + dy * dy > R * R + 1) continue;
       if (los(px, py, x, y)) {
@@ -292,15 +294,23 @@ static int tier_for_floor(Game& g, int floor) {
   return 5;
 }
 
-// SPD Generator category decks. Levelgen uses the first/second deck
-// alternately; artifacts are mapped to a ring because this port has no
-// artifacts yet.
-static LootRoll roll_loot(Game& g, bool allowGold = true) {
+// Generator.random consumes the run's category deck. Default reward draws
+// use combined weights without advancing it. Artifacts share the ring slot
+// until the native artifact catalog is available.
+static LootRoll roll_loot(Game& g, bool allowGold = true, bool consume = false) {
   enum { C_WEP, C_ARMOR, C_WAND, C_RING, C_POTION, C_SCROLL, C_SEED, C_STONE,
          C_GOLD, C_MISSILE, C_COUNT };
-  bool firstDeck = (g.floor & 1) != 0;
-  int W[C_COUNT] = {2, firstDeck ? 2 : 1, 1, 1, 8, 8, 1, 1, 10,
-                    firstDeck ? 1 : 2};
+  static constexpr uint8_t weights[2][C_COUNT] = {
+      {2, 2, 1, 1, 8, 8, 1, 1, 10, 1}, {2, 1, 1, 1, 8, 8, 1, 1, 10, 2}};
+  static_assert(sizeof(g.loot_remaining) == C_COUNT);
+  if (consume && std::none_of(g.loot_remaining, g.loot_remaining + C_COUNT,
+                              [](uint8_t count) { return count != 0; })) {
+    std::copy_n(weights[g.loot_second_deck], C_COUNT, g.loot_remaining);
+    g.loot_second_deck = !g.loot_second_deck;
+  }
+  int W[C_COUNT];
+  for (int i = 0; i < C_COUNT; ++i)
+    W[i] = consume ? g.loot_remaining[i] : weights[0][i] + weights[1][i];
   int total = 0;
   for (int i = 0; i < C_COUNT; i++) {
     if (i == C_GOLD && !allowGold) W[i] = 0;
@@ -312,6 +322,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
     acc += W[i];
     if (roll < acc) { cat = i; break; }
   }
+  if (consume) --g.loot_remaining[cat];
   LootRoll r;
   int floor = g.floor;
   switch (cat) {
@@ -330,7 +341,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
     case C_WAND: r.id = random_wand(g, (floor - 1) / 5 + 1); break;
     case C_POTION: {
       static const uint8_t P[11] = {
-          IT_POTION_HEAL, IT_POTION_STR, IT_POTION_SHIELD, IT_POTION_HASTE,
+          IT_POTION_HEAL, IT_POTION_HEAL, IT_POTION_SHIELD, IT_POTION_HASTE,
           IT_POTION_INVIS, IT_POTION_LEVITATE, IT_POTION_MIND, IT_POTION_XP,
           IT_POTION_MIGHT, IT_POTION_TOXIC, IT_POTION_FLAME};
       r.id = P[ri(g, 0, 10)];
@@ -338,7 +349,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
     }
     case C_SCROLL: {
       static const uint8_t S[11] = {
-          IT_SCROLL_MAP, IT_SCROLL_UP, IT_SCROLL_TELE, IT_SCROLL_IDENTIFY,
+          IT_SCROLL_MAP, IT_SCROLL_MAP, IT_SCROLL_TELE, IT_SCROLL_IDENTIFY,
           IT_SCROLL_CURSE, IT_SCROLL_TERROR, IT_SCROLL_LULLABY,
           IT_SCROLL_RECHARGE, IT_SCROLL_RAGE, IT_SCROLL_CHALLENGE,
           IT_SCROLL_TRANSMUTE};
@@ -676,6 +687,7 @@ bool Game::try_respawn() {
 // Level generation
 // ---------------------------------------------------------------------------
 void Game::gen_level() {
+  map_width = map_height = LEGACY_MAP_SIZE;
   hero_combat = {};
   combat_fx.clear();
   combat_delay = 0;
@@ -734,6 +746,44 @@ void Game::gen_level() {
   bool shop_here = (floor == 6 || floor == 11 || floor == 16);
   bool imp_shop = (floor == 20 && imp_state == 2);
   bool quest_extra = !boss_floor && (floor == smith_floor || floor == imp_floor);
+  const bool shop = shop_here || imp_shop;
+  const int leaves = nspec + nsecret + int(shop) + int(quest_extra);
+  const bool eight = !boss_floor && nstd >= 5 && ri(*this, 0, 1) != 0;
+  int entrance_room = 0, exit_room = 0;
+  auto layout = boss_floor ? floor_layout::Layout{} :
+      floor_layout::build(nstd + 2, leaves, shop, eight, MW, MH,
+                          [&](int lo, int hi) { return ri(*this, lo, hi); });
+  if (!layout.rooms.empty()) {
+    map_width = layout.width; map_height = layout.height;
+    entrance_room = eight ? 2 : 0;
+    exit_room = eight ? 5 : 3;
+    for (int i = 0; i < int(layout.rooms.size()); ++i) {
+      const auto& p = layout.rooms[i];
+      GRoom r{p.x, p.y, p.w, p.h, p.x + p.w / 2, p.y + p.h / 2,
+              RK_STANDARD, SP_NONE, false};
+      int leaf = i - (nstd + 2);
+      if (i == entrance_room) r.kind = RK_ENTRANCE;
+      else if (i == exit_room) r.kind = RK_EXIT;
+      else if (leaf >= 0) {
+        if (shop && leaf == 0) r.kind = RK_SHOP;
+        else if (quest_extra && leaf == int(shop)) r.kind = RK_QUEST;
+        else if ((leaf -= int(shop) + int(quest_extra)) < nspec) {
+          r.kind = RK_SPECIAL;
+          r.spec = plan_special[floor - 1][leaf];
+          r.locked = spec_locked(r.spec);
+        } else r.kind = RK_SECRET;
+      }
+      for (int y = r.y + 1; y < r.y + r.h - 1; ++y)
+        for (int x = r.x + 1; x < r.x + r.w - 1; ++x) tiles[y][x] = T_FLOOR;
+      rooms.push_back(r);
+    }
+    for (const auto& e : layout.edges) {
+      auto& r = rooms[e.b];
+      uint8_t t = r.kind == RK_SECRET ? T_SECRET : r.locked ? T_DOOR_LOCKED : T_DOOR;
+      tiles[e.door.y][e.door.x] = t;
+      if (r.kind >= RK_SPECIAL) { r.door_x = e.door.x; r.door_y = e.door.y; }
+    }
+  } else {
   int required = 2 + nstd + nspec + nsecret + (shop_here ? 1 : 0) +
                  (imp_shop ? 1 : 0) + (quest_extra ? 1 : 0);
   if (required > 24) {
@@ -932,10 +982,12 @@ void Game::gen_level() {
     loops--;
   }
 
+  entrance_room = slot_to_room[start];
+  exit_room = slot_to_room[exit_slot];
+  }
+
   // Stairs, start position.
   room_count = (int)rooms.size();
-  int entrance_room = slot_to_room[start];
-  int exit_room = slot_to_room[exit_slot];
   const GRoom& er = rooms[entrance_room];
   const GRoom& xr = rooms[exit_room];
   px = er.cx; py = er.cy;
@@ -1062,14 +1114,20 @@ void Game::gen_level() {
         add_random_item(r, IT_SEED_SUNGRASS, 0);
         add_random_item(r, IT_SEED_FIREBLOOM, 0);
         break;
-      case SP_LIBRARY:
-        for (int x = r.x; x < r.x + r.w; x++)
-          if (!(r.door_y < r.y && x == r.door_x) &&
-              !(r.door_y == r.y && (x == r.x || x == r.x + r.w - 1)))
-            add_feature(F_BOOKSHELF, x, r.y);
-        add_random_item(r, IT_SCROLL_IDENTIFY, 0);
-        add_random_item(r, IT_SCROLL_CURSE, 0);
+      case SP_LIBRARY: {
+        const int book_y = r.y + 1;
+        const int approach_x = std::clamp(r.door_x, r.x + 1, r.x + r.w - 2);
+        const int approach_y = std::clamp(r.door_y, r.y + 1, r.y + r.h - 2);
+        for (int x = r.x + 1; x < r.x + r.w - 1; x++)
+          if (x != approach_x || book_y != approach_y)
+            add_feature(F_BOOKSHELF, x, book_y);
+        add_random_item(r, ri(*this, 0, 1) ? IT_SCROLL_IDENTIFY : IT_SCROLL_CURSE);
+        static constexpr uint8_t scrolls[] = {IT_SCROLL_IDENTIFY, IT_SCROLL_CURSE,
+            IT_SCROLL_MAP, IT_SCROLL_TELE, IT_SCROLL_RECHARGE, IT_SCROLL_TERROR};
+        for (int i = 1, n = (ri(*this, 1, 3) + ri(*this, 1, 3)) / 2; i < n; ++i)
+          add_random_item(r, scrolls[ri(*this, 0, 5)]);
         break;
+      }
       case SP_STORAGE:
         tiles[r.door_y][r.door_x] = T_FLOOR;
         add_feature(F_BARRICADE, r.door_x, r.door_y, 0, 2);
@@ -1083,9 +1141,9 @@ void Game::gen_level() {
       case SP_LAB: {
         int x = (rnd(*this) & 1) ? r.x + 1 : r.x + r.w - 2;
         int y = (rnd(*this) & 1) ? r.y + 1 : r.y + r.h - 2;
-        if (r.door_x < r.x) x = r.x + r.w - 2;
-        else if (r.door_x >= r.x + r.w) x = r.x + 1;
-        else if (r.door_y < r.y) y = r.y + r.h - 2;
+        if (r.door_x <= r.x) x = r.x + r.w - 2;
+        else if (r.door_x >= r.x + r.w - 1) x = r.x + 1;
+        else if (r.door_y <= r.y) y = r.y + r.h - 2;
         else y = r.y + 1;
         add_feature(F_ALCHEMY, x, y);
         add_random_item(r, IT_POTION_HEAL, 0);
@@ -1130,12 +1188,19 @@ void Game::gen_level() {
         add_random_item(r, IT_STONE_AUG, 0);
         add_random_item(r, (uint8_t)ri(*this, IT_RING_MIGHT, IT_RING_ELEMENTS), 0);
         break;
-      case SP_VAULT:
-        add_feature(F_CHEST_LOCKED, r.cx, r.cy);
-        add_random_item(r, IT_GOLD, 60 + floor * 20);
-        add_random_item(r, IT_GOLD, 60 + floor * 20);
-        add_random_item(r, random_wand(*this, (floor - 1) / 5 + 1), 0);
+      case SP_VAULT: {
+        // Two prizes on opposite sides, neither immediately inside the door.
+        // The second category falls back to a ring until artifacts exist.
+        int dx = 1, dy = 0;
+        if (grid_distance(r.cx - 1, r.cy, r.door_x, r.door_y) <= 1 ||
+            grid_distance(r.cx + 1, r.cy, r.door_x, r.door_y) <= 1) { dx = 0; dy = 1; }
+        const uint8_t wand = random_wand(*this, region() + 1);
+        const uint8_t ring = uint8_t(ri(*this, IT_RING_MIGHT, IT_RING_ELEMENTS));
+        const bool swap = ri(*this, 0, 1);
+        place_loot(r.cx - dx, r.cy - dy, {swap ? ring : wand}, F_CHEST_CRYSTAL);
+        place_loot(r.cx + dx, r.cy + dy, {swap ? wand : ring}, F_CHEST_CRYSTAL);
         break;
+      }
       default:
         break;
     }
@@ -1164,12 +1229,12 @@ void Game::gen_level() {
   }
 
   // Locked special rooms get a key somewhere in a standard room.
-  int locked_count = 0;
-  for (int y = 1; y < MH - 1; y++)
-    for (int x = 1; x < MW - 1; x++)
+  int locked_count = 0, locked_chests = 0;
+  for (int y = 1; y < map_height - 1; y++)
+    for (int x = 1; x < map_width - 1; x++)
       if (tiles[y][x] == T_DOOR_LOCKED) locked_count++;
   for (const Feature& f : features)
-    if (f.type == F_CHEST_LOCKED) locked_count++;
+    if (f.type == F_CHEST_LOCKED) locked_chests++;
   std::vector<int> std_rooms;
   for (int i = 0; i < (int)rooms.size(); i++)
     if (rooms[i].kind == RK_STANDARD) std_rooms.push_back(i);
@@ -1187,9 +1252,9 @@ void Game::gen_level() {
     }
     return std::pair<int, int>{-1, -1};
   };
-  auto drop_key = [&]() {
+  auto drop_key = [&](uint8_t id) {
     auto p = drop_cell();
-    if (p.first >= 0) add_item_at(p.first, p.second, IT_KEY, 0);
+    if (p.first >= 0) add_item_at(p.first, p.second, id, 0);
     return p.first >= 0;
   };
   // Standard loot (SPD RegularLevel.createItems).
@@ -1205,7 +1270,7 @@ void Game::gen_level() {
     } else if (upgradable && ri(*this, 0, 3 - std::min<int>(lr.level, 3)) == 0) {
       int type = floor > 1 && ri(*this, 0, 9) == 0 ? F_CHEST_MIMIC : F_CHEST_LOCKED;
       place_loot(p.first, p.second, lr, type);
-      if (type == F_CHEST_LOCKED && !drop_key()) features.back().type = F_CHEST;
+      if (type == F_CHEST_LOCKED && !drop_key(IT_GOLDEN_KEY)) features.back().type = F_CHEST;
     } else {
       place_loot(p.first, p.second, lr, roll == 0 ? int(F_REMAINS) :
                  roll <= 5 ? int(F_CHEST) : -1);
@@ -1220,7 +1285,8 @@ void Game::gen_level() {
     if (std_rooms.empty()) break;
     const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
     auto p = room_cell(r);
-    if (p.first >= 0) add_feature(F_TRAP, p.first, p.second);
+    if (p.first >= 0) add_feature(floor == 1 ? F_TRAP_FOUND : F_TRAP,
+                                  p.first, p.second, 0, floor == 1 ? 1 : 0);
   }
 
   // Quest token target.
@@ -1260,7 +1326,8 @@ void Game::gen_level() {
         if (dist[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) || item_at(x, y) >= 0) continue;
         if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
         int f = feature_at(x, y);
-        if (f >= 0 && (features[f].type == F_TRAP || features[f].type == F_PLANT)) continue;
+        if (f >= 0 && (features[f].type == F_TRAP || features[f].type == F_TRAP_FOUND ||
+                       features[f].type == F_PLANT)) continue;
         mobs.push_back(make_floor_mob(type, x, y, Mob::Sleeping));
         if (--remaining) type = next_spawn_type();
         return true;
@@ -1280,13 +1347,15 @@ void Game::gen_level() {
       auto p = drop_cell();
       if (p.first >= 0) add_item_at(p.first, p.second, id, 0);
     };
-    for (int i = 0; i < locked_count; i++) drop_key();
+    for (int i = 0; i < locked_count; i++) drop_key(IT_KEY);
+    for (int i = 0; i < locked_chests; i++) drop_key(IT_GOLDEN_KEY);
     for (const GRoom& r : rooms) {
       switch (r.spec) {
         case SP_POOL: supply(IT_POTION_INVIS); break;
         case SP_SENTRY: supply(IT_POTION_HASTE); break;
         case SP_STORAGE: supply(IT_POTION_FLAME); break;
         case SP_TRAPS: supply(IT_POTION_LEVITATE); break;
+        case SP_VAULT: supply(IT_CRYSTAL_KEY); break;
       }
     }
     supply(ri(*this, 0, 4) ? IT_FOOD_RATION : IT_FOOD_PASTY);
@@ -1296,7 +1365,7 @@ void Game::gen_level() {
     if (guaranteed & 2) supply(IT_SCROLL_UP);
     int itemRoll = ri(*this, 0, 99);
     int nItems = 3 + (itemRoll < 60 ? 0 : (itemRoll < 90 ? 1 : 2)) + (large ? 2 : 0);
-    for (int i = 0; i < nItems; i++) add_floor_item(roll_loot(*this, true));
+    for (int i = 0; i < nItems; i++) add_floor_item(roll_loot(*this, true, true));
   }
 
   cursor_x = px;
@@ -1380,7 +1449,10 @@ void Game::new_run(int hero_class, uint32_t s) {
   floor = 1;
   zoom = zoom_target = 1.0f;
   turns = 0;
-  keys = gold = shield = 0;
+  keys = golden_keys = crystal_keys = gold = shield = 0;
+  legacy_keys = false;
+  loot_second_deck = (seed >> 31) != 0;
+  memset(loot_remaining, 0, sizeof(loot_remaining));
   level = 1;
   xp = 0;
   xpnext = 10;
@@ -1433,6 +1505,8 @@ bool Game::remove_item(int idx, int count) {
 void Game::add_item(uint8_t id, int count, int level) {
   if (id == IT_GOLD) { gold += count; return; }
   if (id == IT_KEY) { keys += count; return; }
+  if (id == IT_GOLDEN_KEY) { golden_keys += count; return; }
+  if (id == IT_CRYSTAL_KEY) { crystal_keys += count; return; }
   const ItemDef& d = item_def(id);
   if (item_is_stackable(id)) {
     for (int i = 0; i < inv_n; i++) {
@@ -1549,12 +1623,14 @@ void Game::use_item(int idx) {
         if (weapon != IT_NONE) { weapon_level++; message("你的武器变得更强了。"); }
         else { armor_level++; message("你的护甲变得更强了。"); }
       } else if (it.id == IT_SCROLL_TELE) {
-        int tries = 0;
-        do {
-          px = ri(*this, 1, MW - 2);
-          py = ri(*this, 1, MH - 2);
-        } while ((!walkable(px, py) || mob_at(px, py) >= 0) && ++tries < 200);
+        for (int tries = 0; tries < 200; ++tries) {
+          int x = ri(*this, 1, map_width - 2), y = ri(*this, 1, map_height - 2);
+          if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
+          px = x; py = y;
+          break;
+        }
         pvx = (float)px; pvy = (float)py;
+        cursor_x = px; cursor_y = py;
         recompute_fov();
         message("你被传送到本层的另一个角落。");
       } else if (it.id == IT_SCROLL_IDENTIFY || it.id == IT_SCROLL_CURSE) {
@@ -1825,10 +1901,16 @@ void Game::use_feature(int idx) {
     }
     case F_CHEST:
     case F_REMAINS:
+    case F_CHEST_CRYSTAL:
     case F_CHEST_LOCKED: {
+      if (f.type == F_CHEST_CRYSTAL) {
+        if (crystal_keys <= 0) { message("这个宝箱需要一把水晶钥匙。"); return; }
+        --crystal_keys;
+      }
       if (f.type == F_CHEST_LOCKED) {
-        if (keys <= 0) { message("箱子锁住了，需要一把钥匙。"); return; }
-        keys--;
+        int& held = legacy_keys ? keys : golden_keys;
+        if (held <= 0) { message("箱子锁住了，需要一把金钥匙。"); return; }
+        held--;
       }
       if (f.loot_id == IT_GOLD) {
         gain_gold(*this, f.loot_gold);
@@ -1855,10 +1937,7 @@ void Game::use_feature(int idx) {
       advance_turn();
       break;
     case F_BOOKSHELF:
-      add_item(IT_SCROLL_UP, 1);
-      f.type = F_BOOKSHELF_USED;
-      message("你在书架上找到了一卷强化卷轴。");
-      advance_turn();
+      message("这里没有可以交互的东西。");
       break;
     case F_ALCHEMY:
       alchemy_open = true;
@@ -1915,25 +1994,35 @@ void Game::use_feature(int idx) {
   }
 }
 
-void Game::trigger_tile_features() {
-  int idx = feature_at(px, py);
-  if (idx < 0) return;
+void Game::trigger_trap(int idx, Mob* who) {
   Feature& f = features[idx];
-  if (f.type == F_TRAP) {
-    int dmg = 3 + floor / 4;
-    if (levit_t > 0) dmg = 0;
-    if (ring_has(IT_RING_ELEMENTS)) dmg /= 2;
-    if (shield > 0) {
-      int a = std::min(shield, dmg);
-      shield -= a;
-      dmg -= a;
-    }
-    hp -= dmg;
-    f.type = F_TRAP_FOUND;
-    message("你踩中了陷阱！");
-  } else if (f.type == F_PLANT) {
-    use_feature(idx);
+  if (f.type != F_TRAP_FOUND && (f.type != F_TRAP || who)) return;
+  if ((who && (who->type == M_BAT || who->type == M_SWARM || who->type == M_WRAITH ||
+               who->type == M_EYE)) || (!who && levit_t > 0)) return;
+  const bool dart = f.aux == 1;
+  int raw = 3 + floor / 4;
+  if (dart) {
+    const uint32_t a = rnd(*this) >> 16, b = rnd(*this) >> 16;
+    raw = 4 + int((a + b) * 5 / 131072);
   }
+  f.type = F_TRAP_DISARMED;
+  if (who) {
+    damage_mob(int(who - mobs.data()), raw);
+    return;
+  }
+  int dmg = dart ? std::max(0, raw - ri(*this, 0, armor_bonus())) : raw;
+  if (!dart && ring_has(IT_RING_ELEMENTS)) dmg /= 2;
+  const int absorbed = std::min(shield, dmg);
+  shield -= absorbed;
+  hp -= dmg - absorbed;
+  message(dart ? "陷阱射出了一支飞镖！" : "你踩中了陷阱！");
+}
+
+void Game::trigger_tile_features() {
+  const int idx = feature_at(px, py);
+  if (idx < 0) return;
+  if (features[idx].type == F_PLANT) use_feature(idx);
+  else trigger_trap(idx);
 }
 
 void Game::harm_shopkeeper() {
@@ -2221,7 +2310,7 @@ void Game::close_door_if_clear(int x, int y) {
 void Game::move_player(int dx, int dy) {
   if ((!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
   int nx = px + dx, ny = py + dy;
-  if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
+  if (!in_map(nx, ny)) return;
   if (feature_blocking(nx, ny)) return;
   if (tiles[ny][nx] == T_DOOR) {
     tiles[ny][nx] = T_DOOR_OPEN;
@@ -2229,8 +2318,11 @@ void Game::move_player(int dx, int dy) {
   } else if (tiles[ny][nx] == T_DOOR_LOCKED) {
     if (keys > 0) {
       keys--;
-      tiles[ny][nx] = T_DOOR_OPEN;
-      message("你用钥匙打开了门。");
+      tiles[ny][nx] = T_DOOR;
+      message("你用铁钥匙解开了门锁。");
+      recompute_fov();
+      advance_turn();
+      return;
     } else {
       message("门锁住了，需要一把钥匙。");
       return;
@@ -2364,6 +2456,11 @@ void Game::attack(int idx, bool ranged, int bonus) {
 }
 
 void Game::interact_at(int x, int y) {
+  if (!in_map(x, y)) return;
+  if (tiles[y][x] == T_DOOR_LOCKED && grid_distance(x, y, px, py) == 1) {
+    move_player(x - px, y - py);
+    return;
+  }
   int m = mob_at(x, y);
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
@@ -2412,7 +2509,7 @@ void Game::interact_at(int x, int y) {
 
 void Game::act_at(int x, int y, bool interact) {
   if (dialog || dead || shop_open) return;
-  if (x < 0 || y < 0 || x >= MW || y >= MH) return;
+  if (!in_map(x, y)) return;
   if (interact) { interact_at(x, y); return; }
   if (targeting) {
     if (target_item >= 0 && item_def(inv[target_item].id).kind == K_WAND)
@@ -2511,6 +2608,8 @@ void Game::mob_turn(Mob& m) {
     m.x = step % MW; m.y = step / MW;
     if (tiles[m.y][m.x] == T_DOOR) tiles[m.y][m.x] = T_DOOR_OPEN;
     close_door_if_clear(ox, oy);
+    const int trap = feature_at(m.x, m.y);
+    if (trap >= 0) trigger_trap(trap, &m);
     return true;
   };
   if (m.terror_t > 0) {
@@ -2579,7 +2678,8 @@ void Game::mob_turn(Mob& m) {
   m.ai = Mob::Wandering;
   m.target = -1;
   for (int tries = 0; tries < 16; ++tries) {
-    const int p = ri(*this, 0, MW * MH - 1);
+    const int x = ri(*this, 1, map_width - 2), y = ri(*this, 1, map_height - 2);
+    const int p = y * MW + x;
     if (passable(p)) { m.target = p; break; }
   }
 }
@@ -2615,7 +2715,7 @@ void Game::search() {
   }
   for (Feature& f : features) {
     if (f.type == F_TRAP &&
-        std::max(absi(f.x - px), absi(f.y - py)) <= R) {
+        vis[f.y][f.x] && grid_distance(f.x, f.y, px, py) <= R) {
       f.type = F_TRAP_FOUND;
       found = true;
     }
@@ -2707,7 +2807,7 @@ static uint8_t transmute_result(Game& g, uint8_t id) {
 bool Game::can_transmute(int idx) const {
   if (idx < 0 || idx >= inv_n) return false;
   uint8_t id = inv[idx].id;
-  if (id == IT_NONE || id == IT_KEY || id == IT_GOLD || id == IT_AMULET ||
+  if (id == IT_NONE || item_def(id).kind == K_KEY || id == IT_GOLD || id == IT_AMULET ||
       id == IT_PICKAXE || id == IT_ANKH || id == IT_SCROLL_TRANSMUTE ||
       item_def(id).kind == K_QUEST || item_def(id).kind == K_BAG)
     return false;
@@ -2845,6 +2945,8 @@ void Game::descend() {
     return;
   }
   floor++;
+  keys = golden_keys = crystal_keys = 0;
+  legacy_keys = false;
   gen_level();
   pvx = (float)px; pvy = (float)py;
   clear_path();
@@ -3036,7 +3138,7 @@ void Game::cast_or_throw(int x, int y) {
 }
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 9;
+static const uint16_t SAVE_VERSION = 10, LEGACY_SAVE_VERSION = 9;
 // Optional trailer: the original V9 header and slot metadata stay readable.
 struct SpawnDisk {
   uint32_t magic = 0x31575053; // SPW1
@@ -3044,6 +3146,16 @@ struct SpawnDisk {
   uint8_t room_count = 0, deck_count = 0;
   Game::SpawnRoom rooms[25]{};
   uint8_t deck[16]{};
+};
+struct MapDisk {
+  uint32_t magic = 0x3150414D; // MAP1
+  uint8_t width = 0, height = 0;
+  uint16_t golden_keys = 0;
+  uint8_t tiles[MH][MW]{};
+  uint8_t seen[MH][MW]{};
+  uint8_t legacy_keys = 0, loot_second_deck = 0;
+  uint8_t loot_remaining[10]{};
+  uint16_t crystal_keys = 0;
 };
 
 static void slot_path(int slot, char* out, size_t n) {
@@ -3087,8 +3199,10 @@ bool Game::save(int slot) const {
   d.haste_t = haste_t; d.invis_t = invis_t; d.might_t = might_t;
   d.levit_t = levit_t; d.mind_t = mind_t; d.rage_t = rage_t;
   d.quest = quest;
-  memcpy(d.tiles, tiles, sizeof(tiles));
-  memcpy(d.seen, seen, sizeof(seen));
+  for (int y = 0; y < LEGACY_MAP_SIZE; ++y) {
+    memcpy(d.tiles[y], tiles[y], sizeof(d.tiles[y]));
+    memcpy(d.seen[y], seen[y], sizeof(d.seen[y]));
+  }
   d.mob_n = (uint16_t)std::min((int)mobs.size(), 48);
   for (int i = 0; i < d.mob_n; i++)
     d.mobs[i] = {(int16_t)mobs[i].x, (int16_t)mobs[i].y, (int16_t)mobs[i].hp,
@@ -3150,7 +3264,17 @@ bool Game::save(int slot) const {
   sp.deck_count = uint8_t(std::min<size_t>(16, spawn_deck.size()));
   std::copy_n(spawn_rooms.begin(), sp.room_count, sp.rooms);
   std::copy_n(spawn_deck.begin(), sp.deck_count, sp.deck);
-  const bool ok = fwrite(&d, sizeof(d), 1, f) == 1 && fwrite(&sp, sizeof(sp), 1, f) == 1;
+  MapDisk map;
+  map.width = map_width; map.height = map_height;
+  map.golden_keys = std::clamp(golden_keys, 0, 65535);
+  map.crystal_keys = std::clamp(crystal_keys, 0, 65535);
+  map.legacy_keys = legacy_keys;
+  map.loot_second_deck = loot_second_deck;
+  memcpy(map.loot_remaining, loot_remaining, sizeof(loot_remaining));
+  memcpy(map.tiles, tiles, sizeof(tiles));
+  memcpy(map.seen, seen, sizeof(seen));
+  const bool ok = fwrite(&d, sizeof(d), 1, f) == 1 && fwrite(&sp, sizeof(sp), 1, f) == 1 &&
+                  fwrite(&map, sizeof(map), 1, f) == 1;
   return fclose(f) == 0 && ok;
 }
 
@@ -3164,9 +3288,15 @@ bool Game::load(int slot) {
   SpawnDisk sp;
   const bool have_spawn = fread(&sp, sizeof(sp), 1, f) == 1 &&
       sp.magic == 0x31575053 && sp.room_count <= 25 && sp.deck_count <= 16 && sp.remaining <= 150;
+  MapDisk map;
+  const bool have_map = fread(&map, sizeof(map), 1, f) == 1 && map.magic == 0x3150414D &&
+                        map.width >= 3 && map.width <= MW && map.height >= 3 && map.height <= MH;
   fclose(f);
-  if (!ok || d.magic != SAVE_MAGIC || d.version != SAVE_VERSION) return false;
-  if (d.floor < 1 || d.floor > 25) return false;
+  if (!ok || d.magic != SAVE_MAGIC ||
+      (d.version != LEGACY_SAVE_VERSION && (d.version != SAVE_VERSION || !have_map))) return false;
+  if (d.floor < 1 || d.floor > 25 || d.px < 0 || d.py < 0 ||
+      d.px >= (have_map ? map.width : LEGACY_MAP_SIZE) ||
+      d.py >= (have_map ? map.height : LEGACY_MAP_SIZE)) return false;
   seed = d.seed; rng = d.rng;
   floor = d.floor; hero = d.hero;
   px = d.px; py = d.py;
@@ -3179,8 +3309,25 @@ bool Game::load(int slot) {
   haste_t = d.haste_t; invis_t = d.invis_t; might_t = d.might_t;
   levit_t = d.levit_t; mind_t = d.mind_t; rage_t = d.rage_t;
   quest = d.quest;
-  memcpy(tiles, d.tiles, sizeof(tiles));
-  memcpy(seen, d.seen, sizeof(seen));
+  map_width = have_map ? map.width : LEGACY_MAP_SIZE;
+  map_height = have_map ? map.height : LEGACY_MAP_SIZE;
+  golden_keys = have_map ? map.golden_keys : 0;
+  crystal_keys = have_map ? map.crystal_keys : 0;
+  legacy_keys = !have_map || map.legacy_keys;
+  loot_second_deck = have_map ? map.loot_second_deck != 0 : (seed >> 31) != 0;
+  memcpy(loot_remaining, map.loot_remaining, sizeof(loot_remaining));
+  if (!have_map) memset(loot_remaining, 0, sizeof(loot_remaining));
+  if (have_map) {
+    memcpy(tiles, map.tiles, sizeof(tiles));
+    memcpy(seen, map.seen, sizeof(seen));
+  } else {
+    memset(tiles, T_WALL, sizeof(tiles));
+    memset(seen, 0, sizeof(seen));
+    for (int y = 0; y < LEGACY_MAP_SIZE; ++y) {
+      memcpy(tiles[y], d.tiles[y], sizeof(d.tiles[y]));
+      memcpy(seen[y], d.seen[y], sizeof(d.seen[y]));
+    }
+  }
   mobs.clear();
   for (int i = 0; i < d.mob_n && i < 48; i++) {
     Mob m;
@@ -3203,6 +3350,7 @@ bool Game::load(int slot) {
     Feature f;
     f.x = d.features[i].x; f.y = d.features[i].y;
     f.type = d.features[i].type; f.state = d.features[i].state;
+    if (!have_map && f.type == F_TRAP_FOUND) f.type = F_TRAP_DISARMED;
     f.aux = d.features[i].aux;
     f.loot_id = d.features[i].loot_id;
     f.loot_level = d.features[i].loot_level;
@@ -3264,7 +3412,7 @@ bool Game::load(int slot) {
     for (int i = 0; i < sp.room_count; ++i) {
       auto r = sp.rooms[i];
       if (r.w >= 3 && r.h >= 3 && r.x > 0 && r.y > 0 &&
-          r.x + r.w < MW && r.y + r.h < MH) spawn_rooms.push_back(r);
+          r.x + r.w < map_width && r.y + r.h < map_height) spawn_rooms.push_back(r);
     }
     if (std::all_of(sp.deck, sp.deck + sp.deck_count, [](uint8_t t) { return t < M_COUNT; }))
       spawn_deck.assign(sp.deck, sp.deck + sp.deck_count);
@@ -3289,7 +3437,7 @@ bool Game::slot_meta(int slot, SlotMeta& out) {
     GameDisk d{};
     bool ok = fread(&d, sizeof(d), 1, f) == 1;
     fclose(f);
-    if (!ok || d.version != SAVE_VERSION) return false;
+    if (!ok || (d.version != SAVE_VERSION && d.version != LEGACY_SAVE_VERSION)) return false;
     out = d.meta;
     out.used = true;
     return true;

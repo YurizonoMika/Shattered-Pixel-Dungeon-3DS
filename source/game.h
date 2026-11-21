@@ -4,8 +4,8 @@
 #include "items.h"
 #include "content.h"
 
-#define MW 41
-#define MH 41
+constexpr int MW = 64, MH = 64;
+constexpr int LEGACY_MAP_SIZE = 41;
 #define BAG_CAP 25
 #define BAG_MAX 40
 
@@ -45,6 +45,8 @@ enum FeatureType : uint8_t {
   F_CHEST_MIMIC,
   F_REMAINS,
   F_MIMIC_LOOT, // hidden payload; aux is the index of the active mimic
+  F_TRAP_DISARMED,
+  F_CHEST_CRYSTAL,
 };
 
 struct Feature {
@@ -135,8 +137,8 @@ struct GameDisk {
   uint8_t ring1, ring1_level, ring2, ring2_level;
   uint8_t haste_t, invis_t, might_t, levit_t, mind_t, rage_t;
   uint8_t quest;
-  uint8_t tiles[MH][MW];
-  uint8_t seen[MH][MW];
+  uint8_t tiles[LEGACY_MAP_SIZE][LEGACY_MAP_SIZE];
+  uint8_t seen[LEGACY_MAP_SIZE][LEGACY_MAP_SIZE];
   uint16_t mob_n;
   MobDisk mobs[48];
   uint16_t item_n;
@@ -172,6 +174,15 @@ struct Game {
   int px = 1, py = 1;
   int hp = 20, maxhp = 20, level = 1, xp = 0, xpnext = 10;
   int keys = 0, gold = 0, shield = 0;
+  int golden_keys = 0;
+  int crystal_keys = 0;
+  bool legacy_keys = false;
+  bool loot_second_deck = false;
+  uint8_t loot_remaining[10]{};
+  int map_width = LEGACY_MAP_SIZE, map_height = LEGACY_MAP_SIZE;
+  bool in_map(int x, int y) const {
+    return x >= 0 && y >= 0 && x < map_width && y < map_height;
+  }
   int turns = 0;
   uint8_t tiles[MH][MW]{};
   uint8_t seen[MH][MW]{};
@@ -304,6 +315,7 @@ struct Game {
   bool feature_blocking(int x, int y) const;
   void use_feature(int idx);
   void trigger_tile_features();
+  void trigger_trap(int idx, Mob* who = nullptr);
   void open_shop();
   void shop_buy(int i);
   void shop_sell(int i);

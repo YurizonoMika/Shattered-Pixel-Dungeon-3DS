@@ -34,7 +34,7 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"符文甲", "刻有守护符文的铠甲。", K_ARMOR, CAT_GEAR, 11, 0, 181},
     {"寒霜法杖", "冻结目标的法术，消耗 1 充能。", K_WAND, CAT_WAND, 6, 3, 210},
     {"闪电法杖", "范围闪电法术，消耗 1 充能。", K_WAND, CAT_WAND, 9, 3, 211},
-    {"钥匙", "用来打开上锁的门。", K_KEY, CAT_MISC, 0, 0, 55},
+    {"铁钥匙", "用来打开这一层的上锁房门。", K_KEY, CAT_MISC, 0, 0, 55},
     {"金币", "闪闪发光的金币。", K_GOLD, CAT_MISC, 0, 0, 18},
     {"幽魂护符", "幽魂遗失的护符，任务物品。", K_QUEST, CAT_MISC, 0, 0, 61},
     // --- more weapons ---
@@ -103,6 +103,8 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"强化石", "强化当前武器或护甲。", K_USE, CAT_MISC, 0, 0, 337},
     {"淬毒飞镖", "命中后附加毒素/催眠。", K_MISSILE, CAT_MISC, 6, 0, 167},
     {"镐", "可以砸开路障的沉重工具。", K_WEAPON, CAT_GEAR, 6, 0, 468},
+    {"金钥匙", "可以打开这一层的上锁宝箱。", K_KEY, CAT_MISC, 0, 0, 56},
+    {"水晶钥匙", "可以打开这一层的水晶宝箱。", K_KEY, CAT_MISC, 0, 0, 57},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }

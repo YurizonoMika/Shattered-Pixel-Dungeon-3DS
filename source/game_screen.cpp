@@ -210,8 +210,9 @@ static void draw_feature(const Feature& f, int camx, int camy) {
       break;
     case F_CHEST:
     case F_CHEST_LOCKED:
+    case F_CHEST_CRYSTAL:
     case F_CHEST_MIMIC: {
-      int spr = f.type == F_CHEST_LOCKED ? 37 : 36;
+      int spr = f.type == F_CHEST_CRYSTAL ? 38 : f.type == F_CHEST_LOCKED ? 37 : 36;
       draw_tile_world(A_items, (spr % 16) * 16, (spr / 16) * 16, wx, wy + 1,
                       z, camx, camy, 0);
       break;
@@ -243,6 +244,9 @@ static void draw_feature(const Feature& f, int camx, int camy) {
     case F_TRAP_FOUND:
       draw_icon(32, 32, 14, 14, x + 1 * z, y + 1 * z, z, CLR_RED);
       break;
+    case F_TRAP_DISARMED:
+      draw_icon(32, 32, 14, 14, x + 1 * z, y + 1 * z, z, 0xFFA0A0A0);
+      break;
     case F_TOKEN: {
       float bob = sinf(TIME_S * 3.0f + f.x) * 1.5f;
       draw_item_icon(IT_DWARF_TOKEN, x, y + bob * z, z);
@@ -255,7 +259,7 @@ static void draw_feature(const Feature& f, int camx, int camy) {
 
 // SPD FogOfWar: 0 visible, 1 visited, 2 mapped (scroll), 3 invisible.
 static int fog_level(int x, int y) {
-  if (x < 0 || y < 0 || x >= MW || y >= MH) return 3;
+  if (!G.in_map(x, y)) return 3;
   if (G.vis[y][x]) return 0;
   if (G.seen[y][x] & 1) return 1;
   if (G.seen[y][x] & 2) return 2;
@@ -276,8 +280,8 @@ static void draw_fog(int camx, int camy) {
   float cell = 16 * z;
   int tx0 = std::max(0, (int)(camx / cell) - 1);
   int ty0 = std::max(0, (int)(camy / cell) - 1);
-  int tx1 = std::min(MW - 1, tx0 + (int)(TOP_W / cell) + 3);
-  int ty1 = std::min(MH - 1, ty0 + (int)(TOP_H / cell) + 3);
+  int tx1 = std::min(G.map_width - 1, tx0 + (int)(TOP_W / cell) + 3);
+  int ty1 = std::min(G.map_height - 1, ty0 + (int)(TOP_H / cell) + 3);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
       int x0 = (int)roundf(x * cell - camx);
@@ -339,8 +343,12 @@ static void draw_map() {
   if (cx > camx + TOP_W - 44) camx = cx - (TOP_W - 44);
   if (cy < camy + 44) camy = cy - 44;
   if (cy > camy + TOP_H - 44) camy = cy - (TOP_H - 44);
-  camx = std::max(0, std::min(camx, (int)(MW * cell) - TOP_W));
-  camy = std::max(0, std::min(camy, (int)(MH * cell) - TOP_H));
+  auto clamp_camera = [&](int offset, int tiles, int screen) {
+    int extent = int(tiles * cell) - screen;
+    return extent < 0 ? extent / 2 : std::clamp(offset, 0, extent);
+  };
+  camx = clamp_camera(camx, G.map_width, TOP_W);
+  camy = clamp_camera(camy, G.map_height, TOP_H);
   G.camx = camx;
   G.camy = camy;
 
@@ -348,8 +356,8 @@ static void draw_map() {
 
   int tx0 = std::max(0, (int)(camx / cell) - 1);
   int ty0 = std::max(0, (int)(camy / cell) - 1);
-  int tx1 = std::min(MW - 1, tx0 + (int)(TOP_W / cell) + 3);
-  int ty1 = std::min(MH - 1, ty0 + (int)(TOP_H / cell) + 3);
+  int tx1 = std::min(G.map_width - 1, tx0 + (int)(TOP_W / cell) + 3);
+  int ty1 = std::min(G.map_height - 1, ty0 + (int)(TOP_H / cell) + 3);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) continue;
@@ -580,11 +588,18 @@ static void draw_status() {
   draw_box(122, 16, 70, 6, C2D_Color32(30, 34, 46, 255), 0.4f);
   float xf = G.xpnext > 0 ? (float)G.xp / G.xpnext : 0;
   draw_box(122, 16, 70 * xf, 6, C2D_Color32(80, 150, 240, 255), 0.41f);
-  // depth (top right), keys + gold on the second line
+  // Floor and gold on the first line; three key counters on the second.
   textf(196, 3, CLR_WHITE, 1.0f, "%s %d", REGIONS[G.region()].name, G.floor);
-  draw_item_icon(IT_KEY, 196, 15, 1.0f);
-  textf(214, 17, CLR_WHITE, 1.0f, "x%d", G.keys);
-  textf(252, 17, CLR_YELLOW, 1.0f, "%d 金", G.gold);
+  char gold[24];
+  snprintf(gold, sizeof(gold), "%d 金", G.gold);
+  text(gold, BOT_W - 4 - text_w(gold), 3, CLR_YELLOW);
+  const uint8_t key_items[] = {IT_KEY, IT_GOLDEN_KEY, IT_CRYSTAL_KEY};
+  const int counts[] = {G.keys, G.golden_keys, G.crystal_keys};
+  for (int i = 0; i < 3; ++i) {
+    const int x = 195 + i * 41;
+    draw_item_icon(key_items[i], x, 14, 1.0f);
+    textf(x + 15, 17, CLR_WHITE, 1.0f, "%d", counts[i]);
+  }
 }
 
 static void draw_quickslots() {
@@ -1165,8 +1180,8 @@ void game_update() {
   }
 
   // Cursor movement.
-  if (IN.dx) G.cursor_x = std::max(0, std::min(MW - 1, G.cursor_x + IN.dx));
-  if (IN.dy) G.cursor_y = std::max(0, std::min(MH - 1, G.cursor_y + IN.dy));
+  if (IN.dx) G.cursor_x = std::clamp(G.cursor_x + IN.dx, 0, G.map_width - 1);
+  if (IN.dy) G.cursor_y = std::clamp(G.cursor_y + IN.dy, 0, G.map_height - 1);
 
   if (IN.pressed(KEY_A)) G.act_at(G.cursor_x, G.cursor_y, false);
   if (IN.pressed(KEY_Y)) G.act_at(G.cursor_x, G.cursor_y, true);

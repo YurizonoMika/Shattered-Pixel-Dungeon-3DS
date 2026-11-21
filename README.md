@@ -480,6 +480,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 88 | Check long hero route, door closure, and pursuit of a last-seen target |
 | 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
 | 91 | Check one-turn respawn retry and consumption of the remaining monster deck |
+| 92 | Check typed locks, trap reveal and activation, and a save round-trip on a 48×14 map |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |
