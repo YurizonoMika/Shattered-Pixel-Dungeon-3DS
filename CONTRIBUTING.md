@@ -32,6 +32,15 @@ entry (see README) to jump directly to the screen you are working on.
 - Do not commit ROMs, commercial assets, or anything you do not have the right to
   redistribute.
 
+## Release notes / 发布日志
+
+Write GitHub release notes in Simplified Chinese and English. Keep the published
+text in `docs/releases/<tag>.md` and update both `README.md` and `README.zh-CN.md`
+when downloads or compatibility change.
+
+GitHub 发布日志须有简体中文和英文两个版本，正文保存在
+`docs/releases/<tag>.md`。下载地址或兼容性有变动时，同步更新两份 README。
+
 ## License
 
 By contributing you agree that your changes are licensed under GPL-3.0.

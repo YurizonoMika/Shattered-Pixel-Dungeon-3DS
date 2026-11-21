@@ -4,8 +4,10 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.0alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.2alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
+
+**English** · [简体中文](README.zh-CN.md)
 
 A **native C++17 port** of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon)
 for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
@@ -13,10 +15,14 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download 0.1.0alpha:** [GitHub release](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.0alpha)
-— `spd3ds.3dsx` (Homebrew Launcher) or `spd3ds.cia` (installable home-menu title).
+**Download [v0.1.2alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.2alpha):**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.cia) (installable HOME Menu title).
 
-[中文简介](#中文简介) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
+[Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
+
+**Latest update:** v0.1.2alpha fixes black water in all five regions by restoring the
+original scrolling water textures. The save format is unchanged from v0.1.1alpha.
 
 > **Status: complete 25-floor run, five regions, full save/load.** All five SPD
 > regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
@@ -154,19 +160,20 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 - **Level feelings** on depths 2+: 50% chance of water, grass, large, traps,
   secrets or dark; large adds rooms/items/mobs, traps doubles traps, secrets adds a
   secret room, dark reduces FOV.
-- **Mob rotation** uses SPD's exact depth table (rat/snake/gnoll/swarm/crab/slime,
-  skeleton/thief/DM-100/guard/necromancer, bat/brute/shaman/spinner/DM-200,
-  ghoul/elemental/warlock/monk/golem, succubus/eye/scorpio), including the 2.5%
-  rare additions and 1/50 albino alt. Mob cap is `3 + depth%5 + rand(0..2)`,
-  floor 1 spawns 8, and the level refills to the cap every 50 turns (33 dark).
+- **Mob rotation** follows upstream depth-based rotations for the supported roster.
+  Floor 1 starts with eight ordinary enemies. Later regular floors use a population
+  limit and check for respawns about every 50 turns (33 on dark floors).
 - **Traps**: `NormalIntRange(2, 3 + depth/5)`.
 - **Quest placement**: ghost in the exit room (2–4), Wandmaker in the entrance
   room (7–9), Blacksmith (12–14) and Imp (17–19) in their own quest rooms.
 
+See the [v4.0.2 parity notes](docs/floor-mechanics-parity.md) for what's verified
+against upstream. Whole floors do not yet match upstream from the same seed.
+
 ### Loot generation (ported from SPD)
 
 - Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**; large floors add 2.
-  There is no guaranteed food drop — food comes from mobs and shops.
+  Loose food is guaranteed on regular floors, with an extra food drop on large floors.
 - Category decks follow SPD's first/second generator deck: weapons 2, armor 2/1,
   missiles 1/2, wands 1, rings 1, potions 8, scrolls 8, seeds 1, stones 1, gold 10
   (artifacts are mapped to rings).
@@ -226,12 +233,11 @@ Implementation was cross-checked against:
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v9): seed/RNG, floor, player stats,
-inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
-floor items (including gold amounts and chest contents), features/traps, shop stock
-and sold flags, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
-run; leaving the game auto-saves. Slot files from older save formats are detected and
-ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
+The current save format is **V10**. Slots store the run seed, current map and fog,
+inventory, actors, quest and boss state, typed keys, and loot and respawn state.
+Leaving the game auto-saves. **V9 saves from v0.1.0alpha still load**: the current
+floor keeps its old shared key balance until descent, and newly generated floors
+use the current rules. Back up `sdmc:/3ds/spd/` before updating an alpha build.
 
 ## Controls
 
@@ -261,7 +267,7 @@ git clone https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS.git
 cd Shattered-Pixel-Dungeon-3DS
 
 # 1. Upstream assets (only core assets are needed)
-git clone --depth 1 https://github.com/00-Evan/shattered-pixel-dungeon.git ../spd-upstream
+git clone --depth 1 --branch v4.0.2 https://github.com/00-Evan/shattered-pixel-dungeon.git ../spd-upstream
 bash tools/prepare-assets.sh          # copy PNGs + hero art, generate .t3s
 
 # 2. CJK bitmap font (OFL, pinned SHA-256)
@@ -357,9 +363,10 @@ tools/                # asset prep, font generation, dev helpers
   `bash tools/check-pathfinder.sh ../spd-upstream` compares the native step
   and retreat searches with upstream Java on identical passability maps.
   This checks the search, not actor passability rules or AI state transitions.
-- The fixed-size 3DS maps adapt upstream `LoopBuilder`: the entrance and exit
-  sit on a loop, with single-entrance special rooms attached as branches.
-  This is not a seed-for-seed port of upstream's variable-size builders.
+- Regular floors use variable-size layouts within a 64×64 backing grid. The
+  host-only `bash tools/check-floor-layout.sh ../spd-upstream` compares the
+  builders, patch masks and maze masks on shared inputs with the v4.0.2 Java source.
+  Java is not needed to build or run the game.
 - Text is a generated white-alpha glyph atlas tinted at runtime with `C2D_TintMult`.
 - Saves use a fixed-size `GameDisk` struct (`source/game.h`) with magic + version
   fields; `Game::slot_meta` reads just the header for the slot list.
@@ -419,7 +426,8 @@ Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
   adds its lip in the door cell after actors, using bases `208/212/216`
   (open/closed/locked), plus 1 for an open southeast neighbour and 2 for an
   open southwest neighbour, as in upstream `stitchWallOverhangTile`,
-- water uses the 16-way stitched tiles (`32..47`),
+- water scrolls at 5 pixels per second using the original `water0.png` to
+  `water4.png` textures, beneath stitched banks (`32..47`) and fog,
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
 - alchemy pot, barricade, bookshelf and statue use the raised feature cells
   (`120 / 121 / 92 / 128`),
