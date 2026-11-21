@@ -15,6 +15,11 @@ static inline int ri(Game& g, int a, int b) {
 static int absi(int v) { return v < 0 ? -v : v; }
 
 static bool is_npc(uint8_t t) { return t >= M_NPC_GHOST; }
+
+static void gain_gold(Game& g, int amount) {
+  if (g.ring_has(IT_RING_WEALTH)) amount += amount / 4;
+  g.gold += amount;
+}
 static bool is_boss(uint8_t t) { return mob_def(t).boss; }
 
 int Game::hero_atk() const {
@@ -302,7 +307,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true) {
 
 static void grant_loot(Game& g, const LootRoll& r) {
   if (r.id == IT_GOLD) {
-    g.gold += r.gold;
+    gain_gold(g, r.gold);
     g.message("你找到了金币。");
   } else {
     g.add_item(r.id, 1, r.level);
@@ -743,6 +748,7 @@ void Game::use_item(int idx) {
         }
         message("更多敌人被召唤了出来！");
       } else if (it.id == IT_SCROLL_TRANSMUTE) {
+        remove_item(idx, 1);  // consume the scroll first
         if (inv_n > 0) {
           int i = ri(*this, 0, inv_n - 1);
           char b[96];
@@ -751,6 +757,8 @@ void Game::use_item(int idx) {
           grant_loot(*this, roll_loot(*this, true));
           message(b);
         }
+        advance_turn();
+        return;
       }
       break;
     case K_FOOD:
@@ -941,7 +949,7 @@ void Game::use_feature(int idx) {
         keys--;
       }
       if (f.loot_id == IT_GOLD) {
-        gold += f.loot_gold;
+        gain_gold(*this, f.loot_gold);
         message("箱子里装满了金币。");
       } else if (f.loot_id != IT_NONE) {
         add_item(f.loot_id, 1, f.loot_level);
@@ -1127,7 +1135,7 @@ void Game::pick_item(int idx) {
   FloorItem fi = items[idx];
   items.erase(items.begin() + idx);
   if (fi.id == IT_GOLD) {
-    gold += fi.level;
+    gain_gold(*this, fi.level);
     message("你拾取了一堆金币。");
     return;
   }
@@ -1199,7 +1207,7 @@ void Game::damage_mob(int idx, int raw) {
     uint8_t drop = ((rnd(*this) & 1) ? weapon_for_tier(tier + 1)
                                      : armor_for_tier(tier + 1));
     items.push_back({m.x, m.y, drop, (int16_t)tier});
-    gold += 150 + region() * 100;
+    gain_gold(*this, 150 + region() * 100);
     message("首领倒下了，掉落了强力装备。");
   } else if ((rnd(*this) % 100) < 10) {
     items.push_back({m.x, m.y, IT_GOLD,
@@ -1581,7 +1589,7 @@ void Game::dialog_choose(int i) {
     } else if (quest == 2 && i == 0) {
       quest = 3;
       add_item(IT_POTION_HEAL, 2);
-      gold += 30;
+      gain_gold(*this, 30);
       message("幽魂：收下这些药水和金币吧。");
     }
   } else if (dlg_type == 4) {  // smith
@@ -1598,7 +1606,7 @@ void Game::dialog_choose(int i) {
   } else if (dlg_type == 5) {  // imp
     dialog = false;
     if (tokens >= 3) {
-      gold += 80;
+      gain_gold(*this, 80);
       add_item(IT_WAND_LIGHTNING, 1, 0);
       tokens = 0;
       token_quest = 2;
