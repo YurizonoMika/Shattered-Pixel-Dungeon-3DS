@@ -37,6 +37,9 @@ copy environment/tiles_prison.png tiles_prison.png
 copy environment/tiles_caves.png  tiles_caves.png
 copy environment/tiles_city.png   tiles_city.png
 copy environment/tiles_halls.png  tiles_halls.png
+for region in 0 1 2 3 4; do
+  copy "environment/water$region.png" "water$region.png"
+done
 
 for h in warrior mage rogue huntress duelist cleric; do
   copy "sprites/$h.png" "hero_$h.png"

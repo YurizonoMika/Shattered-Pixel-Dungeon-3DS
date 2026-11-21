@@ -58,6 +58,7 @@ enum MobAsset : uint8_t {
   MA_GHOST, MA_SHOP, MA_SMITH, MA_IMP, MA_WANDMAKER, MA_COUNT
 };
 extern Img A_tiles[5];   // region tilesets (256x256, 16x16 grid)
+extern Img A_water[5];   // standalone repeatable 32x32 water textures
 extern Img A_mobs[MA_COUNT];
 extern Img A_hero[6];    // 256x128  hero walk sheets (16x16 grid)
 extern Img A_art[6];     // 400x225  hero splash art

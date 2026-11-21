@@ -272,6 +272,7 @@ struct Game {
   bool dead = false;
   bool won = false;
   bool freeze_anim = false;  // debug: hold mid-walk pose
+  int water_anim_ms = 0;
   bool demo_lock = false;    // debug: ignore input
 
   char msg[128]{};

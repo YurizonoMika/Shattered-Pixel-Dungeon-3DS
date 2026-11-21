@@ -2642,6 +2642,7 @@ void Game::tick(int dt_ms) {
   if (dt_ms > 100) dt_ms = 100;
   const float sp = dt_ms * 0.014f;
   if (!freeze_anim) {
+    water_anim_ms = (water_anim_ms + dt_ms) % 6400; // 32 pixels at 5 px/s
     auto advance_pose = [&](CombatPose& p) {
       if (p.age >= 0 && (p.age += dt_ms) >= 420) p.age = -1;
       if (p.hit_age < 200) p.hit_age += dt_ms;

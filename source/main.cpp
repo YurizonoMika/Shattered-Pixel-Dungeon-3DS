@@ -877,6 +877,32 @@ int main() {
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
+        else if (want >= 93 && want <= 97) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.floor = 1 + (want - 93) * 5;
+          G.map_width = 18; G.map_height = 12;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          memset(G.seen, 0, sizeof(G.seen));
+          memset(G.vis, 0, sizeof(G.vis));
+          for (int y = 0; y < G.map_height; ++y) for (int x = 0; x < G.map_width; ++x) {
+            if (x && y && x < 17 && y < 11) G.tiles[y][x] = T_FLOOR;
+            if ((x >= 3 && x <= 13 && y >= 3 && y <= 8) ||
+                (x >= 7 && x <= 10 && (y == 1 || y == 2))) G.tiles[y][x] = T_WATER;
+            G.seen[y][x] = x < 13;
+            G.vis[y][x] = x < 12;
+          }
+          G.tiles[3][4] = T_GRASS;
+          G.tiles[8][4] = T_FLOOR;
+          G.pvx = G.cursor_x = G.px = 8;
+          G.pvy = G.cursor_y = G.py = 9;
+          G.zoom = G.zoom_target = want == 93 ? 1.f : 1.33f;
+          G.demo_lock = true;
+          const Img& water = A_water[G.region()];
+          dlog("[water] region=%d loaded=%d texture=%dx%d", G.region(), water.ok(),
+               water.ok() ? water.tex->width : 0, water.ok() ? water.tex->height : 0);
+        }
         else if (want == 92) {
           G.new_run(0, 0x12345678);
           SCENE = Scene::GAME;

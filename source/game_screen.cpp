@@ -14,6 +14,28 @@ static bool door_tile(uint8_t t) {
   return t == T_DOOR || t == T_DOOR_OPEN || t == T_DOOR_LOCKED;
 }
 
+static bool water_shore(int x, int y) {
+  if (!G.in_map(x, y)) return false;
+  const uint8_t t = G.tiles[y][x];
+  return t == T_FLOOR || t == T_GRASS || t == T_STAIRS || door_tile(t);
+}
+
+static void draw_water_world(const Img& im, int x, int y, float cell, int camx, int camy) {
+  const int x0 = (int)roundf(x * cell - camx), x1 = (int)roundf((x + 1) * cell - camx);
+  const int y0 = (int)roundf(y * cell - camy), y1 = (int)roundf((y + 1) * cell - camy);
+  if (!im.ok()) {
+    draw_box(x0, y0, x1 - x0, y1 - y0, C2D_Color32(30, 61, 88, 255));
+    return;
+  }
+  // Standalone repeat texture: one shared UV origin in world space, as in
+  // GameScene's SkinnedBlock. Citro2D's V coordinate increases upward.
+  const float u = (x & 1) * 0.5f;
+  const float v = 1.f - (y & 1) * 0.5f + G.water_anim_ms / 6400.f;
+  const Tex3DS_SubTexture sub{16, 16, u, v, u + 0.5f, v - 0.5f};
+  C2D_DrawImageAt({im.tex, &sub}, x0, y0, 0.5f, nullptr,
+                  (x1 - x0) / 16.f, (y1 - y0) / 16.f);
+}
+
 // Draw a 16x16 world tile at integer destination boundaries so scaled
 // neighbours never leave seams or sample adjacent atlas cells.
 static void draw_tile_world(const Img& im, int cx, int cy, float wx, float wy,
@@ -385,15 +407,12 @@ static void draw_map() {
                           tint);
         }
       } else if (tt == T_WATER) {
-        // +1 top land, +2 right, +4 bottom, +8 left (SPD stitchWaterTile).
-        int idx = 32;
-        if (y <= 0 || G.tiles[y - 1][x] != T_WATER) idx += 1;
-        if (x + 1 >= MW || G.tiles[y][x + 1] != T_WATER) idx += 2;
-        if (y + 1 >= MH || G.tiles[y + 1][x] != T_WATER) idx += 4;
-        if (x <= 0 || G.tiles[y][x - 1] != T_WATER) idx += 8;
-        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
-                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                        tint);
+        draw_water_world(A_water[G.region()], x, y, cell, camx, camy);
+        // The atlas contains transparent shoreline overlays, not the water.
+        const int shore = water_shore(x, y - 1) | (water_shore(x + 1, y) << 1) |
+                          (water_shore(x, y + 1) << 2) | (water_shore(x - 1, y) << 3);
+        if (shore) draw_tile_world(A_tiles[G.region()], shore * 16, 32,
+                                   x * 16.0f, y * 16.0f, z, camx, camy);
       } else {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;

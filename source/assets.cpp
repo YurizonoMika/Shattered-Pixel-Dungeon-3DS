@@ -7,7 +7,7 @@ Img A_banners, A_chrome, A_toolbar, A_status, A_icons, A_heroicons, A_avatars,
     A_items, A_itemicons;
 Img A_hero[6], A_art[6];
 Img A_mobs[MA_COUNT];
-Img A_tiles[5];
+Img A_tiles[5], A_water[5];
 Img A_t_archs, A_t_back, A_t_front;
 Img A_font;
 
@@ -46,6 +46,12 @@ bool assets_load() {
   A_tiles[2] = load_img("romfs:/gfx/tiles_caves.t3x", 256, 256);
   A_tiles[3] = load_img("romfs:/gfx/tiles_city.t3x", 256, 256);
   A_tiles[4] = load_img("romfs:/gfx/tiles_halls.t3x", 256, 256);
+  for (int i = 0; i < 5; ++i) {
+    char path[48];
+    snprintf(path, sizeof(path), "romfs:/gfx/water%d.t3x", i);
+    A_water[i] = load_img(path, 32, 32);
+    if (A_water[i].ok()) C3D_TexSetWrap(A_water[i].tex, GPU_REPEAT, GPU_REPEAT);
+  }
 
   static const char* heroes[6] = {"warrior", "mage", "rogue", "huntress", "duelist", "cleric"};
   char path[128];
