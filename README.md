@@ -404,8 +404,8 @@ Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
   material** (`192..207`) drawn on the floor cell above the wall; nothing is
   rotated,
 - doors in horizontal walls use `112/113/114`; vertical-wall doors use the
-  dedicated `RAISED_DOOR_SIDEWAYS` threshold (`116`) plus the separate full
-  side-door panel `227/228` on the wall cell above, matching SPD's door layers,
+  `116` threshold plus the full side-door panel `227/228` inside the opening
+  (compensating for the missing 2.5D wall-layer offset),
 - doors use the raised door frames (`112` closed / `113` open),
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
