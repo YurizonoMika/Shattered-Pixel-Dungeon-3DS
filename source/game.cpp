@@ -784,14 +784,12 @@ void Game::gen_level() {
         tiles[p.second][p.first] = T_FLOOR;
     for (int i = 1; i < (int)path.size(); i++) {
       if (inside(a, path[i].first, path[i].second)) continue;
-      auto p = path[i - 1];
-      if (inside(a, p.first, p.second)) set_door(p.first, p.second, a);
+      set_door(path[i].first, path[i].second, a);
       break;
     }
     for (int i = (int)path.size() - 2; i >= 0; i--) {
       if (inside(b, path[i].first, path[i].second)) continue;
-      auto p = path[i + 1];
-      if (inside(b, p.first, p.second)) set_door(p.first, p.second, b);
+      set_door(path[i].first, path[i].second, b);
       break;
     }
   };

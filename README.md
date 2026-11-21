@@ -377,9 +377,12 @@ tools/venv/bin/python tools/item_audit.py
 
 Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
 
-- walls use the **raised-wall** group (`80..83`, stitched per side), with the
-  internal top-surface layer (`144..159`) on interior wall cells and a 4px
-  contact-shadow overhang (`192..207`) at wall/floor joins,
+- walls use the **raised-wall** group (`80..83`) rotated to face the room:
+  light cap up for a top wall, down for a bottom wall, left/right for side
+  walls; interior cells use the top-surface layer (`144..159`) and wall/floor
+  joins get a 4px contact shadow (`192..207`),
+- doors are always standing **vertical panels** (`112/113/114`) as in SPD,
+  placed in the wall opening rather than inside the room,
 - doors use the raised door frames (`112` closed / `113` open),
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
