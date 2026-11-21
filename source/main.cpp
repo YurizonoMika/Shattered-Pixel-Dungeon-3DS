@@ -837,7 +837,7 @@ int main() {
           }
           for (int y = 0; y < MH; y++)
             for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
-          G.recompute_fov();
+          G.zoom = G.zoom_target = 1.6f;
           G.demo_lock = true;
         }
         else if (want == 76) {
