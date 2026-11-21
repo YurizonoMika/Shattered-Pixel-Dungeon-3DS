@@ -377,12 +377,13 @@ tools/venv/bin/python tools/item_audit.py
 
 Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
 
-- walls use the **raised-wall** group (`80..83`) rotated to face the room:
-  light cap up for a top wall, down for a bottom wall, left/right for side
-  walls; interior cells use the top-surface layer (`144..159`) and wall/floor
-  joins get a 4px contact shadow (`192..207`),
-- doors are always standing **vertical panels** (`112/113/114`) as in SPD,
-  placed in the wall opening rather than inside the room,
+- wall cells with floor **below** use the raised front face (`80..83`); cells
+  with another wall below use the **internal-wall top material** (`144..159`).
+  Nothing is rotated: these are separate SPD tiles for front faces vs. wall
+  tops. Wall/floor joins get a 4px contact shadow (`192..207`),
+- doors in horizontal walls use `112/113/114`; doors in vertical walls use the
+  separate **side-door** material (`116` threshold plus `227/228` above), also
+  no rotation,
 - doors use the raised door frames (`112` closed / `113` open),
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
@@ -442,6 +443,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 74 | Generate all floors and print room/mob/item/door audit |
 | 75 | Spawn the new depth-rotation enemies for a visual check |
 | 76 | Clean enemy gallery (no items/features) |
+| 77 | Jump next to a locked side door |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |

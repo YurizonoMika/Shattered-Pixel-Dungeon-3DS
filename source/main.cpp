@@ -766,6 +766,30 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 77) {
+          start_new_game(0);
+          int found = -1;
+          for (int y = 1; y < MH - 1 && found < 0; y++)
+            for (int x = 1; x < MW - 1; x++)
+              if (G.tiles[y][x] == T_DOOR_LOCKED) { found = y * MW + x; break; }
+          if (found >= 0) {
+            int tx = found % MW, ty = found / MW;
+            // stand next to it, preferring the room side
+            static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+            for (int k = 0; k < 4; k++) {
+              int nx = tx + DX[k], ny = ty + DY[k];
+              if (G.walkable(nx, ny)) {
+                G.px = nx; G.py = ny; G.pvx = (float)nx; G.pvy = (float)ny;
+                break;
+              }
+            }
+            G.keys = 5;
+          }
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
+          G.recompute_fov();
+          G.demo_lock = true;
+        }
         else if (want == 76) {
           start_new_game(0);
           G.floor = 14;

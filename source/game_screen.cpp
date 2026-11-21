@@ -173,33 +173,18 @@ static void draw_map() {
         // Doors are drawn below with the correct orientation.
         continue;
       } else if (wall_like(tt)) {
-        bool open_above = (y > 0 && !wall_like(G.tiles[y - 1][x]));
-        bool open_below = (y + 1 < MH && !wall_like(G.tiles[y + 1][x]));
-        bool open_left = (x > 0 && !wall_like(G.tiles[y][x - 1]));
-        bool open_right = (x + 1 < MW && !wall_like(G.tiles[y][x + 1]));
-        if (open_above || open_below || open_left || open_right) {
-          // The raised wall sprite is a face with its light cap at the top.
-          // Rotate it so the cap faces away from the room:
-          //   floor below -> 0deg, floor above -> 180deg,
-          //   floor right (wall on the left) -> -90deg,
-          //   floor left (wall on the right) -> +90deg.
-          int idx = 80;
-          float angle = 0.0f;
-          if (open_below) {
-            angle = 0.0f;
-            if (open_right) idx += 1;
-            if (open_left) idx += 2;
-          } else if (open_above) {
-            angle = (float)M_PI;
-            if (open_left) idx += 1;
-            if (open_right) idx += 2;
-          } else if (open_right) {
-            angle = -(float)M_PI * 0.5f;
-          } else {
-            angle = (float)M_PI * 0.5f;
-          }
-          draw_cell_rot(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                        16, 16, tx, ty, 1.0f, angle, tint);
+        // SPD: raised front face only when there is no wall below.
+        bool below_wall = (y + 1 < MH && wall_like(G.tiles[y + 1][x]));
+        if (!below_wall) {
+          uint8_t below_tile = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
+          bool below_door = (below_tile == T_DOOR ||
+                             below_tile == T_DOOR_OPEN ||
+                             below_tile == T_DOOR_LOCKED);
+          int idx = below_door ? 88 : 80;  // RAISED_WALL_DOOR / RAISED_WALL
+          if (x + 1 >= MW || !wall_like(G.tiles[y][x + 1])) idx += 1;
+          if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
+          draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                    16, 16, tx, ty, 1, 1, tint);
         }
       } else if (tt == T_WATER) {
         // +1 top land, +2 right, +4 bottom, +8 left (SPD stitchWaterTile).
@@ -229,10 +214,17 @@ static void draw_map() {
         continue;
       uint32_t tint = G.vis[y][x] ? 0 : 0x707070FF;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
-      // SPD draws all door variants as standing vertical panels.
-      int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
-      draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                16, 16, tx, ty, 1, 1, tint);
+      bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
+      if (above_wall) {
+        // Door in a vertical wall: SPD passes the cell ABOVE to
+        // getRaisedDoorTile, which selects the sideways threshold.
+        draw_cell(A_tiles[G.region()], (116 % 16) * 16, (116 / 16) * 16,
+                  16, 16, tx, ty, 1, 1, tint);
+      } else {
+        int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                  16, 16, tx, ty, 1, 1, tint);
+      }
     }
   }
 
@@ -244,12 +236,15 @@ static void draw_map() {
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = G.vis[y][x] ? 0 : 0x707070FF;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
-      bool open_up = (y > 0 && !wall_like(G.tiles[y - 1][x]));
-      bool open_dn = (y + 1 < MH && !wall_like(G.tiles[y + 1][x]));
-      bool open_lf = (x > 0 && !wall_like(G.tiles[y][x - 1]));
-      bool open_rt = (x + 1 < MW && !wall_like(G.tiles[y][x + 1]));
-      if (wall_like(tt) && wall_like(below) && !open_up && !open_dn &&
-          !open_lf && !open_rt) {
+      if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
+                            below == T_DOOR_OPEN)) {
+        // Wall cell directly above a door: SPD's side-door face.
+        if (below == T_DOOR || below == T_DOOR_LOCKED) {
+          int di = below == T_DOOR_LOCKED ? 228 : 227;
+          draw_cell(A_tiles[G.region()], (di % 16) * 16, (di / 16) * 16,
+                    16, 16, tx, ty, 1, 1, tint);
+        }
+      } else if (wall_like(tt) && wall_like(below)) {
         // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
         int right = (x + 1 < MW && wall_like(G.tiles[y][x + 1])) ? 1 : 0;
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
