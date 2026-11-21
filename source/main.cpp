@@ -766,6 +766,31 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 85 || want == 86) {
+          // Same geometry for all three states, at native and fractional zoom.
+          start_new_game(0);
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          const int cx = MW / 2, cy = MH / 2;
+          for (int y = 0; y < MH; y++) {
+            for (int x = 0; x < MW; x++) {
+              G.tiles[y][x] = (x == 0 || y == 0 || x == MW - 1 || y == MH - 1)
+                                 ? T_WALL : T_FLOOR;
+              G.seen[y][x] = G.vis[y][x] = true;
+            }
+          }
+          const uint8_t states[] = {T_DOOR, T_DOOR_OPEN, T_DOOR_LOCKED};
+          for (int i = 0; i < 3; i++) {
+            const int x = cx + (i - 1) * 4, y = cy - 2;
+            for (int dy = -2; dy <= 2; dy++) G.tiles[y + dy][x] = T_WALL;
+            G.tiles[y][x] = states[i];
+            G.tiles[cy + 3][x - 1] = G.tiles[cy + 3][x + 1] = T_WALL;
+            G.tiles[cy + 3][x] = states[i];
+          }
+          G.cursor_x = G.px = cx + 1; G.cursor_y = G.py = cy + 1;
+          G.pvx = G.px; G.pvy = G.py;
+          G.zoom = G.zoom_target = want == 85 ? 1.0f : 1.33f;
+          G.demo_lock = true;
+        }
         else if (want == 84) {
           start_new_game(0);
           G.mobs.clear();

@@ -403,11 +403,12 @@ Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
   The **bottom wall seen from inside a room** is the separate **overhang
   material** (`192..207`) drawn on the floor cell above the wall; nothing is
   rotated,
-- doors in horizontal walls use `112/113/114`; vertical-wall doors use the
-  upper side-door half `227/228/229` on the wall cell above and the door-cap
-  half `212/216/220` in the door cell. Together they form one tall continuous
-  side door. Door cells are excluded from the wall-overhang pass,
-- doors use the raised door frames (`112` closed / `113` open),
+- doors without a wall immediately above use `112/113/114` (closed/open/locked).
+  Side doors always draw threshold `116`. The wall above adds `227` when
+  closed or `228` when locked, and no foreground tile when open. A wall below
+  adds its lip in the door cell after actors, using bases `208/212/216`
+  (open/closed/locked), plus 1 for an open southeast neighbour and 2 for an
+  open southwest neighbour, as in upstream `stitchWallOverhangTile`,
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
 - alchemy pot, barricade, bookshelf and statue use the raised feature cells
@@ -467,6 +468,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 75 | Spawn the new depth-rotation enemies for a visual check |
 | 76 | Clean enemy gallery (no items/features) |
 | 77 | Jump next to a locked side door |
+| 85/86 | Door rendering comparison: closed, open, locked, left to right; side doors above front doors; 1× / 1.33× |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |

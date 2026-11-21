@@ -10,22 +10,8 @@ static bool wall_like(uint8_t t) {
   return t == T_WALL || t == T_SECRET;
 }
 
-static void tile_cell(uint8_t t, int& cx, int& cy) {
-  // Indices from SPD's DungeonTileSheet (tiles_sewers.png is a 16x16 grid).
-  int idx = 0;
-  switch (t) {
-    case T_WALL: idx = 80; break;      // RAISED_WALL (3D wall face)
-    case T_FLOOR: idx = 0; break;      // FLOOR
-    case T_DOOR: idx = 56; break;      // flat door (raised door drawn on top)
-    case T_DOOR_LOCKED: idx = 56; break;
-    case T_SECRET: idx = 80; break;    // looks like a wall
-    case T_STAIRS: idx = 17; break;    // EXIT
-    case T_WATER: idx = 32; break;     // WATER (stitched in draw_map)
-    case T_GRASS: idx = 2; break;      // GRASS
-    default: idx = 0; break;
-  }
-  cx = (idx % 16) * 16;
-  cy = (idx / 16) * 16;
+static bool door_tile(uint8_t t) {
+  return t == T_DOOR || t == T_DOOR_OPEN || t == T_DOOR_LOCKED;
 }
 
 // Draw a 16x16 world tile at integer destination boundaries so scaled
@@ -255,28 +241,23 @@ static void draw_map() {
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) continue;
-      int scx, scy;
       uint8_t tt = G.tiles[y][x];
-      tile_cell(tt, scx, scy);
       u32 tint = 0;
-      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      bool is_door = (tt == T_DOOR || tt == T_DOOR_OPEN ||
-                      tt == T_DOOR_LOCKED);
-      if (is_door) {
-        // Base masonry under the door so transparent parts of the side-door
-        // halves do not show the black void.
-        draw_tile_world(A_tiles[G.region()], 0, 3 * 16, x * 16.0f, y * 16.0f,
-                        z, camx, camy, tint);
-        continue;  // door material is drawn in the door pass
+      if (door_tile(tt)) {
+        // DungeonTerrainTilemap: the side threshold is opaque and does not
+        // change with door state. Door leaves belong to the foreground pass.
+        const bool side = y > 0 && wall_like(G.tiles[y - 1][x]);
+        const int idx = side ? 116 : tt == T_DOOR_OPEN ? 113 :
+                                      tt == T_DOOR_LOCKED ? 114 : 112;
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else if (wall_like(tt)) {
         // SPD: raised front face only when there is no wall below.
         bool below_wall = (y + 1 < MH && wall_like(G.tiles[y + 1][x]));
         if (!below_wall) {
           uint8_t below_tile = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
-          bool below_door = (below_tile == T_DOOR ||
-                             below_tile == T_DOOR_OPEN ||
-                             below_tile == T_DOOR_LOCKED);
-          int idx = below_door ? 88 : 80;  // RAISED_WALL_DOOR / RAISED_WALL
+          int idx = door_tile(below_tile) ? 88 : 80;  // RAISED_WALL_DOOR / RAISED_WALL
           if (x + 1 >= MW || !wall_like(G.tiles[y][x + 1])) idx += 1;
           if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
           draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
@@ -297,36 +278,6 @@ static void draw_map() {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
-        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
-                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                        tint);
-      }
-    }
-  }
-
-  // Doors: vertical panels in horizontal walls, horizontal panels in vertical walls.
-  for (int y = ty0; y <= ty1; y++) {
-    for (int x = tx0; x <= tx1; x++) {
-      if (!(G.seen[y][x] & 3)) continue;
-      uint8_t tt = G.tiles[y][x];
-      if (tt != T_DOOR && tt != T_DOOR_OPEN && tt != T_DOOR_LOCKED)
-        continue;
-      uint32_t tint = 0;
-      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
-      if (above_wall) {
-        if (tt == T_DOOR || tt == T_DOOR_LOCKED) {
-          int di = tt == T_DOOR_LOCKED ? 216 : 212;
-          draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
-                          (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                          tint);
-        } else {
-          draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
-                          (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                          tint);
-        }
-      } else {
-        int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
                         (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                         tint);
@@ -394,15 +345,12 @@ static void draw_map() {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) continue;
       uint8_t tt = G.tiles[y][x];
-      if (tt == T_DOOR || tt == T_DOOR_OPEN || tt == T_DOOR_LOCKED)
-        continue;  // doors are already drawn in their own pass
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = 0;
-      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
-                            below == T_DOOR_OPEN)) {
-        // Upper door half on the wall cell above; the door cell holds 212/216.
-        int di = below == T_DOOR_OPEN ? 208 : (below == T_DOOR_LOCKED ? 228 : 227);
+      if (wall_like(tt) && door_tile(below)) {
+        // DungeonWallsTilemap: the upper leaf disappears when the door opens.
+        if (below == T_DOOR_OPEN) continue;
+        int di = below == T_DOOR_LOCKED ? 228 : 227;
         draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
                         (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                         tint);
@@ -419,17 +367,19 @@ static void draw_map() {
                         tint);
       } else if (!wall_like(tt) && wall_like(below)) {
         // Shadow/edge over the tile directly above a wall (SPD overhang layer).
-        int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
-        int lb = (x > 0 && y + 1 < MH && wall_like(G.tiles[y + 1][x - 1])) ? 1 : 0;
-        int idx = 192 + (rb ? 0 : 1) + (lb ? 0 : 2);
+        const bool open_right = x + 1 < MW && y + 1 < MH && !wall_like(G.tiles[y + 1][x + 1]);
+        const bool open_left = x > 0 && y + 1 < MH && !wall_like(G.tiles[y + 1][x - 1]);
+        // DungeonTileSheet.stitchWallOverhangTile uses door-specific lips.
+        int base = tt == T_DOOR_OPEN ? 208 : tt == T_DOOR ? 212 :
+                   tt == T_DOOR_LOCKED ? 216 : 192;
+        int idx = base + (open_right ? 1 : 0) + (open_left ? 2 : 0);
         // Full wall-overhang material: brick lip + contact shadow, drawn on
         // the floor cell above a wall (this is what makes the bottom wall
         // visible from inside the room).
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
                         (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                         tint);
-      } else if (!wall_like(tt) && (below == T_DOOR || below == T_DOOR_OPEN ||
-                                    below == T_DOOR_LOCKED)) {
+      } else if (!wall_like(tt) && door_tile(below)) {
         int idx = below == T_DOOR_OPEN ? 225 : 224;
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
                         (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
@@ -1143,4 +1093,3 @@ void game_update() {
     s_wait_frames = 0;
   }
 }
-
