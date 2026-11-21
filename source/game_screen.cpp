@@ -312,15 +312,15 @@ static void draw_map() {
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
       if (above_wall) {
-        // The engine's wall layer is drawn without SPD's 8px 2.5D offset, so
-        // place the sideways door panel directly in the door opening.
-        draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
-                        (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                        tint);
         if (tt == T_DOOR || tt == T_DOOR_LOCKED) {
+          // Lower half of the two-tile-tall side door; the wall above draws
+          // the upper half.
           int di = tt == T_DOOR_LOCKED ? 228 : 227;
-          draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
-                          (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+          draw_cell_rot(A_tiles[G.region()], (di % 16) * 16, (di / 16) * 16,
+                        16, 16, tx, ty, z, (float)M_PI, tint);
+        } else {
+          draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
+                          (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                           tint);
         }
       } else {
@@ -397,7 +397,15 @@ static void draw_map() {
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = 0;
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      if (wall_like(tt) && wall_like(below)) {
+      if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
+                            below == T_DOOR_OPEN)) {
+        if (below == T_DOOR || below == T_DOOR_LOCKED) {
+          int di = below == T_DOOR_LOCKED ? 228 : 227;
+          draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
+                          (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                          tint);
+        }
+      } else if (wall_like(tt) && wall_like(below)) {
         // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
         int right = (x + 1 < MW && wall_like(G.tiles[y][x + 1])) ? 1 : 0;
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
