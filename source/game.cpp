@@ -799,7 +799,7 @@ void Game::open_shop() {
   int tier = std::min(5, (floor - 1) / 5 + 1);
   int mult = floor / 5 + 1;
   auto add = [&](uint8_t id, int count, int level) {
-    if (shop_n >= 8) return;
+    if (shop_n >= 7) return;
     Item it;
     it.id = id; it.count = (uint8_t)count; it.level = (uint8_t)level;
     it.charges = item_def(id).kind == K_WAND ? item_def(id).max_charge : 0;

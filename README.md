@@ -118,8 +118,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 ### Shops (ported from SPD)
 
 - One shopkeeper per region (floors 2/7/12/17/22), with **stock fixed per floor**:
-  a weapon and armor of the current tier, a wand, a healing potion, a scroll, food,
-  bombs, and a strength potion on tier 3+.
+  a weapon and armor of the current tier, a wand, a healing potion, a scroll, food
+  and bombs (7 slots).
 - Price formula mirrors SPD: `value × quantity × 5 × (depth/5 + 1)`.
 - Bought items are marked sold and stay sold when revisiting the shop; stock, prices
   and sold flags are part of the save file.
