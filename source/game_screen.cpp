@@ -263,8 +263,11 @@ static void draw_map() {
       bool is_door = (tt == T_DOOR || tt == T_DOOR_OPEN ||
                       tt == T_DOOR_LOCKED);
       if (is_door) {
-        // Doors are drawn below with the correct orientation.
-        continue;
+        // Base masonry under the door so transparent parts of the side-door
+        // halves do not show the black void.
+        draw_tile_world(A_tiles[G.region()], 0, 3 * 16, x * 16.0f, y * 16.0f,
+                        z, camx, camy, tint);
+        continue;  // door material is drawn in the door pass
       } else if (wall_like(tt)) {
         // SPD: raised front face only when there is no wall below.
         bool below_wall = (y + 1 < MH && wall_like(G.tiles[y + 1][x]));
