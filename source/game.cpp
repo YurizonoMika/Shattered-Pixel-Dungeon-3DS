@@ -111,6 +111,8 @@ void Game::gen_level() {
   memset(vis, 0, sizeof(vis));
   mobs.clear();
   items.clear();
+  search_fx.clear();
+  search_ms = 0;
   rng = seed ^ (uint32_t)(floor * 2654435761u);
 
   struct Room { int x, y, w, h; };
@@ -1026,6 +1028,8 @@ bool Game::load(int slot) {
   for (int i = 0; i < inv_n; i++)
     inv[i] = {d.inv[i].id, d.inv[i].count, d.inv[i].level, d.inv[i].charges};
   memset(vis, 0, sizeof(vis));
+  search_fx.clear();
+  search_ms = 0;
   pvx = (float)px; pvy = (float)py; panim_ms = 0;
   clear_path();
   cursor_x = px; cursor_y = py;
