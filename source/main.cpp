@@ -440,6 +440,7 @@ static void title_draw_top() {
   draw_logo(1.0f, 44);
   text_c("Shattered Pixel Dungeon - 3DS", 0, TOP_W, 118,
          C2D_Color32(255, 210, 120, 255), 2.0f);
+  textf(TOP_W - 86, TOP_H - 32, CLR_GREY, 1.0f, "v%s", SPD3DS_VERSION);
   draw_top_hint("十字键 / 摇杆 选择    A 确认");
 }
 

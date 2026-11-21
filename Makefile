@@ -36,8 +36,8 @@ PORTLIBS := $(DEVKITPRO)/portlibs/3ds
 #---------------------------------------------------------------------------------
 TARGET		:=	spd3ds
 BUILD		:=	build
-APP_TITLE	:=	Shattered PD
-APP_DESCRIPTION	:=	Shattered Pixel Dungeon 3DS port
+APP_TITLE	:=	Shattered PD 3DS
+APP_DESCRIPTION	:=	Shattered Pixel Dungeon 3DS 0.1.0alpha
 APP_AUTHOR	:=	YurizonoMika
 SOURCES		:=	source
 DATA		:=	data
@@ -163,7 +163,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean
+.PHONY: all clean cia
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -185,7 +185,18 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD)
+	@rm -fr $(BUILD) $(TARGET).3dsx $(TARGET).cia $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD)
+
+#---------------------------------------------------------------------------------
+# CIA (installable). Requires makerom; banner.bin is prebuilt with bannertool.
+#---------------------------------------------------------------------------------
+cia: all
+	@command -v makerom >/dev/null 2>&1 || { \
+		echo "makerom not found (https://github.com/3DSGuy/Project_CTR/releases)"; \
+		exit 1; }
+	makerom -f cia -o $(TARGET).cia -rsf spd3ds.rsf -target t \
+		-elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner banner.bin -exefslogo
+	@ls -lh $(TARGET).cia
 
 #---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s

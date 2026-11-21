@@ -4,6 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
+![Version](https://img.shields.io/badge/version-0.1.0alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 A **native C++17 port** of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon)
@@ -11,6 +12,9 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
+
+**Download 0.1.0alpha:** [GitHub release](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.0alpha)
+— `spd3ds.3dsx` (Homebrew Launcher) or `spd3ds.cia` (installable home-menu title).
 
 [中文简介](#中文简介) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
@@ -227,8 +231,23 @@ export PATH=$DEVKITPRO/tools/bin:$DEVKITARM/bin:$PATH
 make
 ```
 
-The build produces `spd3ds.3dsx` (~2.1 MB). Textures are packed into the RomFS at
+The build produces `spd3ds.3dsx` (~2.5 MB). Textures are packed into the RomFS at
 build time by `tex3ds`; nothing is loaded from the SD card except saves/settings.
+
+To build the installable CIA as well:
+
+```bash
+make cia
+# → spd3ds.cia (~2.4 MB), requires makerom:
+#   https://github.com/3DSGuy/Project_CTR/releases
+```
+
+`banner.bin`, `banner.png`, `banner.wav`, `icon.png` and `spd3ds.rsf` are checked in,
+so only `makerom` is needed. To regenerate the banner after changing its art:
+
+```bash
+bannertool makebanner -i banner.png -a banner.wav -o banner.bin
+```
 
 Tested against upstream commit
 [`57a4e06`](https://github.com/00-Evan/shattered-pixel-dungeon/commit/57a4e06a4caf162446d1c28caa7983f0493fecf0).
@@ -242,6 +261,17 @@ open -a "$HOME/Applications/Azahar.app" "$PWD/spd3ds.3dsx"
 # Real hardware (Homebrew Launcher with NetLoader)
 3dslink spd3ds.3dsx
 ```
+
+### Installing the CIA
+
+1. Copy `spd3ds.cia` to the SD card.
+2. Install it with **FBI** or **GodMode9** (Luma3DS signature patches enabled, like
+   any homebrew CIA).
+3. Launch **Shattered PD 3DS** from the home menu.
+
+The title ID is `00040000051D3000`. Save slots, settings and scores stay in
+`sdmc:/3ds/spd/`, the same location used by the 3DSX build, so both versions share
+their saves.
 
 > If Azahar's default window is too short, maximize it or use fullscreen; the bottom
 > screen's last few pixels can be clipped by the window size.
