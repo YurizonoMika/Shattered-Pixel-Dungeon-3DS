@@ -766,6 +766,14 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 78) {
+          start_new_game(0);
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++)
+              G.seen[y][x] = (x < MW / 2) ? 1 : 2;
+          G.recompute_fov();
+          G.demo_lock = true;
+        }
         else if (want == 77) {
           start_new_game(0);
           int found = -1;

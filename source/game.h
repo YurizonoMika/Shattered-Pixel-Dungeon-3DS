@@ -173,7 +173,7 @@ struct Game {
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
   bool icon_test = false;
-  uint8_t fov_radius = 7;
+  uint8_t fov_radius = 8;
   // Deterministic per-run plan (rebuilt from the seed, not saved).
   uint8_t plan_special[25][3]{};
   uint8_t plan_special_n[25]{};

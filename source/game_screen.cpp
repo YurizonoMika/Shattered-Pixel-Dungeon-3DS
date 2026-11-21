@@ -142,6 +142,72 @@ static void draw_feature(const Feature& f, int camx, int camy) {
   }
 }
 
+// SPD FogOfWar: 0 visible, 1 visited, 2 mapped (scroll), 3 invisible.
+static int fog_level(int x, int y) {
+  if (x < 0 || y < 0 || x >= MW || y >= MH) return 3;
+  if (G.vis[y][x]) return 0;
+  if (G.seen[y][x] & 1) return 1;
+  if (G.seen[y][x] & 2) return 2;
+  return 3;
+}
+
+static u32 fog_color(int lvl) {
+  switch (lvl) {
+    case 0: return 0;
+    case 1: return C2D_Color32(0x00, 0x00, 0x00, 0x99);
+    case 2: return C2D_Color32(0x19, 0x33, 0x66, 0x99);
+    default: return C2D_Color32(0x00, 0x00, 0x00, 0xFF);
+  }
+}
+
+static void draw_fog(int camx, int camy) {
+  int tx0 = std::max(0, camx / 16 - 1), ty0 = std::max(0, camy / 16 - 1);
+  int tx1 = std::min(MW - 1, camx / 16 + 26), ty1 = std::min(MH - 1, camy / 16 + 17);
+  for (int y = ty0; y <= ty1; y++) {
+    for (int x = tx0; x <= tx1; x++) {
+      if (!(G.seen[y][x] & 3)) {
+        draw_box((float)(x * 16 - camx), (float)(y * 16 - camy), 16, 16,
+                 C2D_Color32(0, 0, 0, 255), 0.45f);
+        continue;
+      }
+      uint8_t tile = G.tiles[y][x];
+      float px = (float)(x * 16 - camx), py = (float)(y * 16 - camy);
+      if (wall_like(tile) && y + 1 < MH && wall_like(G.tiles[y + 1][x])) {
+        // Internal wall: fog the two halves separately, like SPD.
+        int l = fog_level(x, y);
+        if (x > 0) {
+          if (wall_like(G.tiles[y][x - 1])) {
+            l = std::max(l, fog_level(x - 1, y));
+            if (y + 1 < MH && wall_like(G.tiles[y + 1][x - 1])) l = 3;
+            else l = std::max(l, fog_level(x - 1, y + 1));
+          } else {
+            l = std::max(l, fog_level(x - 1, y));
+          }
+        } else l = 3;
+        int rr = fog_level(x, y);
+        if (x + 1 < MW) {
+          if (wall_like(G.tiles[y][x + 1])) {
+            rr = std::max(rr, fog_level(x + 1, y));
+            if (y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) rr = 3;
+            else rr = std::max(rr, fog_level(x + 1, y + 1));
+          } else {
+            rr = std::max(rr, fog_level(x + 1, y));
+          }
+        } else rr = 3;
+        u32 cl = fog_color(l), cr = fog_color(rr);
+        if (cl) draw_box(px, py, 8, 16, cl, 0.45f);
+        if (cr) draw_box(px + 8, py, 8, 16, cr, 0.45f);
+      } else {
+        int l = fog_level(x, y);
+        if (wall_like(tile) && !(y + 1 < MH && wall_like(G.tiles[y + 1][x])))
+          l = std::max(l, fog_level(x, y + 1));
+        u32 c = fog_color(l);
+        if (c) draw_box(px, py, 16, 16, c, 0.45f);
+      }
+    }
+  }
+}
+
 static void draw_map() {
   int camx = G.px * 16 - TOP_W / 2 + 8;
   int camy = G.py * 16 - TOP_H / 2 + 8;
@@ -161,11 +227,11 @@ static void draw_map() {
   int tx1 = std::min(MW - 1, camx / 16 + 26), ty1 = std::min(MH - 1, camy / 16 + 17);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
-      if (!G.seen[y][x]) continue;
+      if (!(G.seen[y][x] & 3)) continue;
       int scx, scy;
       uint8_t tt = G.tiles[y][x];
       tile_cell(tt, scx, scy);
-      u32 tint = G.vis[y][x] ? 0 : 0x707070FF;
+      u32 tint = 0;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
       bool is_door = (tt == T_DOOR || tt == T_DOOR_OPEN ||
                       tt == T_DOOR_LOCKED);
@@ -208,11 +274,11 @@ static void draw_map() {
   // Doors: vertical panels in horizontal walls, horizontal panels in vertical walls.
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
-      if (!G.seen[y][x]) continue;
+      if (!(G.seen[y][x] & 3)) continue;
       uint8_t tt = G.tiles[y][x];
       if (tt != T_DOOR && tt != T_DOOR_OPEN && tt != T_DOOR_LOCKED)
         continue;
-      uint32_t tint = G.vis[y][x] ? 0 : 0x707070FF;
+      uint32_t tint = 0;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
       bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
       if (above_wall) {
@@ -231,10 +297,10 @@ static void draw_map() {
   // SPD upper wall layers: internal wall tops (144..159) and overhangs (192..207).
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
-      if (!G.seen[y][x]) continue;
+      if (!(G.seen[y][x] & 3)) continue;
       uint8_t tt = G.tiles[y][x];
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
-      uint32_t tint = G.vis[y][x] ? 0 : 0x707070FF;
+      uint32_t tint = 0;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
       if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
                             below == T_DOOR_OPEN)) {
@@ -327,6 +393,8 @@ static void draw_map() {
     text(txt, G.pvx * 16 - camx + 8 - text_w(txt, 1.0f) * 0.5f,
          G.pvy * 16 - camy - 14, CLR_WHITE, 1.0f);
   }
+
+  draw_fog(camx, camy);
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;

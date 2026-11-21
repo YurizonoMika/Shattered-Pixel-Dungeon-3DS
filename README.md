@@ -49,6 +49,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Alchemy](docs/screens/alchemy.png) | ![Shop](docs/screens/shop.png) |
 | **Transmutation picker** | **Hero info** |
 | ![Transmute](docs/screens/transmute.png) | ![Hero info](docs/screens/hero_info.png) |
+| **Fog of war** | **Shop** |
+| ![Fog](docs/screens/fog.png) | ![Shop](docs/screens/shop.png) |
 | **Prison (6–10)** | **Caves (11–15)** |
 | ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
 | **City (16–20)** | **Halls boss (21–25)** |
@@ -106,6 +108,13 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   sleep and terror are applied by potions, scrolls, wands, seeds and bombs.
 - **Wands**: 13 types (single-target, AoE, beam, root, knockback, shield, heal,
   lifesteal, prismatic) with charges, recharge and per-wand behaviour.
+- **Fog of war**: SPD-style visible / visited / mapped / invisible states.
+  Visited cells use the 0x99 black veil, scroll-mapped cells the blue
+  `0x99193366` veil, unseen cells are black. Internal walls use SPD's split
+  left/right fog halves; camera-facing walls take the darker of the wall and
+  the tile below.
+- **Field of view**: radius 8 with wall-aware line of sight (radius 5 on dark
+  floors), matching SPD's `viewDistance`.
 - **Search** reproduces SPD's visual: per-tile blue square shrinking with distance
   delay, hero `operate` animation and a floating “搜索中” label.
 - **SPD-style backpack**: 5×5 (25-slot) grid, gold/capacity, equipped gear, item
@@ -445,6 +454,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 75 | Spawn the new depth-rotation enemies for a visual check |
 | 76 | Clean enemy gallery (no items/features) |
 | 77 | Jump next to a locked side door |
+| 78 | Visited / mapped fog test |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |

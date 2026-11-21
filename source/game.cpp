@@ -195,11 +195,12 @@ void Game::recompute_fov() {
       if (dx * dx + dy * dy > R * R + 1) continue;
       if (los(px, py, x, y)) {
         vis[y][x] = true;
-        seen[y][x] = true;
+        seen[y][x] |= 1;  // bit0 = visited, bit1 = mapped
       }
     }
   }
-  vis[py][px] = seen[py][px] = true;
+  vis[py][px] = true;
+  seen[py][px] |= 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -581,7 +582,7 @@ void Game::gen_level() {
 
   int reg = region();
   int feeling = plan_feeling[floor - 1];
-  fov_radius = feeling == 6 ? 5 : 7;
+  fov_radius = feeling == 6 ? 5 : 8;
   bool large = feeling == 3;
   bool traps_feeling = feeling == 4;
   bool secret_feeling = feeling == 5;
@@ -1390,7 +1391,7 @@ void Game::use_item(int idx) {
       } else if (it.id == IT_POTION_MIND) {
         mind_t = d.power;
         for (int y = 0; y < MH; y++)
-          for (int x = 0; x < MW; x++) seen[y][x] = true;
+          for (int x = 0; x < MW; x++) seen[y][x] |= 2;
         message("你感知到了整层地牢。");
       } else if (it.id == IT_POTION_XP) {
         xp += d.power + floor;
@@ -1418,7 +1419,7 @@ void Game::use_item(int idx) {
         message(it.id == IT_POTION_TOXIC ? "毒气弥漫开来。" : "烈焰席卷四周。");
       } else if (it.id == IT_SCROLL_MAP) {
         for (int y = 0; y < MH; y++)
-          for (int x = 0; x < MW; x++) seen[y][x] = true;
+          for (int x = 0; x < MW; x++) seen[y][x] |= 2;
         message("卷轴揭示了本层地图。");
       } else if (it.id == IT_SCROLL_UP) {
         if (weapon != IT_NONE) { weapon_level++; message("你的武器变得更强了。"); }
@@ -2210,7 +2211,7 @@ void Game::interact_at(int x, int y) {
       if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
       if (tiles[ny][nx] == T_SECRET) {
         tiles[ny][nx] = T_DOOR;
-        seen[ny][nx] = true;
+        seen[ny][nx] |= 1;
         message("你发现了一扇暗门！");
         recompute_fov();
         advance_turn();
@@ -2420,7 +2421,7 @@ void Game::search() {
       search_fx.push_back({(float)x, (float)y, delay, 0.8f});
       if (tiles[y][x] == T_SECRET) {
         tiles[y][x] = T_DOOR;
-        seen[y][x] = true;
+        seen[y][x] |= 1;
         found = true;
       }
     }
@@ -3061,7 +3062,7 @@ bool Game::load(int slot) {
   won = false;
   msg[0] = 0;
   build_run_plan();
-  fov_radius = (plan_feeling[floor - 1] == 6) ? 5 : 7;
+  fov_radius = (plan_feeling[floor - 1] == 6) ? 5 : 8;
   mob_cap = (floor % 5 == 0) ? 0 : 3 + floor % 5;
   respawn_t = 0;
   check_talents();
