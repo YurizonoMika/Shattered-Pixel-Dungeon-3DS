@@ -6,16 +6,20 @@ int g_bag_sel = 0;
 int g_bag_tab = 0;
 bool g_bag_action = false;
 
+static bool wall_like(uint8_t t) {
+  return t == T_WALL || t == T_SECRET;
+}
+
 static void tile_cell(uint8_t t, int& cx, int& cy) {
   // Indices from SPD's DungeonTileSheet (tiles_sewers.png is a 16x16 grid).
   int idx = 0;
   switch (t) {
-    case T_WALL: idx = 48; break;      // FLAT_WALL
+    case T_WALL: idx = 80; break;      // RAISED_WALL (3D wall face)
     case T_FLOOR: idx = 0; break;      // FLOOR
-    case T_DOOR: idx = 56; break;      // FLAT_DOOR
-    case T_SECRET: idx = 48; break;    // looks like a wall
+    case T_DOOR: idx = 56; break;      // flat door (raised door drawn on top)
+    case T_SECRET: idx = 80; break;    // looks like a wall
     case T_STAIRS: idx = 17; break;    // EXIT
-    case T_WATER: idx = 32; break;     // WATER
+    case T_WATER: idx = 32; break;     // WATER (stitched in draw_map)
     case T_GRASS: idx = 2; break;      // GRASS
     default: idx = 0; break;
   }
@@ -78,42 +82,43 @@ static void draw_feature(const Feature& f, int camx, int camy) {
     case F_BOOKSHELF:
     case F_BOOKSHELF_USED: {
       u32 tint = f.type == F_BOOKSHELF_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 2 * 16, 3 * 16, 16, 16, x, y, 1, 1, tint);
+      draw_cell(A_tiles[G.region()], 12 * 16, 5 * 16, 16, 16, x, y, 1, 1, tint);
       break;
     }
     case F_ALCHEMY:
     case F_ALCHEMY_USED: {
       u32 tint = f.type == F_ALCHEMY_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 0, 4 * 16, 16, 16, x, y, 1, 1, tint);
+      draw_cell(A_tiles[G.region()], 8 * 16, 7 * 16, 16, 16, x, y, 1, 1, tint);
       break;
     }
     case F_STATUE:
     case F_STATUE_USED: {
       u32 tint = f.type == F_STATUE_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 8 * 16, 4 * 16, 16, 16, x, y, 1, 1, tint);
+      draw_cell(A_tiles[G.region()], 0, 8 * 16, 16, 16, x, y, 1, 1, tint);
       break;
     }
     case F_BARRICADE:
-      draw_cell(A_tiles[G.region()], 1 * 16, 4 * 16, 16, 16, x, y, 1, 1, 0);
+      draw_cell(A_tiles[G.region()], 9 * 16, 7 * 16, 16, 16, x, y, 1, 1, 0);
       break;
     case F_CHEST:
-    case F_CHEST_LOCKED:
-      draw_box(x + 2, y + 5, 12, 8, C2D_Color32(120, 78, 40, 255), 0.5f);
-      draw_box(x + 2, y + 3, 12, 4, C2D_Color32(86, 54, 26, 255), 0.51f);
-      draw_box(x + 7, y + 8, 2, 3, f.type == F_CHEST_LOCKED ? CLR_YELLOW
-                                                           : C2D_Color32(60, 40, 20, 255),
-               0.52f);
+    case F_CHEST_LOCKED: {
+      // SPD ItemSpriteSheet.CHEST (36) / LOCKED_CHEST (37).
+      int spr = f.type == F_CHEST_LOCKED ? 37 : 36;
+      draw_cell(A_items, (spr % 16) * 16, (spr / 16) * 16, 16, 16, x, y + 1, 1, 1, 0);
       break;
+    }
     case F_CHEST_OPEN:
-      draw_box(x + 2, y + 8, 12, 5, C2D_Color32(80, 52, 28, 255), 0.5f);
-      draw_box(x + 2, y + 4, 12, 3, C2D_Color32(60, 40, 20, 255), 0.51f);
+      draw_cell(A_items, (36 % 16) * 16, (36 / 16) * 16, 16, 16, x, y + 1, 1, 1,
+                0x808080FF);
       break;
     case F_TOMB:
-    case F_TOMB_USED:
-      draw_box(x + 3, y + 4, 10, 10, C2D_Color32(110, 110, 120, 255), 0.5f);
-      draw_box(x + 7, y + 6, 2, 6, C2D_Color32(60, 60, 70, 255), 0.51f);
-      draw_box(x + 5, y + 8, 6, 2, C2D_Color32(60, 60, 70, 255), 0.51f);
+    case F_TOMB_USED: {
+      // SPD ItemSpriteSheet.TOMB (34); spent tombs are dimmed.
+      u32 tint = f.type == F_TOMB_USED ? 0x808080FF : 0;
+      draw_cell(A_items, (34 % 16) * 16, (34 / 16) * 16, 16, 16, x, y + 1, 1, 1,
+                tint);
       break;
+    }
     case F_PLANT:
       draw_cell(A_tiles[G.region()], 2 * 16, 0, 16, 16, x, y, 1, 1, 0x80FFB0FF);
       break;
@@ -127,7 +132,7 @@ static void draw_feature(const Feature& f, int camx, int camy) {
       break;
     case F_TOKEN: {
       float bob = sinf(TIME_S * 3.0f + f.x) * 1.5f;
-      draw_item_icon(IT_AMULET, x, y + bob, 1.0f);
+      draw_item_icon(IT_DWARF_TOKEN, x, y + bob, 1.0f);
       break;
     }
     default:
@@ -156,18 +161,37 @@ static void draw_map() {
     for (int x = tx0; x <= tx1; x++) {
       if (!G.seen[y][x]) continue;
       int scx, scy;
-      tile_cell(G.tiles[y][x], scx, scy);
+      uint8_t tt = G.tiles[y][x];
+      tile_cell(tt, scx, scy);
       u32 tint = G.vis[y][x] ? 0 : 0x707070FF;
       float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
-      if (G.tiles[y][x] == T_DOOR || G.tiles[y][x] == T_DOOR_OPEN) {
-        // The flat door sprite is a vertical panel. Rotate it when the wall
-        // runs left-to-right so doors match the corridor orientation.
-        bool horizontal_wall =
-            G.blocks_sight(x - 1, y) && G.blocks_sight(x + 1, y);
-        draw_cell_rot(A_tiles[G.region()], scx, scy, 16, 16, tx, ty, 1.0f,
-                      horizontal_wall ? (float)M_PI * 0.5f : 0.0f, tint);
+      if (wall_like(tt)) {
+        // SPD stitches raised walls: +1 open to the right, +2 open to the left.
+        int idx = 80;
+        if (x + 1 >= MW || !wall_like(G.tiles[y][x + 1])) idx += 1;
+        if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
+      } else if (tt == T_DOOR || tt == T_DOOR_OPEN) {
+        // Raised doors are vertical panels in SPD: 112 closed, 113 open.
+        int idx = tt == T_DOOR_OPEN ? 113 : 112;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
+      } else if (tt == T_WATER) {
+        // +1 top land, +2 right, +4 bottom, +8 left (SPD stitchWaterTile).
+        int idx = 32;
+        if (y <= 0 || G.tiles[y - 1][x] != T_WATER) idx += 1;
+        if (x + 1 >= MW || G.tiles[y][x + 1] != T_WATER) idx += 2;
+        if (y + 1 >= MH || G.tiles[y + 1][x] != T_WATER) idx += 4;
+        if (x <= 0 || G.tiles[y][x - 1] != T_WATER) idx += 8;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
       } else {
-        draw_cell(A_tiles[G.region()], scx, scy, 16, 16, tx, ty, 1, 1, tint);
+        int idx = 0;
+        if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
+        else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
       }
     }
   }
@@ -612,6 +636,13 @@ static void draw_pause() {
 void game_draw_bottom() {
   static bool once = false;
   if (!once) { once = true; dlog("first game_draw_bottom"); }
+  if (G.icon_test) {
+    draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(10, 12, 18, 255), 0.25f);
+    for (int i = 1; i < IT_COUNT; i++)
+      draw_item_icon((uint8_t)i, 4 + ((i - 1) % 18) * 17,
+                     4 + ((i - 1) / 18) * 17, 1.0f);
+    return;
+  }
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(10, 12, 18, 255), 0.25f);
   draw_status();
   draw_quickslots();

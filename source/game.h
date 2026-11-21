@@ -167,6 +167,7 @@ struct Game {
   int dust_timer = 0;
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
+  bool icon_test = false;
   int alchemy_sel = 0;
   bool transmute_open = false;
   int transmute_sel = 0;

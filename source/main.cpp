@@ -765,6 +765,11 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 73) {
+          start_new_game(0);
+          G.icon_test = true;
+          G.demo_lock = true;
+        }
         else if (want == 72) {
           start_new_game(0);
           G.add_item(IT_SCROLL_TRANSMUTE, 1, 0);

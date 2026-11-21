@@ -310,6 +310,34 @@ Readability rules used by the renderer:
 > 1600×960 for the top screen and 1280×960 for the bottom screen). Non-integer
 > window scaling blurs the whole framebuffer, not just text.
 
+### Sprite fidelity
+
+Every item's sprite index is taken from SPD's `ItemSpriteSheet.java`
+(`xy(x, y) = (x-1) + 16*(y-1)`); the 90 entries are checked by rendering each
+definition next to its real `items.png` cell:
+
+```bash
+tools/venv/bin/python tools/item_audit.py
+# → docs/item_audit.png
+```
+
+[Open the full 90-item audit sheet](docs/item_audit.png).
+
+Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
+
+- walls use the **raised-wall** group (`80..83`, stitched per side),
+- doors use the raised door frames (`112` closed / `113` open),
+- water uses the 16-way stitched tiles (`32..47`),
+- chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
+- alchemy pot, barricade, bookshelf and statue use the raised feature cells
+  (`120 / 121 / 92 / 128`),
+- floors and grass occasionally use their SPD alternate variants (`6 / 8`).
+
+The audit caught and fixed meat-vs-ration food icons, the pickaxe showing a
+mage's staff, the augmentation stone showing a crown, quest dust/ore/token all
+sharing the amulet sprite, the three bag sprites, and weapons that were mapped
+to the wrong tier.
+
 ## Debug
 
 Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
@@ -353,6 +381,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 65 | Generate all 25 floors (smoke test) |
 | 70 | Alchemy UI |
 | 72 | Scroll of Transmutation item selector |
+| 73 | All 90 item icons on one screen (sprite audit) |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |
