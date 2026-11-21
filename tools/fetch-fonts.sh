@@ -24,7 +24,11 @@ if [ ! -f "$ZIP" ]; then
   curl -fL --retry 3 --connect-timeout 20 -o "$ZIP" "$URL"
 fi
 
-ACTUAL=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+if command -v shasum >/dev/null 2>&1; then
+  ACTUAL=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+else
+  ACTUAL=$(sha256sum "$ZIP" | awk '{print $1}')
+fi
 if [ "$ACTUAL" != "$SHA" ]; then
   echo "字体包校验失败："
   echo "  expected $SHA"
