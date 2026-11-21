@@ -403,9 +403,10 @@ Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
   The **bottom wall seen from inside a room** is the separate **overhang
   material** (`192..207`) drawn on the floor cell above the wall; nothing is
   rotated,
-- doors in horizontal walls use `112/113/114`; vertical-wall doors use the
-  `116` threshold plus the full side-door panel `227/228` inside the opening
-  (compensating for the missing 2.5D wall-layer offset),
+- doors in horizontal walls use `112/113/114`; vertical-wall doors draw the
+  `116` threshold and the full side-door panel `227/228` inside the opening.
+  Door cells are excluded from the wall-overhang pass, otherwise the wall lip
+  covers the door entirely,
 - doors use the raised door frames (`112` closed / `113` open),
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,

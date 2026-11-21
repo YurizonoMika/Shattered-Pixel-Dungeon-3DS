@@ -392,6 +392,8 @@ static void draw_map() {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) continue;
       uint8_t tt = G.tiles[y][x];
+      if (tt == T_DOOR || tt == T_DOOR_OPEN || tt == T_DOOR_LOCKED)
+        continue;  // doors are already drawn in their own pass
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = 0;
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
