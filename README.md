@@ -351,6 +351,9 @@ tools/                # asset prep, font generation, dev helpers
 - The hero and enemies use an eight-direction distance map for movement.
   Hero routes stay on known terrain and are recomputed each step around actors.
   Enemies sleep, wander, pursue their last seen target, or flee under terror.
+  `bash tools/check-pathfinder.sh ../spd-upstream` compares the native step
+  and retreat searches with upstream Java on identical passability maps.
+  This checks the search, not actor passability rules or AI state transitions.
 - The fixed-size 3DS maps adapt upstream `LoopBuilder`: the entrance and exit
   sit on a loop, with single-entrance special rooms attached as branches.
   This is not a seed-for-seed port of upstream's variable-size builders.

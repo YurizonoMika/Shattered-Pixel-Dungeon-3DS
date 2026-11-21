@@ -1,4 +1,5 @@
 #include "game.h"
+#include "pathfinder.h"
 
 void dlog(const char* fmt, ...);
 
@@ -21,10 +22,7 @@ static int grid_distance(int x, int y, int tx, int ty) {
   return std::max(absi(x - tx), absi(y - ty));
 }
 
-// A reverse distance map, as in SPD PathFinder. Static scratch keeps the
-// per-turn search allocation-free on 3DS; calls are sequential.
-struct GridSearch {
-  int16_t distance[MW * MH], queue[MW * MH];
+struct GridSearch : PathFinder<MW, MH> {
   uint8_t occupied[MH][MW];
 
   void load_actors(const Game& g) {
@@ -35,57 +33,8 @@ struct GridSearch {
     occupied[g.py][g.px] = 1;
   }
 
-  template<class F> static void neighbours(int cell, F f) {
-    const int x = cell % MW, y = cell / MW;
-    for (int dy = -1; dy <= 1; ++dy)
-      for (int dx = -1; dx <= 1; ++dx) {
-        const int nx = x + dx, ny = y + dy;
-        if ((dx || dy) && nx >= 0 && ny >= 0 && nx < MW && ny < MH)
-          f(ny * MW + nx);
-      }
-  }
-
-  template<class F> void build(int goal, int stop, F passable) {
-    std::fill_n(distance, MW * MH, int16_t(-1));
-    int head = 0, tail = 0;
-    distance[goal] = 0;
-    queue[tail++] = goal;
-    while (head < tail) {
-      const int cell = queue[head++];
-      if (cell == stop) break;
-      neighbours(cell, [&](int n) {
-        if (distance[n] >= 0 || (n != stop && !passable(n))) return;
-        distance[n] = distance[cell] + 1;
-        queue[tail++] = n;
-      });
-    }
-  }
-
   template<class F> int toward(int start, int goal, F passable) {
-    if (start == goal || !passable(goal)) return -1;
-    build(goal, start, passable);
-    if (distance[start] < 0) return -1;
-    int step = -1;
-    neighbours(start, [&](int n) {
-      if (step < 0 && distance[n] == distance[start] - 1) step = n;
-    });
-    return step;
-  }
-
-  template<class F> int away(int start, int threat, F passable) {
-    build(threat, -1, [&](int n) { return n == start || passable(n); });
-    if (distance[start] < 0) return -1;
-    int best = start, step = -1;
-    auto flee = [&](auto&& self, int cell, int first, int depth) -> void {
-      if (distance[cell] > distance[best]) { best = cell; step = first; }
-      if (!depth) return;
-      neighbours(cell, [&](int n) {
-        if (distance[n] > distance[cell] && passable(n))
-          self(self, n, first < 0 ? n : first, depth - 1);
-      });
-    };
-    flee(flee, start, -1, 4);
-    return step;
+    return passable(goal) ? step(start, goal, passable) : -1;
   }
 };
 static GridSearch navigation;
@@ -2434,7 +2383,16 @@ void Game::mob_turn(Mob& m) {
   };
   if (m.terror_t > 0) {
     m.terror_t--;
-    step_to(navigation.away(start, hero, passable));
+    // Dungeon.flee first ignores actors, then excludes any occupied step
+    // and retries. Terror uses four cells and cannot approach the source.
+    bool excluded[MW * MH]{};
+    for (;;) {
+      int next = navigation.retreat(start, hero, 4, false, [&](int p) {
+        return p == start || (!excluded[p] && walkable(p % MW, p / MW));
+      });
+      if (next < 0 || next == start || step_to(next)) break;
+      excluded[next] = true;
+    }
     return;
   }
   if (rage_t > 0) {
