@@ -1,0 +1,11 @@
+build/
+*.3dsx
+*.elf
+*.smdh
+*.cia
+*.map
+romfs/gfx/
+tools/venv/
+tools/fonts/*.zip
+tools/fonts/*.ttf
+tools/winid
