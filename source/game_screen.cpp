@@ -25,7 +25,7 @@ static void tile_cell(uint8_t t, int& cx, int& cy) {
 
 static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
                         float y, u32 tint = 0) {
-  int cols = 256 / fw;
+  int cols = sheet.w / fw;
   int cx = (frame % cols) * fw;
   int cy = (frame / cols) * fh;
   draw_cell(sheet, cx, cy, fw, fh, x, y, 1, 1, tint);
@@ -46,43 +46,93 @@ static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
 }
 
 static void draw_mob(const Mob& m, int camx, int camy) {
+  const MobDef& d = mob_def(m.type);
+  const Img& sheet = A_mobs[d.asset];
   bool moving = fabsf(m.vx - m.x) > 0.01f || fabsf(m.vy - m.y) > 0.01f;
-  const Img* sheet = &A_rat;
-  int fw = 16, fh = 15, ox = 0, oy = 1;
-  u32 tint = 0;
   int frame = 0;
-  static const uint8_t rat_idle[4] = {0, 0, 0, 1};
-  static const uint8_t gnoll_idle[8] = {0, 0, 0, 1, 0, 0, 1, 1};
-  static const uint8_t crab_idle[4] = {0, 1, 0, 2};
-  switch (m.type) {
-    case M_RAT:
-      sheet = &A_rat; fw = 16; fh = 15; ox = 0; oy = 1;
-      frame = moving ? 6 + (m.anim_ms / 100) % 5 : rat_idle[(m.anim_ms / 500) % 4];
+  if (!d.boss) {
+    frame = moving ? 2 + (m.anim_ms / 100) % 4 : (m.anim_ms / 450) % 2;
+  } else {
+    frame = (m.anim_ms / 400) % 2;
+  }
+  float ox = (16 - d.fw) * 0.5f;
+  float oy = 16.0f - d.fh;
+  float bob = 0;
+  if (m.type == M_NPC_GHOST) bob = sinf(TIME_S * 2.0f) * 1.5f;
+  draw_sprite(sheet, d.fw, d.fh, frame, m.vx * 16 - camx + ox,
+              m.vy * 16 - camy + oy + bob, d.tint);
+}
+
+static void draw_feature(const Feature& f, int camx, int camy) {
+  if (!G.vis[f.y][f.x]) return;
+  float x = (float)(f.x * 16 - camx);
+  float y = (float)(f.y * 16 - camy);
+  switch (f.type) {
+    case F_WELL:
+    case F_WELL_USED: {
+      int idx = f.type == F_WELL ? 18 : 19;
+      draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                x, y, 1, 1, 0);
       break;
-    case M_ALBINO:
-      sheet = &A_rat; fw = 16; fh = 15; ox = 0; oy = 1; tint = 0xFFD6E6FF;
-      frame = moving ? 6 + (m.anim_ms / 100) % 5 : rat_idle[(m.anim_ms / 500) % 4];
+    }
+    case F_BOOKSHELF:
+    case F_BOOKSHELF_USED: {
+      u32 tint = f.type == F_BOOKSHELF_USED ? 0x808080FF : 0;
+      draw_cell(A_tiles[G.region()], 2 * 16, 3 * 16, 16, 16, x, y, 1, 1, tint);
       break;
-    case M_GNOLL:
-      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1;
-      frame = moving ? 4 + (m.anim_ms / 83) % 4 : gnoll_idle[(m.anim_ms / 500) % 8];
+    }
+    case F_ALCHEMY:
+    case F_ALCHEMY_USED: {
+      u32 tint = f.type == F_ALCHEMY_USED ? 0x808080FF : 0;
+      draw_cell(A_tiles[G.region()], 0, 4 * 16, 16, 16, x, y, 1, 1, tint);
       break;
-    case M_CRAB:
-      sheet = &A_crab; fw = 16; fh = 16; ox = 0; oy = 0;
-      frame = moving ? 3 + (m.anim_ms / 66) % 4 : crab_idle[(m.anim_ms / 200) % 4];
+    }
+    case F_STATUE:
+    case F_STATUE_USED: {
+      u32 tint = f.type == F_STATUE_USED ? 0x808080FF : 0;
+      draw_cell(A_tiles[G.region()], 8 * 16, 4 * 16, 16, 16, x, y, 1, 1, tint);
       break;
-    case M_BOSS:
-      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1; tint = 0xFF9090FF;
-      frame = moving ? 4 + (m.anim_ms / 83) % 4 : gnoll_idle[(m.anim_ms / 500) % 8];
+    }
+    case F_BARRICADE:
+      draw_cell(A_tiles[G.region()], 1 * 16, 4 * 16, 16, 16, x, y, 1, 1, 0);
       break;
+    case F_CHEST:
+    case F_CHEST_LOCKED:
+      draw_box(x + 2, y + 5, 12, 8, C2D_Color32(120, 78, 40, 255), 0.5f);
+      draw_box(x + 2, y + 3, 12, 4, C2D_Color32(86, 54, 26, 255), 0.51f);
+      draw_box(x + 7, y + 8, 2, 3, f.type == F_CHEST_LOCKED ? CLR_YELLOW
+                                                           : C2D_Color32(60, 40, 20, 255),
+               0.52f);
+      break;
+    case F_CHEST_OPEN:
+      draw_box(x + 2, y + 8, 12, 5, C2D_Color32(80, 52, 28, 255), 0.5f);
+      draw_box(x + 2, y + 4, 12, 3, C2D_Color32(60, 40, 20, 255), 0.51f);
+      break;
+    case F_TOMB:
+    case F_TOMB_USED:
+      draw_box(x + 3, y + 4, 10, 10, C2D_Color32(110, 110, 120, 255), 0.5f);
+      draw_box(x + 7, y + 6, 2, 6, C2D_Color32(60, 60, 70, 255), 0.51f);
+      draw_box(x + 5, y + 8, 6, 2, C2D_Color32(60, 60, 70, 255), 0.51f);
+      break;
+    case F_PLANT:
+      draw_cell(A_tiles[G.region()], 2 * 16, 0, 16, 16, x, y, 1, 1, 0x80FFB0FF);
+      break;
+    case F_SIGN:
+      draw_box(x + 6, y + 4, 4, 9, C2D_Color32(90, 60, 30, 255), 0.5f);
+      draw_box(x + 2, y + 3, 12, 6, C2D_Color32(150, 105, 55, 255), 0.51f);
+      draw_box(x + 4, y + 5, 8, 1, C2D_Color32(80, 50, 20, 255), 0.52f);
+      break;
+    case F_TRAP_FOUND:
+      draw_icon(32, 32, 14, 14, x + 1, y + 1, 1.0f, CLR_RED);
+      break;
+    case F_TOKEN: {
+      float bob = sinf(TIME_S * 3.0f + f.x) * 1.5f;
+      draw_item_icon(IT_AMULET, x, y + bob, 1.0f);
+      break;
+    }
     default:
-      sheet = &A_gnoll; fw = 12; fh = 15; ox = 2; oy = 1; tint = 0x9FC0FFFF;
-      frame = gnoll_idle[(m.anim_ms / 700) % 8];
-      oy += (int)(sinf(TIME_S * 2.0f) * 1.5f);
       break;
   }
-  draw_sprite(*sheet, fw, fh, frame, m.vx * 16 - camx + ox,
-              m.vy * 16 - camy + oy, tint);
 }
 
 static void draw_map() {
@@ -114,10 +164,10 @@ static void draw_map() {
         // runs left-to-right so doors match the corridor orientation.
         bool horizontal_wall =
             G.blocks_sight(x - 1, y) && G.blocks_sight(x + 1, y);
-        draw_cell_rot(A_tiles, scx, scy, 16, 16, tx, ty, 1.0f,
+        draw_cell_rot(A_tiles[G.region()], scx, scy, 16, 16, tx, ty, 1.0f,
                       horizontal_wall ? (float)M_PI * 0.5f : 0.0f, tint);
       } else {
-        draw_cell(A_tiles, scx, scy, 16, 16, tx, ty, 1, 1, tint);
+        draw_cell(A_tiles[G.region()], scx, scy, 16, 16, tx, ty, 1, 1, tint);
       }
     }
   }
@@ -131,6 +181,17 @@ static void draw_map() {
              s, s, C2D_Color32(0x55, 0xAA, 0xFF, a), 0.52f);
   }
 
+  // boss health bar
+  for (const Mob& m : G.mobs) {
+    if (!m.alive || !mob_def(m.type).boss || !G.vis[m.y][m.x]) continue;
+    const MobDef& d = mob_def(m.type);
+    draw_box(60, 4, 280, 26, C2D_Color32(0, 0, 0, 150), 0.56f);
+    text_c(d.name, 60, 280, 5, CLR_YELLOW, 1.0f);
+    draw_box(66, 20, 268, 7, C2D_Color32(60, 12, 12, 255), 0.57f);
+    float f = m.maxhp > 0 ? (float)m.hp / m.maxhp : 0;
+    draw_box(66, 20, 268 * f, 7, C2D_Color32(210, 46, 46, 255), 0.58f);
+  }
+
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x]) continue;
@@ -141,7 +202,10 @@ static void draw_map() {
     draw_item_icon(it.id, ix, iy + bob, 1.0f);
   }
 
-  // mobs (correct SPD frame sizes: rat 16x15, gnoll 12x15, crab 16x16)
+  // interactables / decorations
+  for (const Feature& f : G.features) draw_feature(f, camx, camy);
+
+  // mobs
   for (const Mob& m : G.mobs) {
     if (!m.alive || !G.vis[m.y][m.x]) continue;
     draw_mob(m, camx, camy);
@@ -189,11 +253,16 @@ static void draw_dialog() {
   // left 3/4: portrait + name + text
   float lx = 20, ly = 20;
   draw_button(lx, ly, 56, 56, "", false, 1.6f);
-  if (G.dlg_type >= 2)
-    draw_cell(A_hero[G.hero], 0, 0, 16, 16, lx + 12, ly + 12, 2.0f, 2.0f,
-              G.dlg_type == 2 ? 0xBBBBBBFF : 0xFFFFFF);
-  else
-    draw_cell(A_gnoll, 0, 0, 16, 16, lx + 12, ly + 12, 2.0f, 2.0f, 0x9FC0FFFF);
+  if (G.dlg_type == 2 || G.dlg_type == 3) {
+    draw_sprite(A_hero[G.hero], 12, 15, 0, lx + 22, ly + 12,
+                G.dlg_type == 2 ? 0xBBBBBBFF : 0);
+  } else {
+    uint8_t npc = G.dlg_type == 4 ? M_NPC_SMITH
+                  : G.dlg_type == 5 ? M_NPC_IMP
+                                    : M_NPC_GHOST;
+    const MobDef& nd = mob_def(npc);
+    draw_sprite(A_mobs[nd.asset], nd.fw, nd.fh, 0, lx + 20, ly + 12);
+  }
   text(G.dlg_name, lx + 66, ly + 2,
        G.dlg_type == 2 ? CLR_RED : CLR_YELLOW, 2.0f);
   text_wrap(G.dlg_text, lx, ly + 68, 268, CLR_WHITE, 1.0f, 2.0f);
@@ -239,7 +308,7 @@ static void draw_status() {
   float xf = G.xpnext > 0 ? (float)G.xp / G.xpnext : 0;
   draw_box(122, 16, 70 * xf, 6, C2D_Color32(80, 150, 240, 255), 0.41f);
   // depth (top right), keys + gold on the second line
-  textf(206, 3, CLR_WHITE, 1.0f, "第 %d 层", G.floor);
+  textf(196, 3, CLR_WHITE, 1.0f, "%s %d", REGIONS[G.region()].name, G.floor);
   draw_item_icon(IT_KEY, 196, 15, 0.8f);
   textf(214, 17, CLR_WHITE, 1.0f, "x%d", G.keys);
   textf(252, 17, CLR_YELLOW, 1.0f, "%d 金", G.gold);
@@ -399,6 +468,26 @@ static void draw_backpack() {
   if (g_bag_action) draw_bag_action();
 }
 
+static void draw_shop() {
+  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 220), 0.66f);
+  draw_panel(4, 4, BOT_W - 8, BOT_H - 8, 2.0f);
+  text("商店", 14, 8, CLR_YELLOW, 2.0f);
+  draw_item_icon(IT_GOLD, 218, 14, 1.0f);
+  textf(238, 16, CLR_YELLOW, 1.0f, "%d", G.gold);
+  for (int i = 0; i < G.shop_n; i++) {
+    float y = 40 + i * 32;
+    draw_button(14, y, BOT_W - 28, 28, "", i == G.shop_sel, 1.6f);
+    draw_item_icon(G.shop_items[i].id, 22, y + 6, 1.0f);
+    text(item_name(G.shop_items[i].id), 44, y + 8, CLR_WHITE, 1.0f);
+    char price[24];
+    if (G.shop_sold[i]) snprintf(price, sizeof(price), "已售");
+    else snprintf(price, sizeof(price), "%d 金", G.shop_prices[i]);
+    text(price, BOT_W - 30 - text_w(price, 1.0f), y + 8,
+         G.shop_sold[i] ? CLR_GREY : CLR_YELLOW, 1.0f);
+  }
+  text_c("A 购买   B 关闭", 0, BOT_W, 214, CLR_GREY, 1.0f);
+}
+
 static void draw_pause() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
   draw_panel(60, 52, 200, 150, 2.0f);
@@ -419,6 +508,7 @@ void game_draw_bottom() {
   if (!G.backpack && !G.paused) draw_action_bar();
   if (G.backpack) draw_backpack();
   if (G.paused) draw_pause();
+  if (G.shop_open) draw_shop();
 }
 
 // ---------------------------------------------------------------------------

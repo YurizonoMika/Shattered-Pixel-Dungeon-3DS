@@ -4,9 +4,10 @@
 #include <vector>
 
 Img A_banners, A_chrome, A_toolbar, A_status, A_icons, A_heroicons, A_avatars,
-    A_items, A_itemicons, A_tiles;
+    A_items, A_itemicons;
 Img A_hero[6], A_art[6];
-Img A_rat, A_gnoll, A_crab;
+Img A_mobs[MA_COUNT];
+Img A_tiles[5];
 Img A_t_archs, A_t_back, A_t_front;
 Img A_font;
 
@@ -40,7 +41,11 @@ bool assets_load() {
   A_avatars = load_img("romfs:/gfx/avatars.t3x", 256, 32);
   A_items = load_img("romfs:/gfx/items.t3x", 256, 512);
   A_itemicons = load_img("romfs:/gfx/item_icons.t3x", 128, 64);
-  A_tiles = load_img("romfs:/gfx/tiles.t3x", 256, 256);
+  A_tiles[0] = load_img("romfs:/gfx/tiles_sewers.t3x", 256, 256);
+  A_tiles[1] = load_img("romfs:/gfx/tiles_prison.t3x", 256, 256);
+  A_tiles[2] = load_img("romfs:/gfx/tiles_caves.t3x", 256, 256);
+  A_tiles[3] = load_img("romfs:/gfx/tiles_city.t3x", 256, 256);
+  A_tiles[4] = load_img("romfs:/gfx/tiles_halls.t3x", 256, 256);
 
   static const char* heroes[6] = {"warrior", "mage", "rogue", "huntress", "duelist", "cleric"};
   char path[128];
@@ -50,14 +55,31 @@ bool assets_load() {
     snprintf(path, sizeof(path), "romfs:/gfx/art_%s.t3x", heroes[i]);
     A_art[i] = load_img(path, 400, 225);
   }
-  A_rat = load_img("romfs:/gfx/mob_rat.t3x", 256, 64);
-  A_gnoll = load_img("romfs:/gfx/mob_gnoll.t3x", 256, 64);
-  A_crab = load_img("romfs:/gfx/mob_crab.t3x", 256, 64);
+  static const struct { const char* file; int w, h; } sheets[MA_COUNT] = {
+      {"mob_rat", 256, 64},      {"mob_gnoll", 256, 64},
+      {"mob_crab", 256, 64},     {"mob_skeleton", 256, 32},
+      {"mob_thief", 256, 32},    {"mob_guard", 256, 16},
+      {"mob_bat", 128, 16},      {"mob_brute", 256, 32},
+      {"mob_shaman", 256, 64},   {"mob_spinner", 256, 16},
+      {"mob_golem", 256, 32},    {"mob_monk", 256, 32},
+      {"mob_warlock", 256, 16},  {"mob_succubus", 256, 16},
+      {"mob_eye", 256, 32},      {"mob_ripper", 256, 16},
+      {"mob_wraith", 128, 32},   {"mob_goo", 256, 16},
+      {"mob_tengu", 256, 16},    {"mob_dm300", 256, 64},
+      {"mob_king", 256, 16},     {"mob_yog", 256, 32},
+      {"mob_ghost", 128, 16},    {"mob_shopkeeper", 32, 16},
+      {"mob_blacksmith", 64, 16},{"mob_imp", 64, 16},
+  };
+  char mpath[64];
+  for (int i = 0; i < MA_COUNT; i++) {
+    snprintf(mpath, sizeof(mpath), "romfs:/gfx/%s.t3x", sheets[i].file);
+    A_mobs[i] = load_img(mpath, sheets[i].w, sheets[i].h);
+  }
   A_t_archs = load_img("romfs:/gfx/title_archs.t3x", 1024, 256);
   A_t_back = load_img("romfs:/gfx/title_back.t3x", 512, 512);
   A_t_front = load_img("romfs:/gfx/title_front.t3x", 1024, 512);
   A_font = load_img("romfs:/gfx/font.t3x", FONT_ATLAS_W, FONT_ATLAS_H);
-  return A_banners.ok() && A_chrome.ok() && A_tiles.ok() && A_font.ok();
+  return A_banners.ok() && A_chrome.ok() && A_tiles[0].ok() && A_font.ok();
 }
 
 // ---------------------------------------------------------------------------

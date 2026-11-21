@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "items.h"
+#include "content.h"
 
 #define MW 41
 #define MH 41
@@ -18,13 +19,34 @@ enum TileType : uint8_t {
   T_DOOR_OPEN,  // walkable, still drawn as a door frame
 };
 
-enum MobType : uint8_t {
-  M_RAT = 0,
-  M_GNOLL,
-  M_CRAB,
-  M_ALBINO,
-  M_BOSS,
-  M_NPC,
+
+enum FeatureType : uint8_t {
+  F_CHEST,
+  F_CHEST_OPEN,
+  F_CHEST_LOCKED,
+  F_WELL,
+  F_WELL_USED,
+  F_BOOKSHELF,
+  F_BOOKSHELF_USED,
+  F_ALCHEMY,
+  F_ALCHEMY_USED,
+  F_STATUE,
+  F_STATUE_USED,
+  F_TOMB,
+  F_TOMB_USED,
+  F_PLANT,
+  F_SIGN,
+  F_BARRICADE,
+  F_TRAP,
+  F_TRAP_FOUND,
+  F_TOKEN,
+};
+
+struct Feature {
+  int x = 0, y = 0;
+  uint8_t type = F_CHEST;
+  uint8_t state = 0;
+  int16_t aux = 0;
 };
 
 struct Mob {
@@ -62,6 +84,11 @@ struct ItemDisk {
   uint8_t id, count, level, charges;
 };
 
+struct FeatureDisk {
+  int16_t x, y, aux;
+  uint8_t type, state;
+};
+
 struct SearchFx {
   float x, y;      // tile coords
   float delay;     // seconds before the shrink starts
@@ -78,7 +105,7 @@ struct GameDisk {
   int16_t px, py, hp, maxhp, level, xp, xpnext;
   int16_t keys, gold, turns, shield;
   uint8_t weapon, weapon_level, armor, armor_level;
-  uint8_t quest, boss_dead;
+  uint8_t quest;
   uint8_t tiles[MH][MW];
   uint8_t seen[MH][MW];
   uint16_t mob_n;
@@ -87,6 +114,10 @@ struct GameDisk {
   FloorItemDisk items[48];
   uint8_t inv_n;
   ItemDisk inv[BAG_CAP];
+  uint8_t feature_n;
+  FeatureDisk features[64];
+  uint8_t boss_dead[5];
+  uint8_t tokens, token_quest, smith_used, imp_state;
 };
 
 struct Game {
@@ -102,12 +133,22 @@ struct Game {
   bool vis[MH][MW]{};
   std::vector<Mob> mobs;
   std::vector<FloorItem> items;
+  std::vector<Feature> features;
+  uint8_t boss_dead[5]{};
+  uint8_t tokens = 0;
+  uint8_t token_quest = 0;
+  uint8_t smith_used = 0;
+  uint8_t imp_state = 0;
+  bool shop_open = false;
+  int shop_sel = 0, shop_n = 0;
+  Item shop_items[4];
+  int shop_prices[4];
+  bool shop_sold[4];
   Item inv[BAG_CAP];
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
   uint8_t armor = IT_CLOTH_ARMOR, armor_level = 0;
   uint8_t quest = 0;     // 0 none, 1 accepted, 2 complete
-  uint8_t boss_dead = 0;
   int cursor_x = 1, cursor_y = 1;
   bool targeting = false;
   int target_item = -1;
@@ -166,6 +207,16 @@ struct Game {
   void dialog_choose(int i);
   void add_item(uint8_t id, int count = 1, int level = 0);
   bool remove_item(int idx, int count = 1);
+  int region() const { return region_of_floor(floor); }
+  bool boss_alive() const;
+  int feature_at(int x, int y) const;
+  bool feature_blocking(int x, int y) const;
+  void use_feature(int idx);
+  void trigger_tile_features();
+  void open_shop();
+  void shop_buy(int i);
+  void talk_npc(int idx);
+  void give_loot(int tier, bool chest);
   int weapon_bonus() const;
   int armor_bonus() const;
   int hero_atk() const;

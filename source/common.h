@@ -47,10 +47,16 @@ extern Img A_heroicons;  // 128x256  hero icons (16x16 grid)
 extern Img A_avatars;    // 256x32   hero portraits (24x32 frames)
 extern Img A_items;      // 256x512  item sprites (16x16 grid)
 extern Img A_itemicons;  // 128x64   item category icons (16x16 grid)
-extern Img A_tiles;      // 256x256  terrain tiles (16x16 grid)
+enum MobAsset : uint8_t {
+  MA_RAT, MA_GNOLL, MA_CRAB, MA_SKELETON, MA_THIEF, MA_GUARD, MA_BAT, MA_BRUTE,
+  MA_SHAMAN, MA_SPINNER, MA_GOLEM, MA_MONK, MA_WARLOCK, MA_SUCCUBUS, MA_EYE,
+  MA_RIPPER, MA_WRAITH, MA_GOO, MA_TENGU, MA_DM300, MA_KING, MA_YOG,
+  MA_GHOST, MA_SHOP, MA_SMITH, MA_IMP, MA_COUNT
+};
+extern Img A_tiles[5];   // region tilesets (256x256, 16x16 grid)
+extern Img A_mobs[MA_COUNT];
 extern Img A_hero[6];    // 256x128  hero walk sheets (16x16 grid)
 extern Img A_art[6];     // 400x225  hero splash art
-extern Img A_rat, A_gnoll, A_crab;
 extern Img A_t_archs, A_t_back, A_t_front;
 extern Img A_font;
 

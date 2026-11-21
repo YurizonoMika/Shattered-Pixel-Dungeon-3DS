@@ -32,7 +32,11 @@ copy interfaces/hero_icons.png   hero_icons.png
 copy sprites/avatars.png         avatars.png
 copy sprites/items.png           items.png
 copy sprites/item_icons.png      item_icons.png
-copy environment/tiles_sewers.png tiles.png
+copy environment/tiles_sewers.png tiles_sewers.png
+copy environment/tiles_prison.png tiles_prison.png
+copy environment/tiles_caves.png  tiles_caves.png
+copy environment/tiles_city.png   tiles_city.png
+copy environment/tiles_halls.png  tiles_halls.png
 
 for h in warrior mage rogue huntress duelist cleric; do
   copy "sprites/$h.png" "hero_$h.png"
@@ -41,9 +45,11 @@ for h in warrior mage rogue huntress duelist cleric; do
     -vf "scale=400:-1:flags=neighbor" "gfx/art_$h.png"
 done
 
-copy sprites/rat.png    mob_rat.png
-copy sprites/gnoll.png  mob_gnoll.png
-copy sprites/crab.png   mob_crab.png
+for m in rat gnoll crab skeleton thief guard bat brute shaman spinner golem monk \
+         warlock succubus eye ripper wraith goo tengu dm300 king yog \
+         ghost shopkeeper blacksmith imp; do
+  copy "sprites/$m.png" "mob_$m.png"
+done
 
 copy splashes/title/archs.png         title_archs.png
 copy splashes/title/back_clusters.png title_back.png

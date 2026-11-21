@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Status](https://img.shields.io/badge/status-playable%20slice-f0a030)
+![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 A **native C++17 port** of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon)
 for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
@@ -14,16 +14,17 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 [中文简介](#中文简介) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-> **Status: playable 3-floor slice, full save/load.** The dual-screen shell, hero
-> select, dungeon generation, turn loop, equipment, wands, a floor-3 boss and complete
-> run snapshots are working. It is not yet the full 25-floor game — see
-> [Roadmap](#roadmap).
+> **Status: complete 25-floor run, five regions, full save/load.** All five SPD
+> regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
+> bosses, NPCs, shops, interactables and area events. Content breadth is still smaller
+> than upstream SPD — see [Roadmap](#roadmap).
 
 ## 中文简介
 
 这是 Shattered Pixel Dungeon 的 **3DS 原生 C++ 移植原型**：不运行 JVM、不运行 APK、
-不用转译器。上下双屏菜单、6 英雄选择、前三层地牢、回合制移动/战斗、装备/法杖/
-消耗品、Boss、任务 NPC、HUD、对话和**完整存档**都已跑通，并且直接使用原版美术素材。
+不用转译器。上下双屏菜单、6 英雄选择、**25 层 / 5 个区域**、回合制移动/战斗、
+5 个 Boss、 NPC/商店/任务、装备与法杖、交互物、HUD、对话和**完整存档**都已跑通，
+并且直接使用原版美术素材。
 
 - 目标机型：Old 3DS / New 3DS（主要按 Old 3DS 的 400×240 + 320×240 设计）
 - 开发环境：macOS + devkitPro（Linux 同样可用）
@@ -40,8 +41,12 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
 | **Item details / actions** | **Bag tabs (药水 filter)** |
 | ![Item actions](docs/screens/bag_item.png) | ![Bag tabs](docs/screens/bag_tabs.png) |
-| **Search effect (CheckedCell pulse)** | |
-| ![Search](docs/screens/search.png) | |
+| **Search effect (CheckedCell pulse)** | **Shop** |
+| ![Search](docs/screens/search.png) | ![Shop](docs/screens/shop.png) |
+| **Prison (6–10)** | **Caves (11–15)** |
+| ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
+| **City (16–20)** | **Halls boss (21–25)** |
+| ![City](docs/screens/city.png) | ![Halls](docs/screens/boss_halls.png) |
 
 ## Features
 
@@ -59,41 +64,48 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   the bottom; the info popup shows title and description; tap the selected hero twice
   to start.
 
-### Dungeon (floors 1–3)
+### Dungeon (25 floors / 5 regions)
 
-- Room-and-corridor generation, doors, secret doors, stairs, water and grass.
-- Bresenham line-of-sight, explored/fogged tiles, camera follows the player/cursor.
-- Turn-based movement: cursor moves tile-by-tile, **A** auto-walks (BFS), **Y**
-  interacts (attack / pick up / open secret door / descend).
-- Mobs: giant rat, gnoll, sewer crab, albino rat; a **floor-3 boss** guards the exit,
-  and a friendly ghost NPC gives a quest.
-- Sprite animation: idle and run cycles for the hero, every mob and the NPC, plus
-  smooth per-tile movement interpolation for the player and monsters.
-- Orientation-aware doors (the flat door sprite is rotated to match the wall) and
-  floating/bobbing floor items with small shadows.
-- **Search** reproduces SPD's visual: every searched tile gets the blue
-  `CheckedCell` square that shrinks and fades with a distance delay, the hero plays
-  the `operate` animation, and a “搜索中” label floats above the head.
-- Weapons and armor with upgrade levels, two wands with charges and recharging,
-  bombs, three potions, mapping/upgrade/teleport scrolls, food, keys and gold.
-- **SPD-style backpack**: a 5×5 (25-slot) grid with gold, capacity, equipped gear,
-  item quantity/charge badges, a selection cursor, and a detail panel with
-  name/description plus **使用 / 装备 / 丢弃 / 关闭** actions.
-- **Bag tabs** like SPD's bag types: 全部 / 药水 / 卷轴 / 法杖 / 装备 / 其他,
-  with item icons, **L/R** switching and direct touch on the tab bar.
-- Quick slots show stack counts or wand charges; extra items live in the bag.
-- **Targeting mode** for bombs and wands: cursor turns yellow, **A** uses, **B** cancels.
-- Bottom HUD: HP/shield, level/XP, floor, keys, gold, 2×4 quick slots, and four
-  actions: wait (**hold to keep waiting until HP drops**), search, backpack, pause menu.
-- ABXY dialog overlay on the top screen: NPC portrait/name/text on the left, action
-  buttons on the right.
-- Floor 3 stairs end the slice with a score/victory screen.
+| Floors | Region | Boss | Area events |
+| --- | --- | --- | --- |
+| 1–5 | 下水道 | 史莱姆王 | 幽魂护符任务、商店（2 层） |
+| 6–10 | 监狱 | 天狗 | 上锁宝箱（需要钥匙）、商店（7 层） |
+| 11–15 | 洞穴 | DM-300 | 铁匠强化装备（12 层）、商店（12 层） |
+| 16–20 | 矮人城 | 矮人国王 | 小鬼徽记任务（16–19 层）、商店（17 层） |
+| 21–25 | 恶魔大厅 | 尤格-泽瓦 | 最终 Boss、通关结算、商店（22 层） |
+
+- Region-specific tilesets (`tiles_sewers/prison/caves/city/halls`), room-and-corridor
+  generation, doors, secret doors, stairs, water/grass, and boss-gated stairs.
+- **18 regular mob types** across the five regions (rats/gnolls/crabs, skeletons/
+  thieves/guards, bats/brutes/shamans/spiders, golems/monks/warlocks, demons/eyes/
+  rippers/wraiths), each with idle/run animation and smooth movement.
+- **Bosses**: 史莱姆王, 天狗, DM-300, 矮人国王, 尤格-泽瓦 — unique sprites, boss HP bar,
+  locked stairs until defeated, tier+1 equipment drops.
+- **NPCs**: 幽魂 (amulet quest), 店主 (per-region shop), 铁匠 (pay 40 gold for a weapon
+  upgrade), 小鬼 (collect 3 tokens on floors 16–19 for a reward).
+- **Interactables / decorations**: chests, locked chests, wells, bookshelves, alchemy
+  pots, statues, tombs, plants, signs, barricades, hidden traps and quest tokens.
+  Search reveals traps and secret doors with SPD's blue `CheckedCell` pulse.
+- **Shops**: 3–4 stocked items per region (potions, food, tiered gear, wands) with
+  gold prices, sold-out state and touch/keyboard buying.
+- **Equipment tiers** 1–5 for weapons and armor, six wands (magic/fire/frost/
+  lightning), plus potions, scrolls, food, bombs and keys.
+- **Search** reproduces SPD's visual: per-tile blue square shrinking with distance
+  delay, hero `operate` animation and a floating “搜索中” label.
+- **SPD-style backpack**: 5×5 (25-slot) grid, gold/capacity, equipped gear, item
+  badges, bag tabs (全部/药水/卷轴/法杖/装备/其他), and a detail panel with
+  **使用 / 装备 / 瞄准 / 丢弃 / 关闭**.
+- **Targeting mode** for bombs and wands; quick slots show counts/charges.
+- Bottom HUD: HP/shield, level/XP, region + floor, keys, gold, 2×4 quick slots,
+  wait/search/backpack/pause; search/wait long-press behaves like SPD.
+- ABXY dialog overlay with NPC portrait, name, text and four key actions.
+- Floor 25 victory screen after Yog-Dzewa.
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~5 KB, format v4): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v5): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
-floor items, quest and boss flags, and the full 25-slot bag. Load restores the exact
+floor items, features/traps, per-region boss flags, quest tokens and the full 25-slot bag. Load restores the exact
 run; leaving the game auto-saves. Slot files from older save formats are detected and
 ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 
@@ -246,6 +258,14 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 22 | Frozen search effect (CheckedCell + operate pose) |
 | 23 | Backpack with the item-detail panel open |
 | 24 | Backpack on the 药水 tab (filter demo) |
+| 25–29 | Boss floors 5 / 10 / 15 / 20 / 25 |
+| 30 | Prison (floor 6) |
+| 31 | Caves (floor 11) |
+| 32 | City (floor 16) |
+| 33 | Halls (floor 21) |
+| 34 | Blacksmith dialog (floor 12) |
+| 35 | Imp quest dialog (floor 17) |
+| 36 | Shop UI (floor 7) |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.
@@ -256,9 +276,10 @@ useful when the emulator shows an exception dialog.
 - [x] Dungeon generation, FOV, turn loop, mobs, items, HUD
 - [x] CJK bitmap font pipeline
 - [x] Full save/load (map, mobs, inventory, equipment, quest/boss state)
-- [x] Floors 1–3 content: four mob types, floor-3 boss, gear, wands, potions,
-      scrolls, quest NPC, victory screen
-- [ ] Remaining floors 4–25, shops, talents, full item/mob/spell tables
+- [x] All 25 floors and 5 regions with region mobs, bosses, NPCs, shops,
+      interactables and area events
+- [ ] Parity polish: SPD's full item/mob/spell tables, talents, alchemy recipes
+- [ ] Difficulty tuning across all 25 floors
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
 - [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)
 - [ ] Old 3DS performance and memory tuning
