@@ -74,26 +74,26 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 | Floors | Region | Boss | Area events |
 | --- | --- | --- | --- |
-| 1–5 | 下水道 | 史莱姆王 | 幽魂护符任务、商店（2 层） |
-| 6–10 | 监狱 | 天狗 | 上锁宝箱（需要钥匙）、商店（7 层） |
-| 11–15 | 洞穴 | DM-300 | 铁匠强化装备（12 层）、商店（12 层） |
-| 16–20 | 矮人城 | 矮人国王 | 小鬼徽记任务（16–19 层）、商店（17 层） |
-| 21–25 | 恶魔大厅 | 尤格-泽瓦 | 最终 Boss、通关结算、商店（22 层） |
+| 1–5 | 下水道 | 史莱姆王 | 幽魂护符任务（2–4 层） |
+| 6–10 | 监狱 | 天狗 | 制杖师任务（7–9 层）、商店（6 层） |
+| 11–15 | 洞穴 | DM-300 | 铁匠任务（12–14 层）、商店（11 层） |
+| 16–20 | 矮人城 | 矮人国王 | 小鬼任务（17–19 层）、商店（16 层）、20 层小鬼商店 |
+| 21–25 | 恶魔大厅 | 尤格-泽瓦 | 最终 Boss、通关结算 |
 
 - Region-specific tilesets (`tiles_sewers/prison/caves/city/halls`), room-and-corridor
   generation, doors, secret doors, stairs, water/grass, and boss-gated stairs.
-- **18 regular mob types** across the five regions (rats/gnolls/crabs, skeletons/
+- **28 enemy types** across the five regions (rats/gnolls/crabs, skeletons/
   thieves/guards, bats/brutes/shamans/spiders, golems/monks/warlocks, demons/eyes/
   rippers/wraiths), each with idle/run animation and smooth movement.
 - **Bosses**: 史莱姆王, 天狗, DM-300, 矮人国王, 尤格-泽瓦 — unique sprites, boss HP bar,
   locked stairs until defeated, tier+1 equipment drops.
 - **NPCs**: 幽魂 (amulet quest), 店主 (per-region shop), 铁匠 (pay 40 gold for a weapon
   upgrade), 小鬼 (collect 3 tokens on floors 16–19 for a reward).
-- **Interactables / decorations**: chests, locked chests, wells, bookshelves, alchemy
-  pots, statues, tombs, plants, signs, barricades, hidden traps and quest tokens.
-  Search reveals traps and secret doors with SPD's blue `CheckedCell` pulse.
-- **Shops**: 3–4 stocked items per region (potions, food, tiered gear, wands) with
-  gold prices, sold-out state and touch/keyboard buying.
+- **Interactables / decorations**: chests, locked chests, mimics, wells,
+  bookshelves, alchemy pots, statues, tombs, plants, barricades, hidden traps and
+  quest tokens. Search reveals traps and secret doors with SPD's blue
+  `CheckedCell` pulse.
+- **Shops**: shops on depths 6/11/16 plus the Imp's depth-20 shop after his quest.
 - **90 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
   11 potions, 11 scrolls, 8 rings, 3 food types, 3 bombs, 3 throwing weapons,
   3 seeds, keys/gold/quest items.
@@ -117,25 +117,46 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 - ABXY dialog overlay with NPC portrait, name, text and four key actions.
 - Floor 25 victory screen after Yog-Dzewa.
 
+### Level generation (ported from SPD)
+
+- **Room budget** follows the five region classes: 4–6 / 5–6 / 6–7 / 6–8 / 8–9
+  standard rooms, 1–2 / 1–3 / 2–3 / 2–3 / 2–3 special rooms, plus entrance, exit,
+  shops (6/11/16), the Imp shop (20) and 2–3 secret rooms per region.
+- **Special rooms** are drawn from SPD's equip/consumable rotation and include
+  treasury, armory, crypt, pool, magic well, garden, library, storage, laboratory
+  (one per region on floor 3/4), statue, sentry, trap/toxic/fire rooms, runestone
+  room and crystal vault. Each has one entrance; most are **locked** and place an
+  iron key in a standard room.
+- **Level feelings** on depths 2+: 50% chance of water, grass, large, traps,
+  secrets or dark; large adds rooms/items/mobs, traps doubles traps, secrets adds a
+  secret room, dark reduces FOV.
+- **Mob rotation** uses SPD's exact depth table (rat/snake/gnoll/swarm/crab/slime,
+  skeleton/thief/DM-100/guard/necromancer, bat/brute/shaman/spinner/DM-200,
+  ghoul/elemental/warlock/monk/golem, succubus/eye/scorpio), including the 2.5%
+  rare additions and 1/50 albino alt. Mob cap is `3 + depth%5 + rand(0..2)`,
+  floor 1 spawns 8, and the level refills to the cap every 50 turns (33 dark).
+- **Traps**: `NormalIntRange(2, 3 + depth/5)`.
+- **Quest placement**: ghost in the exit room (2–4), Wandmaker in the entrance
+  room (7–9), Blacksmith (12–14) and Imp (17–19) in their own quest rooms.
+
 ### Loot generation (ported from SPD)
 
-- Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**, plus one guaranteed
-  food drop (`Level.createItems()`).
-- Category weights follow SPD's combined generator deck: weapons 4, armor 3,
-  thrown/bombs 5, wands 4, potions 16, scrolls 16, food 2, gold 20, keys 1,
-  rings 2, throwing weapons 3, seeds 2.
+- Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**; large floors add 2.
+  There is no guaranteed food drop — food comes from mobs and shops.
+- Category decks follow SPD's first/second generator deck: weapons 2, armor 2/1,
+  missiles 1/2, wands 1, rings 1, potions 8, scrolls 8, seeds 1, stones 1, gold 10
+  (artifacts are mapped to rings).
 - Item tiers use SPD's per-floor-set table
-  `{0,75,20,4,1} / {0,25,50,20,5} / {0,0,40,50,10} / {0,0,20,40,40} / {0,0,0,20,80}`,
-  so early floors mostly drop tier 2 and late floors tier 4–5.
-- Heap presentation: 1/20 skeleton, 5/20 chest, otherwise a floor heap; upgradable
-  items have a chance to become a **locked chest with a key** placed elsewhere.
+  `{0,75,20,4,1} / {0,25,50,20,5} / {0,0,40,50,10} / {0,0,20,40,40} / {0,0,0,20,80}`.
+- Heap presentation: 1/20 skeleton, 4/20 chest, 1/20 **mimic**, otherwise a floor
+  heap; upgradable items can become a **locked chest with a key**.
 - Gold piles use SPD's range `30 + 10×depth … 60 + 20×depth`.
-- Mob drops are rare gold only (10%); bosses drop tier+1 equipment and a large purse.
+- Beasts drop mystery meat; all mobs drop gold 10% of the time.
 
 ### Shops (ported from SPD)
 
-- Shops spawn on **depths 6, 11, 16 and 20**. The floor-20 shop is run by the
-  Ambitious Imp and only appears if his quest has been completed.
+- Regular shops spawn on **depths 6, 11 and 16** (`Dungeon.shopOnLevel()`).
+  The depth-20 shop is the Ambitious Imp's and only appears if his quest is done.
 - Stock follows SPD's category list: current-tier melee weapon, matching armor,
   a stack of throwing weapons, a healing potion + 2 random potions, magic mapping /
   identify / remove curse + a random scroll, 2 rations, a bomb, an Ankh, and a
@@ -156,11 +177,12 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | NPC | Floors | Task | Reward |
 | --- | --- | --- | --- |
 | Sad Ghost | 2–4 | Kill the floor's quest miniboss (Fetid Rat / Gnoll Trickster / Great Crab) | Choose a weapon or armor (tier 2–5, upgrade 0–3) |
-| Old Wandmaker | 6–9 | Retrieve corpse dust from behind barricades | Choose one of two wands (+1…+3) |
-| Troll Blacksmith | 11–14 | Collect 15 dark gold ore | Upgrade weapon or armor by +1 |
+| Old Wandmaker | 7–9 | Retrieve corpse dust from behind barricades | Choose one of two wands (+1…+3) |
+| Troll Blacksmith | 12–14 | Collect 15 dark gold ore | Upgrade weapon or armor by +1 |
 | Ambitious Imp | 17–19 | Kill 5 monks or 4 golems | +2 ring, unlocks the depth-20 shop |
 
-Quest floors are rolled per run and stored in the save. Quest items are
+Quest floors are rolled per run with SPD's probabilities (ghost 2–4, Wandmaker
+7–9, Blacksmith 12–14, Imp 17–19) and stored in the save. Quest items are
 non-sellable; the ghost disappears after the reward, and the Imp reappears as the
 floor-20 shopkeeper. Picking up corpse dust spawns wraiths every few turns until
 the Wandmaker is paid; the Blacksmith lends a pickaxe and seals a mine area behind
@@ -355,7 +377,9 @@ tools/venv/bin/python tools/item_audit.py
 
 Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
 
-- walls use the **raised-wall** group (`80..83`, stitched per side),
+- walls use the **raised-wall** group (`80..83`, stitched per side), with the
+  internal top-surface layer (`144..159`) on interior wall cells and a 4px
+  contact-shadow overhang (`192..207`) at wall/floor joins,
 - doors use the raised door frames (`112` closed / `113` open),
 - water uses the 16-way stitched tiles (`32..47`),
 - chests / locked chests / tombs use `ItemSpriteSheet` cells `36 / 37 / 34`,
@@ -412,6 +436,9 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 70 | Alchemy UI |
 | 72 | Scroll of Transmutation item selector |
 | 73 | All 90 item icons on one screen (sprite audit) |
+| 74 | Generate all floors and print room/mob/item/door audit |
+| 75 | Spawn the new depth-rotation enemies for a visual check |
+| 76 | Clean enemy gallery (no items/features) |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |
@@ -432,11 +459,17 @@ useful when the emulator shows an exception dialog.
 - [x] Shopkeeper warn/flee, bags, alchemy UI, Stone of Augmentation, tipped darts
 - [x] Integer-scaled, shadow-free UI text; fixed multiline wrapping measurement
 - [x] Wandmaker wraith spawns, pickaxe/ore mine area, class-neutral talent tiers
-- [ ] True Old Mine sub-level (currently a sealed room on the same floor)
+- [x] SPD room budgets, special-room rotation, locked special rooms + keys
+- [x] SPD depth-specific mob rotations, mob cap, respawns, rare alts
+- [x] SPD level feelings, traps, loot decks, chests/mimics, gold range
+- [x] CIA packaging (makerom, banner + icon, RSF permissions)
+- [ ] True Old Mine / Imp Vault sub-levels (currently rooms on the same floor)
+- [ ] Boss arenas as separate levels (regular rooms + boss room for now)
 - [ ] Full class-specific 3-way talent trees (currently 4 fixed talent tiers)
-- [ ] Difficulty tuning across all 25 floors
+- [ ] Artifacts, trinkets, exotic consumables and full alchemy recipes
+- [ ] Exact layouts for every special room (crystal/sacrifice/fire variants are simplified)
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
-- [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)
+- [ ] Difficulty tuning across all 25 floors
 - [ ] Old 3DS performance and memory tuning
 - [ ] GitHub Actions build (devkitPro container)
 

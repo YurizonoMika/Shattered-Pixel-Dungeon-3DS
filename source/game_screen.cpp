@@ -10,6 +10,19 @@ static bool wall_like(uint8_t t) {
   return t == T_WALL || t == T_SECRET;
 }
 
+// A wall cell touching walkable space is the visible "face" of a wall; only
+// fully interior wall cells get the dark top-surface layer.
+static bool wall_face_cell(int x, int y) {
+  static const int DX[4] = {-1, 1, 0, 0};
+  static const int DY[4] = {0, 0, -1, 1};
+  for (int i = 0; i < 4; i++) {
+    int nx = x + DX[i], ny = y + DY[i];
+    if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
+    if (!wall_like(G.tiles[ny][nx])) return true;
+  }
+  return false;
+}
+
 static void tile_cell(uint8_t t, int& cx, int& cy) {
   // Indices from SPD's DungeonTileSheet (tiles_sewers.png is a 16x16 grid).
   int idx = 0;
@@ -17,6 +30,7 @@ static void tile_cell(uint8_t t, int& cx, int& cy) {
     case T_WALL: idx = 80; break;      // RAISED_WALL (3D wall face)
     case T_FLOOR: idx = 0; break;      // FLOOR
     case T_DOOR: idx = 56; break;      // flat door (raised door drawn on top)
+    case T_DOOR_LOCKED: idx = 56; break;
     case T_SECRET: idx = 80; break;    // looks like a wall
     case T_STAIRS: idx = 17; break;    // EXIT
     case T_WATER: idx = 32; break;     // WATER (stitched in draw_map)
@@ -101,7 +115,8 @@ static void draw_feature(const Feature& f, int camx, int camy) {
       draw_cell(A_tiles[G.region()], 9 * 16, 7 * 16, 16, 16, x, y, 1, 1, 0);
       break;
     case F_CHEST:
-    case F_CHEST_LOCKED: {
+    case F_CHEST_LOCKED:
+    case F_CHEST_MIMIC: {
       // SPD ItemSpriteSheet.CHEST (36) / LOCKED_CHEST (37).
       int spr = f.type == F_CHEST_LOCKED ? 37 : 36;
       draw_cell(A_items, (spr % 16) * 16, (spr / 16) * 16, 16, 16, x, y + 1, 1, 1, 0);
@@ -172,9 +187,10 @@ static void draw_map() {
         if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
         draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
                   tx, ty, 1, 1, tint);
-      } else if (tt == T_DOOR || tt == T_DOOR_OPEN) {
-        // Raised doors are vertical panels in SPD: 112 closed, 113 open.
-        int idx = tt == T_DOOR_OPEN ? 113 : 112;
+      } else if (tt == T_DOOR || tt == T_DOOR_OPEN ||
+                 tt == T_DOOR_LOCKED) {
+        // Raised doors are vertical panels in SPD: 112 closed, 113 open, 114 locked.
+        int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
         draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
                   tx, ty, 1, 1, tint);
       } else if (tt == T_WATER) {
@@ -190,6 +206,44 @@ static void draw_map() {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
+      }
+    }
+  }
+
+  // SPD upper wall layers: internal wall tops (144..159) and overhangs (192..207).
+  for (int y = ty0; y <= ty1; y++) {
+    for (int x = tx0; x <= tx1; x++) {
+      if (!G.seen[y][x]) continue;
+      uint8_t tt = G.tiles[y][x];
+      uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
+      uint32_t tint = G.vis[y][x] ? 0 : 0x707070FF;
+      float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
+      if (wall_like(tt) && wall_like(below) && !wall_face_cell(x, y)) {
+        // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
+        int right = (x + 1 < MW && wall_like(G.tiles[y][x + 1])) ? 1 : 0;
+        int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
+        int lb = (x > 0 && y + 1 < MH && wall_like(G.tiles[y + 1][x - 1])) ? 1 : 0;
+        int left = (x > 0 && wall_like(G.tiles[y][x - 1])) ? 1 : 0;
+        int idx = 144 + (right ? 0 : 1) + (rb ? 0 : 2) + (lb ? 0 : 4) +
+                  (left ? 0 : 8);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+                  tx, ty, 1, 1, tint);
+      } else if (!wall_like(tt) && wall_like(below)) {
+        // Shadow/edge over the tile directly above a wall (SPD overhang layer).
+        int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
+        int lb = (x > 0 && y + 1 < MH && wall_like(G.tiles[y + 1][x - 1])) ? 1 : 0;
+        int idx = 192 + (rb ? 0 : 1) + (lb ? 0 : 2);
+        // Use only the 4px shadow strip at the bottom of the overhang tile so
+        // walls get contact shading without painting a black bar on the floor.
+        u32 otint = G.vis[y][x] ? 0x90FFFFFF : 0x90606060;
+        int cy = (idx / 16) * 16 + 12;
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, cy, 16, 4, tx, ty + 12,
+                  1, 1, otint);
+      } else if (!wall_like(tt) && (below == T_DOOR || below == T_DOOR_OPEN ||
+                                    below == T_DOOR_LOCKED)) {
+        int idx = below == T_DOOR_OPEN ? 225 : 224;
         draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
                   tx, ty, 1, 1, tint);
       }

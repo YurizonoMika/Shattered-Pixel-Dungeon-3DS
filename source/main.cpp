@@ -766,6 +766,66 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 76) {
+          start_new_game(0);
+          G.floor = 14;
+          G.gen_level();
+          G.mobs.clear();
+          G.features.clear();
+          G.items.clear();
+          static const uint8_t types[] = {
+              M_SNAKE, M_SWARM, M_SLIME, M_DM100, M_NECROMANCER,
+              M_DM200, M_GHOUL, M_ELEMENTAL, M_SCORPIO, M_MIMIC};
+          for (int i = 0; i < 10; i++) {
+            int x = G.px - 4 + (i % 5) * 2;
+            int y = G.py - 2 + (i / 5) * 3;
+            if (!G.walkable(x, y)) continue;
+            Mob m;
+            m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+            m.type = types[i];
+            m.maxhp = m.hp = 100;
+            m.sleep_t = 999;
+            G.mobs.push_back(m);
+          }
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
+          G.demo_lock = true;
+        }
+        else if (want == 75) {
+          start_new_game(0);
+          G.floor = 14;
+          G.gen_level();
+          G.mobs.clear();
+          static const uint8_t types[] = {
+              M_SNAKE, M_SWARM, M_SLIME, M_DM100, M_NECROMANCER,
+              M_DM200, M_GHOUL, M_ELEMENTAL, M_SCORPIO, M_MIMIC};
+          int n = (int)(sizeof(types) / sizeof(types[0]));
+          for (int i = 0; i < n; i++) {
+            int x = G.px - 4 + (i % 5) * 2;
+            int y = G.py - 3 + (i / 5) * 3;
+            if (!G.walkable(x, y)) continue;
+            Mob m;
+            m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
+            m.type = types[i];
+            m.maxhp = m.hp = 100;
+            m.sleep_t = 999;
+            G.mobs.push_back(m);
+          }
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
+          G.demo_lock = true;
+        }
+        else if (want == 74) {
+          start_new_game(0);
+          for (int f = 1; f <= 25; f++) {
+            G.floor = f;
+            G.gen_level();
+            G.debug_dump();
+          }
+          G.floor = 1;
+          G.gen_level();
+          G.demo_lock = true;
+        }
         else if (want == 73) {
           start_new_game(0);
           G.icon_test = true;

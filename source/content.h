@@ -39,6 +39,9 @@ enum MobType : uint8_t {
   M_NPC_SMITH,
   M_NPC_WANDMAKER,
   M_NPC_IMP,
+  // depth-specific rotation mobs (appended to keep old save values stable)
+  M_SNAKE, M_SWARM, M_SLIME, M_DM100, M_NECROMANCER, M_DM200, M_GHOUL,
+  M_ELEMENTAL, M_SCORPIO, M_MIMIC,
   M_COUNT
 };
 

@@ -18,6 +18,7 @@ enum TileType : uint8_t {
   T_WATER,
   T_GRASS,
   T_DOOR_OPEN,  // walkable, still drawn as a door frame
+  T_DOOR_LOCKED,// needs a key
 };
 
 
@@ -41,6 +42,7 @@ enum FeatureType : uint8_t {
   F_TRAP,
   F_TRAP_FOUND,
   F_TOKEN,
+  F_CHEST_MIMIC,
 };
 
 struct Feature {
@@ -165,9 +167,18 @@ struct Game {
   bool bag_potion = false, bag_scroll = false, bag_wand = false;
   bool shop_warned[25]{}, shop_gone[25]{};
   int dust_timer = 0;
+  int respawn_t = 0;
+  int mob_cap = 0;
+  int room_count = 0;
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
   bool icon_test = false;
+  uint8_t fov_radius = 7;
+  // Deterministic per-run plan (rebuilt from the seed, not saved).
+  uint8_t plan_special[25][3]{};
+  uint8_t plan_special_n[25]{};
+  uint8_t plan_feeling[25]{};
+  uint8_t plan_secret[25]{};
   int alchemy_sel = 0;
   bool transmute_open = false;
   int transmute_sel = 0;
@@ -224,6 +235,8 @@ struct Game {
 
   void new_run(int hero_class, uint32_t s);
   void gen_level();
+  void build_run_plan();
+  void debug_dump();
   void recompute_fov();
   bool los(int x0, int y0, int x1, int y1) const;
   bool walkable(int x, int y) const;

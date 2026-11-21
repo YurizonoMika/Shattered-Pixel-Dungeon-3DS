@@ -46,7 +46,8 @@ for h in warrior mage rogue huntress duelist cleric; do
 done
 
 for m in rat gnoll crab skeleton thief guard bat brute shaman spinner golem monk \
-         warlock succubus eye ripper wraith goo tengu dm300 king yog \
+         warlock succubus eye ripper wraith snake swarm slime dm100 necromancer \
+         dm200 ghoul elemental scorpio mimic goo tengu dm300 king yog \
          ghost shopkeeper blacksmith imp wandmaker; do
   copy "sprites/$m.png" "mob_$m.png"
 done

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Generation rework toward SPD's actual mechanics:
+
+- exact room budgets per region, shop floors 6/11/16 and the Imp shop on 20
+- SPD special-room rotation (treasury, armory, crypt, pool, well, garden,
+  library, storage, lab, statue, sentry, trap/toxic/fire, runestone, vault)
+  with single entrances, locked doors and iron keys
+- level feelings (water/grass/large/traps/secrets/dark) on depths 2+
+- exact depth mob rotation, mob cap, 50-turn respawns, rare alts and 2.5% rares
+- 10 new enemies (snake, swarm, slime, DM-100, necromancer, DM-200, ghoul,
+  elemental, scorpio, mimic) with SPD stats
+- loot decks, 3/4/5 item counts, skeleton/chest/mimic/locked-chest heaps,
+  mob meat/gold drops and no guaranteed food
+- raised-wall internal tops and wall/floor overhang shading
+- quest floors/rooms corrected (Wandmaker 7–9, Blacksmith 12–14)
+- debug scene 74 (generation audit), 75/76 (enemy galleries)
+
+
 ## 0.1.0alpha — 2026-11-21
 
 First public build.
