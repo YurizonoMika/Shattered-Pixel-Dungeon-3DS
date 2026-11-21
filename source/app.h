@@ -13,6 +13,8 @@ extern int ACTIVE_SLOT;
 extern float TIME_S;
 extern float FPS;
 extern Scene SETTINGS_BACK;
+extern int g_bag_sel;
+extern bool g_bag_action;
 
 void dlog(const char* fmt, ...);
 void go_scene(Scene s);

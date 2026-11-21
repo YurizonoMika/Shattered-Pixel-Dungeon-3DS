@@ -2,6 +2,9 @@
 
 #include <algorithm>
 
+int g_bag_sel = 0;
+bool g_bag_action = false;
+
 static void tile_cell(uint8_t t, int& cx, int& cy) {
   // Indices from SPD's DungeonTileSheet (tiles_sewers.png is a 16x16 grid).
   int idx = 0;
@@ -28,9 +31,15 @@ static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
 }
 
 static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
-                      int camx, int camy) {
+                      int search_ms, int camx, int camy) {
   static const uint8_t idle[8] = {0, 0, 0, 1, 0, 0, 1, 1};
-  int frame = moving ? 2 + (anim_ms / 100) % 6 : idle[(anim_ms / 1000) % 8];
+  int frame;
+  if (search_ms > 0) {
+    // SPD's operate animation: frames 16,17,16,17 at 8fps.
+    frame = 16 + ((500 - search_ms) / 125) % 2;
+  } else {
+    frame = moving ? 2 + (anim_ms / 100) % 6 : idle[(anim_ms / 1000) % 8];
+  }
   draw_sprite(A_hero[hero % 6], 12, 15, frame,
               vx * 16 - camx + 2, vy * 16 - camy + 1);
 }
@@ -112,6 +121,15 @@ static void draw_map() {
     }
   }
 
+  // Search effect: SPD's CheckedCell (blue square shrinking after a delay).
+  for (const SearchFx& f : G.search_fx) {
+    if (f.delay > 0 || f.alpha <= 0) continue;
+    float s = 16.0f * f.alpha;
+    int a = (int)(f.alpha * 255);
+    draw_box(f.x * 16 - camx + 8 - s * 0.5f, f.y * 16 - camy + 8 - s * 0.5f,
+             s, s, C2D_Color32(0x55, 0xAA, 0xFF, a), 0.52f);
+  }
+
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x]) continue;
@@ -136,8 +154,13 @@ static void draw_map() {
 
   // player (hero frames are 12x15 inside the sheet)
   draw_hero(G.hero, G.pvx, G.pvy, G.panim_ms,
-            fabsf(G.pvx - G.px) > 0.01f || fabsf(G.pvy - G.py) > 0.01f, camx,
-            camy);
+            fabsf(G.pvx - G.px) > 0.01f || fabsf(G.pvy - G.py) > 0.01f,
+            G.search_ms, camx, camy);
+  if (G.search_ms > 0) {
+    const char* txt = "搜索中";
+    text(txt, G.pvx * 16 - camx + 8 - text_w(txt, 1.0f) * 0.5f,
+         G.pvy * 16 - camy - 14, CLR_WHITE, 1.0f);
+  }
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
@@ -268,35 +291,66 @@ static void draw_messages() {
   textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
-static void draw_backpack() {
-  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
-  draw_panel(8, 38, BOT_W - 16, 184, 2.0f);
-  text("背包", 20, 40, CLR_YELLOW, 2.0f);
-  textf(BOT_W - 130, 46, CLR_GREY, 1.0f, "%d 金  %d 钥匙", G.gold, G.keys);
-  // equipped gear
-  textf(20, 68, CLR_GREY, 1.0f, "武器: %s", item_name(G.weapon));
-  if (G.weapon_level) textf(168, 68, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
-  textf(20, 82, CLR_GREY, 1.0f, "护甲: %s", item_name(G.armor));
-  if (G.armor_level) textf(168, 82, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+static const float BAG_X = 66, BAG_Y = 58, BAG_W = 36, BAG_H = 29;
+static const float BAG_GX = 38, BAG_GY = 31;
 
-  for (int i = 0; i < 8; i++) {
-    float x = 18 + (i % 2) * 148, y = 98 + (i / 2) * 28;
-    draw_button(x, y, 140, 26, "", false, 1.4f);
+static void draw_bag_action() {
+  if (g_bag_sel < 0 || g_bag_sel >= G.inv_n) return;
+  const ItemDef& d = item_def(G.inv[g_bag_sel].id);
+  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.7f);
+  draw_panel(16, 40, 288, 176, 2.0f);
+  draw_item_icon(G.inv[g_bag_sel].id, 30, 52, 2.0f);
+  text(d.name, 72, 50, CLR_YELLOW, 2.0f);
+  char extra[40] = "";
+  if (d.kind == K_WEAPON || d.kind == K_ARMOR)
+    snprintf(extra, sizeof(extra), "强化 +%d", G.inv[g_bag_sel].level);
+  else if (d.kind == K_WAND)
+    snprintf(extra, sizeof(extra), "充能 %d", G.inv[g_bag_sel].charges);
+  else if (G.inv[g_bag_sel].count > 1)
+    snprintf(extra, sizeof(extra), "数量 %d", G.inv[g_bag_sel].count);
+  if (extra[0]) text(extra, 72, 78, CLR_GREY, 1.0f);
+  text_wrap(d.desc, 30, 102, 260, CLR_WHITE, 1.0f, 2.0f);
+
+  const char* primary = "使用 (A)";
+  if (d.kind == K_WEAPON || d.kind == K_ARMOR) primary = "装备 (A)";
+  else if (d.kind == K_WAND || d.kind == K_BOMB) primary = "瞄准 (A)";
+  else if (d.kind == K_QUEST) primary = "任务物品";
+
+  draw_button(30, 140, 120, 30, primary, false, 1.8f);
+  draw_button(170, 140, 120, 30, "丢弃 (X)", false, 1.8f);
+  draw_button(100, 176, 120, 26, "关闭 (B)", false, 1.8f);
+}
+
+static void draw_backpack() {
+  draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 210), 0.66f);
+  draw_panel(4, 4, BOT_W - 8, BOT_H - 8, 2.0f);
+  text("背包", 14, 8, CLR_YELLOW, 2.0f);
+  draw_item_icon(IT_GOLD, 210, 12, 1.0f);
+  textf(230, 14, CLR_YELLOW, 1.0f, "%d", G.gold);
+  textf(258, 14, CLR_GREY, 1.0f, "%d/%d", G.inv_n, BAG_CAP);
+
+  textf(14, 34, CLR_GREY, 1.0f, "武器: %s", item_name(G.weapon));
+  if (G.weapon_level) textf(120, 34, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
+  textf(164, 34, CLR_GREY, 1.0f, "护甲: %s", item_name(G.armor));
+  if (G.armor_level) textf(270, 34, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+
+  for (int i = 0; i < BAG_CAP; i++) {
+    float x = BAG_X + (i % 5) * BAG_GX;
+    float y = BAG_Y + (i / 5) * BAG_GY;
+    draw_nine(A_chrome, 38, 6, 6, 6, 2, 2, 2, 2, x, y, BAG_W, BAG_H, 1.4f);
     if (i < G.inv_n) {
       const ItemDef& d = item_def(G.inv[i].id);
-      draw_item_icon(G.inv[i].id, x + 6, y + 5, 1.0f);
-      text(item_name(G.inv[i].id), x + 28, y + 6, CLR_WHITE, 1.0f);
-      char right[16];
-      if (d.kind == K_WAND) snprintf(right, sizeof(right), "%d", G.inv[i].charges);
-      else if (d.kind == K_WEAPON || d.kind == K_ARMOR)
-        snprintf(right, sizeof(right), "%s%d", G.inv[i].level ? "+" : "", G.inv[i].level);
-      else snprintf(right, sizeof(right), "x%d", G.inv[i].count);
-      text(right, x + 140 - text_w(right, 1.0f) - 6, y + 6, CLR_GREY, 1.0f);
-    } else {
-      text("—", x + 10, y + 6, C2D_Color32(140, 140, 150, 255), 1.0f);
+      draw_item_icon(G.inv[i].id, x + 6, y + 2, 1.5f);
+      int num = d.kind == K_WAND ? G.inv[i].charges : G.inv[i].count;
+      if (d.kind == K_WAND || num > 1)
+        textf(x + BAG_W - 12, y + BAG_H - 13, CLR_WHITE, 1.0f, "%d", num);
+      if (d.kind == K_WAND || d.kind == K_WEAPON || d.kind == K_ARMOR)
+        draw_box(x + 2, y + 2, 3, 3, CLR_YELLOW, 0.55f);
     }
+    if (i == g_bag_sel) draw_cursor(x, y, BAG_W, BAG_H, CLR_YELLOW, 0.6f, false);
   }
-  text_c("点击装备/使用   B 关闭", 0, BOT_W, 210, CLR_GREY, 1.0f);
+  text_c("方向键选择   A 查看/使用   B 关闭", 0, BOT_W, 214, CLR_GREY, 1.0f);
+  if (g_bag_action) draw_bag_action();
 }
 
 static void draw_pause() {
@@ -328,20 +382,33 @@ static bool in_rect(float x, float y, float rx, float ry, float rw, float rh) {
   return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
 }
 
-static void do_search() {
-  bool found = false;
-  for (int dy = -3; dy <= 3; dy++)
-    for (int dx = -3; dx <= 3; dx++) {
-      int x = G.px + dx, y = G.py + dy;
-      if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
-      if (G.tiles[y][x] == T_SECRET) {
-        G.tiles[y][x] = T_DOOR;
-        G.seen[y][x] = true;
-        found = true;
-      }
-    }
-  G.message(found ? "你发现了一扇暗门！" : "你仔细搜索了周围，什么也没找到。");
-  G.advance_turn();
+static void do_search() { G.search(); }
+
+static void bag_primary_action() {
+  int i = g_bag_sel;
+  if (i < 0 || i >= G.inv_n) return;
+  const ItemDef& d = item_def(G.inv[i].id);
+  if (d.kind == K_QUEST) {
+    G.message("这是任务物品，不能使用。");
+  } else if (d.kind == K_WAND || d.kind == K_BOMB) {
+    G.clear_path();
+    G.use_item(i);
+    G.backpack = false;
+    g_bag_action = false;
+  } else if (d.kind == K_WEAPON || d.kind == K_ARMOR) {
+    G.equip_item(i);
+    g_bag_action = false;
+  } else {
+    G.use_item(i);
+    g_bag_action = false;
+  }
+}
+
+static void bag_drop_action() {
+  if (G.drop_item(g_bag_sel)) {
+    if (g_bag_sel >= G.inv_n && g_bag_sel > 0) g_bag_sel--;
+    g_bag_action = false;
+  }
 }
 
 static int s_wait_frames = 0;
@@ -351,7 +418,7 @@ static void activate_action(int i) {
   switch (i) {
     case 0: G.wait_turns(1); G.message("你等待了一回合。"); break;
     case 1: do_search(); break;
-    case 2: G.clear_path(); G.backpack = !G.backpack; break;
+    case 2: G.clear_path(); G.backpack = !G.backpack; g_bag_sel = 0; g_bag_action = false; break;
     case 3: G.clear_path(); G.paused = 1; break;
   }
 }
@@ -363,6 +430,7 @@ void game_update() {
   last_tick = now_tick;
   G.tick(dt);
   if (G.msg_timer > 0) G.msg_timer--;
+  if (G.demo_lock) return;
 
   if (G.dialog) {
     if (IN.pressed(KEY_A)) G.dialog_choose(0);
@@ -399,15 +467,34 @@ void game_update() {
   }
 
   if (G.backpack) {
+    if (g_bag_action) {
+      int i = g_bag_sel;
+      if (IN.pressed(KEY_B)) { g_bag_action = false; return; }
+      if (IN.pressed(KEY_A)) { bag_primary_action(); return; }
+      if (IN.pressed(KEY_X)) { bag_drop_action(); return; }
+      if (IN.tap) {
+        if (in_rect(IN.tap_x, IN.tap_y, 30, 140, 120, 30)) bag_primary_action();
+        else if (in_rect(IN.tap_x, IN.tap_y, 170, 140, 120, 30)) bag_drop_action();
+        else if (in_rect(IN.tap_x, IN.tap_y, 100, 176, 120, 26)) g_bag_action = false;
+      }
+      return;
+    }
     if (IN.pressed(KEY_B)) { G.backpack = false; return; }
+    if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dx));
+    if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dy * 5));
+    if (IN.pressed(KEY_A) && g_bag_sel < G.inv_n) g_bag_action = true;
     if (IN.tap) {
-      for (int i = 0; i < 8; i++) {
-        float x = 18 + (i % 2) * 148, y = 98 + (i / 2) * 28;
-        if (in_rect(IN.tap_x, IN.tap_y, x, y, 140, 26) && i < G.inv_n) {
-          G.use_item(i);
+      for (int i = 0; i < BAG_CAP; i++) {
+        float x = BAG_X + (i % 5) * BAG_GX;
+        float y = BAG_Y + (i / 5) * BAG_GY;
+        if (in_rect(IN.tap_x, IN.tap_y, x, y, BAG_W, BAG_H)) {
+          g_bag_sel = i;
+          if (i < G.inv_n) g_bag_action = true;
           return;
         }
       }
+      if (in_rect(IN.tap_x, IN.tap_y, 4, 4, BOT_W - 8, BOT_H - 8)) return;
+      G.backpack = false;
     }
     return;
   }
@@ -424,7 +511,7 @@ void game_update() {
 
   if (IN.pressed(KEY_A)) G.act_at(G.cursor_x, G.cursor_y, false);
   if (IN.pressed(KEY_Y)) G.act_at(G.cursor_x, G.cursor_y, true);
-  if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; }
+  if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; g_bag_sel = 0; g_bag_action = false; }
   if (IN.pressed(KEY_L)) { G.wait_turns(1); G.message("你等待了一回合。"); }
   if (IN.pressed(KEY_R)) do_search();
 

@@ -741,6 +741,22 @@ int main() {
           G.pvx = (float)G.px; G.pvy = (float)G.py;
           G.recompute_fov();
         }
+        else if (want == 23) {
+          start_new_game(0);
+          G.add_item(IT_WAND_FIRE, 1, 0);
+          G.backpack = true;
+          G.demo_lock = true;
+          g_bag_sel = 0;
+          g_bag_action = true;
+        }
+        else if (want == 22) {
+          start_new_game(0);
+          G.freeze_anim = true;
+          G.search();
+          G.search_ms = 400;
+          G.demo_lock = true;
+          for (SearchFx& f : G.search_fx) f.delay = 0;
+        }
         else if (want == 21) {
           start_new_game(0);
           G.freeze_anim = true;
@@ -771,7 +787,7 @@ int main() {
           G.keys += 2;
           G.gold += 40;
           G.quest = 1;
-          if (want == 16) G.backpack = true;
+          if (want == 16) { G.backpack = true; G.demo_lock = true; }
           if (want == 17) {
             for (int i = 0; i < G.inv_n; i++)
               if (item_def(G.inv[i].id).kind == K_WAND) {

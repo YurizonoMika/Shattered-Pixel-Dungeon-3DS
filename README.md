@@ -36,8 +36,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Title](docs/screens/title.png) | ![Heroes](docs/screens/heroes.png) |
 | **Save slots** | **In-game dual screen** |
 | ![Saves](docs/screens/saves.png) | ![Game](docs/screens/game.png) |
-| **NPC dialog (top screen)** | **Backpack (bottom screen)** |
+| **NPC dialog (top screen)** | **Backpack (SPD-style grid)** |
 | ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
+| **Item details / actions** | **Search effect (CheckedCell pulse)** |
+| ![Item actions](docs/screens/bag_item.png) | ![Search](docs/screens/search.png) |
 
 ## Features
 
@@ -67,9 +69,15 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   smooth per-tile movement interpolation for the player and monsters.
 - Orientation-aware doors (the flat door sprite is rotated to match the wall) and
   floating/bobbing floor items with small shadows.
+- **Search** reproduces SPD's visual: every searched tile gets the blue
+  `CheckedCell` square that shrinks and fades with a distance delay, the hero plays
+  the `operate` animation, and a “搜索中” label floats above the head.
 - Weapons and armor with upgrade levels, two wands with charges and recharging,
   bombs, three potions, mapping/upgrade/teleport scrolls, food, keys and gold.
-- Backpack equips gear and shows stats; quick slots show stack counts or wand charges.
+- **SPD-style backpack**: a 5×5 (25-slot) grid with gold, capacity, equipped gear,
+  item quantity/charge badges, a selection cursor, and a detail panel with
+  name/description plus **使用 / 装备 / 丢弃 / 关闭** actions.
+- Quick slots show stack counts or wand charges; extra items live in the bag.
 - **Targeting mode** for bombs and wands: cursor turns yellow, **A** uses, **B** cancels.
 - Bottom HUD: HP/shield, level/XP, floor, keys, gold, 2×4 quick slots, and four
   actions: wait (**hold to keep waiting until HP drops**), search, backpack, pause menu.
@@ -79,10 +87,11 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 ### Saves
 
-Each slot is a versioned binary snapshot (~4–5 KB): seed/RNG, floor, player stats,
+Each slot is a versioned binary snapshot (~5 KB, format v4): seed/RNG, floor, player stats,
 inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
-floor items, quest and boss flags. Load restores the exact run; leaving the game
-auto-saves. Slots written by older builds are detected and ignored safely.
+floor items, quest and boss flags, and the full 25-slot bag. Load restores the exact
+run; leaving the game auto-saves. Slot files from older save formats are detected and
+ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 
 ## Controls
 
@@ -94,7 +103,7 @@ auto-saves. Slots written by older builds are detected and ignored safely.
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
 | Game actions | **B** back to save list (auto-save), **X** backpack, **L** wait, **R** search, **START** pause |
 | Targeting | **A** cast/throw at cursor, **B** cancel |
-| Backpack | tap a consumable to use, tap a weapon/armor to equip |
+| Backpack | D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; touch supported |
 | Dialog | **A / B / X / Y** pick the matching option |
 
 ## Building
@@ -230,6 +239,8 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 18 | Floor 3 next to the boss |
 | 19 | Floor 2 next to the quest amulet |
 | 21 | Frozen mid-walk pose (animation check) |
+| 22 | Frozen search effect (CheckedCell + operate pose) |
+| 23 | Backpack with the item-detail panel open |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.

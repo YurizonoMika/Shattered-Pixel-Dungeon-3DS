@@ -312,7 +312,7 @@ void Game::add_item(uint8_t id, int count, int level) {
       }
     }
   }
-  if (inv_n >= 8) {
+  if (inv_n >= BAG_CAP) {
     message("背包满了！");
     return;
   }
@@ -686,6 +686,19 @@ void Game::tick(int dt_ms) {
     else if (pvy > py) pvy = std::max((float)py, pvy - sp);
   }
   panim_ms += dt_ms;
+  if (!freeze_anim) {
+  if (search_ms > 0) search_ms -= dt_ms;
+  for (size_t i = 0; i < search_fx.size();) {
+    SearchFx& f = search_fx[i];
+    if (f.delay > 0) {
+      f.delay -= dt_ms / 1000.0f;
+    } else {
+      f.alpha -= dt_ms / 1000.0f;
+    }
+    if (f.delay <= 0 && f.alpha <= 0) search_fx.erase(search_fx.begin() + i);
+    else i++;
+  }
+  }
 
   for (Mob& m : mobs) {
     if (!freeze_anim) {
@@ -752,6 +765,45 @@ void Game::mob_turn(Mob& m) {
     if (try_move(m.x, m.y + sy)) return;
     try_move(m.x + sx, m.y);
   }
+}
+
+void Game::search() {
+  clear_path();
+  const int R = 2;
+  bool found = false;
+  search_fx.clear();
+  for (int y = std::max(0, py - R); y <= std::min(MH - 1, py + R); y++) {
+    for (int x = std::max(0, px - R); x <= std::min(MW - 1, px + R); x++) {
+      int dist = std::max(absi(x - px), absi(y - py));
+      if (dist == 0) continue;
+      if (!vis[y][x]) continue;
+      // SPD's CheckedCell: a blue square that shrinks after a distance delay.
+      float delay = dist > 1 ? powf((float)(dist - 1), 0.67f) / 10.0f : 0.0f;
+      search_fx.push_back({(float)x, (float)y, delay, 0.8f});
+      if (tiles[y][x] == T_SECRET) {
+        tiles[y][x] = T_DOOR;
+        seen[y][x] = true;
+        found = true;
+      }
+    }
+  }
+  search_ms = 500;
+  message(found ? "你发现了一扇暗门！" : "你仔细搜索了周围，什么也没找到。");
+  advance_turn();
+}
+
+bool Game::drop_item(int idx) {
+  if (idx < 0 || idx >= inv_n) return false;
+  if (item_at(px, py) >= 0) {
+    message("这里已经有东西了。");
+    return false;
+  }
+  items.push_back({px, py, inv[idx].id, inv[idx].level});
+  char b[96];
+  snprintf(b, sizeof(b), "你丢下了 %s", item_name(inv[idx].id));
+  message(b);
+  remove_item(idx, 1);
+  return true;
 }
 
 void Game::recharge_wands() {
@@ -887,7 +939,7 @@ SlotMeta Game::meta() const {
 // Save / load
 // ---------------------------------------------------------------------------
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 3;
+static const uint16_t SAVE_VERSION = 4;
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -925,7 +977,7 @@ bool Game::save(int slot) const {
     d.items[i] = {(int16_t)items[i].x, (int16_t)items[i].y, items[i].id, items[i].level};
   }
   d.inv_n = (uint8_t)inv_n;
-  for (int i = 0; i < inv_n; i++) {
+  for (int i = 0; i < inv_n && i < BAG_CAP; i++) {
     d.inv[i] = {inv[i].id, inv[i].count, inv[i].level, inv[i].charges};
   }
   char path[64];
@@ -970,7 +1022,7 @@ bool Game::load(int slot) {
   items.clear();
   for (int i = 0; i < d.item_n && i < 48; i++)
     items.push_back({d.items[i].x, d.items[i].y, d.items[i].id, d.items[i].level});
-  inv_n = std::min((int)d.inv_n, 8);
+  inv_n = std::min((int)d.inv_n, BAG_CAP);
   for (int i = 0; i < inv_n; i++)
     inv[i] = {d.inv[i].id, d.inv[i].count, d.inv[i].level, d.inv[i].charges};
   memset(vis, 0, sizeof(vis));

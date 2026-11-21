@@ -40,6 +40,7 @@ enum ItemKind : uint8_t {
 
 struct ItemDef {
   const char* name;
+  const char* desc;
   uint8_t kind;
   int8_t power;       // heal amount / weapon or armor bonus / wand damage
   uint8_t max_charge; // wands

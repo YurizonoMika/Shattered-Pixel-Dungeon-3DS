@@ -5,6 +5,7 @@
 
 #define MW 41
 #define MH 41
+#define BAG_CAP 25
 
 enum TileType : uint8_t {
   T_WALL = 0,
@@ -61,6 +62,12 @@ struct ItemDisk {
   uint8_t id, count, level, charges;
 };
 
+struct SearchFx {
+  float x, y;      // tile coords
+  float delay;     // seconds before the shrink starts
+  float alpha;     // 0.8 -> 0
+};
+
 struct GameDisk {
   uint32_t magic;
   uint16_t version;
@@ -79,7 +86,7 @@ struct GameDisk {
   uint16_t item_n;
   FloorItemDisk items[48];
   uint8_t inv_n;
-  ItemDisk inv[8];
+  ItemDisk inv[BAG_CAP];
 };
 
 struct Game {
@@ -95,7 +102,7 @@ struct Game {
   bool vis[MH][MW]{};
   std::vector<Mob> mobs;
   std::vector<FloorItem> items;
-  Item inv[8];
+  Item inv[BAG_CAP];
   int inv_n = 0;
   uint8_t weapon = IT_DAGGER, weapon_level = 0;
   uint8_t armor = IT_CLOTH_ARMOR, armor_level = 0;
@@ -107,6 +114,8 @@ struct Game {
   int camx = 0, camy = 0;
   int wait_hold = 0;
   float pvx = 0, pvy = 0;   // player visual position
+  std::vector<SearchFx> search_fx;
+  int search_ms = 0;
   int panim_ms = 0;
   int16_t path_x[32]{}, path_y[32]{};
   int path_n = 0, path_i = 0;
@@ -122,6 +131,7 @@ struct Game {
   bool dead = false;
   bool won = false;
   bool freeze_anim = false;  // debug: hold mid-walk pose
+  bool demo_lock = false;    // debug: ignore input
 
   char msg[128]{};
   int msg_timer = 0;
@@ -161,6 +171,8 @@ struct Game {
   int hero_atk() const;
   int hero_def() const;
   void recharge_wands();
+  void search();
+  bool drop_item(int idx);
   void cast_or_throw(int cx, int cy);
   SlotMeta meta() const;
   bool save(int slot) const;
