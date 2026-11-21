@@ -766,6 +766,74 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 87) {
+          // Do not create or overwrite a regular save slot for the audit.
+          G.new_run(0, 1);
+          SCENE = Scene::GAME;
+          int bad = 0;
+          for (uint32_t seed = 1; seed <= 32; ++seed) {
+            G.seed = 0x9e3779b9u * seed;
+            for (int floor = 1; floor <= 25; ++floor) {
+              G.floor = floor;
+              G.gen_level();
+              bool reached[MH][MW]{};
+              std::vector<int> pending{G.py * MW + G.px};
+              reached[G.py][G.px] = true;
+              bool exit = false;
+              for (size_t i = 0; i < pending.size(); ++i) {
+                const int p = pending[i], x = p % MW, y = p / MW;
+                exit |= G.tiles[y][x] == T_STAIRS;
+                for (int dy = -1; dy <= 1; ++dy)
+                  for (int dx = -1; dx <= 1; ++dx) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (!G.walkable(nx, ny) || reached[ny][nx]) continue;
+                    reached[ny][nx] = true;
+                    pending.push_back(ny * MW + nx);
+                  }
+              }
+              int locks = 0, available = 0;
+              for (int y = 0; y < MH; ++y)
+                for (int x = 0; x < MW; ++x) locks += G.tiles[y][x] == T_DOOR_LOCKED;
+              for (const Feature& f : G.features) locks += f.type == F_CHEST_LOCKED;
+              for (const FloorItem& it : G.items)
+                if (it.id == IT_KEY && reached[it.y][it.x]) ++available;
+              if (!exit || available < locks) {
+                ++bad;
+                dlog("[generation] seed=%lu floor=%d exit=%d keys=%d/%d",
+                     (unsigned long)G.seed, floor, exit, available, locks);
+              }
+            }
+          }
+          dlog("[generation] 800 maps, %d failures", bad);
+          G.new_run(0, 0x12345678);
+          G.demo_lock = true;
+        }
+        else if (want == 88) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          for (int x = 2; x <= 20; ++x) G.tiles[10][x] = T_FLOOR;
+          for (int y = 10; y <= 15; ++y) G.tiles[y][20] = T_FLOOR;
+          G.tiles[10][9] = T_DOOR;
+          memset(G.seen, 1, sizeof(G.seen));
+          G.pvx = G.px = 2; G.pvy = G.py = 10;
+          G.act_at(20, 15, false);
+          for (int i = 0; i < 120; ++i) G.tick(100);
+          const bool walked = G.px == 20 && G.py == 15 && G.tiles[10][9] == T_DOOR;
+          G.pvx = G.px = 20; G.pvy = G.py = 15;
+          Mob chaser;
+          chaser.x = 15; chaser.y = 10;
+          chaser.ai = Mob::Hunting; chaser.target = 15 * MW + 20;
+          G.mobs.push_back(chaser);
+          // With the hero invisible this must use the last known position.
+          G.invis_t = 10;
+          G.mob_turn(G.mobs[0]);
+          bool pursued = G.mobs[0].x == 16 && G.mobs[0].y == 10;
+          G.cursor_x = G.px; G.cursor_y = G.py;
+          dlog("[navigation] long route + door=%d, last known target=%d", walked, pursued);
+          G.demo_lock = true;
+        }
         else if (want == 85 || want == 86) {
           // Same geometry for all three states, at native and fractional zoom.
           start_new_game(0);

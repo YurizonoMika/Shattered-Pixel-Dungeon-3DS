@@ -17,6 +17,78 @@ static inline int ri(Game& g, int a, int b) {
   return a + (int)(rnd(g) % (uint32_t)(b - a + 1));
 }
 static int absi(int v) { return v < 0 ? -v : v; }
+static int grid_distance(int x, int y, int tx, int ty) {
+  return std::max(absi(x - tx), absi(y - ty));
+}
+
+// A reverse distance map, as in SPD PathFinder. Static scratch keeps the
+// per-turn search allocation-free on 3DS; calls are sequential.
+struct GridSearch {
+  int16_t distance[MW * MH], queue[MW * MH];
+  uint8_t occupied[MH][MW];
+
+  void load_actors(const Game& g) {
+    memset(occupied, 0, sizeof(occupied));
+    for (const Mob& m : g.mobs)
+      if (m.alive && m.x >= 0 && m.x < MW && m.y >= 0 && m.y < MH)
+        occupied[m.y][m.x] = 1;
+    occupied[g.py][g.px] = 1;
+  }
+
+  template<class F> static void neighbours(int cell, F f) {
+    const int x = cell % MW, y = cell / MW;
+    for (int dy = -1; dy <= 1; ++dy)
+      for (int dx = -1; dx <= 1; ++dx) {
+        const int nx = x + dx, ny = y + dy;
+        if ((dx || dy) && nx >= 0 && ny >= 0 && nx < MW && ny < MH)
+          f(ny * MW + nx);
+      }
+  }
+
+  template<class F> void build(int goal, int stop, F passable) {
+    std::fill_n(distance, MW * MH, int16_t(-1));
+    int head = 0, tail = 0;
+    distance[goal] = 0;
+    queue[tail++] = goal;
+    while (head < tail) {
+      const int cell = queue[head++];
+      if (cell == stop) break;
+      neighbours(cell, [&](int n) {
+        if (distance[n] >= 0 || (n != stop && !passable(n))) return;
+        distance[n] = distance[cell] + 1;
+        queue[tail++] = n;
+      });
+    }
+  }
+
+  template<class F> int toward(int start, int goal, F passable) {
+    if (start == goal || !passable(goal)) return -1;
+    build(goal, start, passable);
+    if (distance[start] < 0) return -1;
+    int step = -1;
+    neighbours(start, [&](int n) {
+      if (step < 0 && distance[n] == distance[start] - 1) step = n;
+    });
+    return step;
+  }
+
+  template<class F> int away(int start, int threat, F passable) {
+    build(threat, -1, [&](int n) { return n == start || passable(n); });
+    if (distance[start] < 0) return -1;
+    int best = start, step = -1;
+    auto flee = [&](auto&& self, int cell, int first, int depth) -> void {
+      if (distance[cell] > distance[best]) { best = cell; step = first; }
+      if (!depth) return;
+      neighbours(cell, [&](int n) {
+        if (distance[n] > distance[cell] && passable(n))
+          self(self, n, first < 0 ? n : first, depth - 1);
+      });
+    };
+    flee(flee, start, -1, 4);
+    return step;
+  }
+};
+static GridSearch navigation;
 
 static bool is_npc(uint8_t t) { return t >= M_NPC_GHOST && t <= M_NPC_IMP; }
 
@@ -112,6 +184,7 @@ bool Game::feature_blocking(int x, int y) const {
     switch (f.type) {
       case F_CHEST:
       case F_CHEST_LOCKED:
+      case F_CHEST_MIMIC:
       case F_WELL:
       case F_BOOKSHELF:
       case F_ALCHEMY:
@@ -129,7 +202,8 @@ bool Game::feature_blocking(int x, int y) const {
 
 int Game::feature_at(int x, int y) const {
   for (size_t i = 0; i < features.size(); i++)
-    if (features[i].x == x && features[i].y == y) return (int)i;
+    if (features[i].type != F_MIMIC_LOOT && features[i].x == x && features[i].y == y)
+      return (int)i;
   return -1;
 }
 
@@ -373,7 +447,7 @@ static bool spec_locked(uint8_t s) {
   switch (s) {
     case SP_TREASURY: case SP_ARMORY: case SP_CRYPT: case SP_WELL:
     case SP_GARDEN: case SP_LIBRARY: case SP_STATUE: case SP_SENTRY:
-    case SP_RUNESTONE: case SP_VAULT:
+    case SP_RUNESTONE: case SP_VAULT: case SP_LAB:
       return true;
     default:
       return false;
@@ -399,7 +473,7 @@ void Game::build_run_plan() {
 
   // 50% chance of a level feeling on depth 2+, ~1/14 for each type (SPD Level).
   for (int f = 2; f <= 25; f++) {
-    if (rr() & 1) continue;
+    if ((rr() >> 16) & 1) continue;
     switch (rr() % 14) {
       case 0: plan_feeling[f - 1] = 1; break;  // water
       case 1: plan_feeling[f - 1] = 2; break;  // grass
@@ -449,12 +523,10 @@ void Game::build_run_plan() {
       default: n = 2 + (int)(rr() % 2); break;
     }
     if (plan_feeling[f - 1] == 3) n++;  // large floors add a special
-    if (lab[f] && n < 3) {
-      plan_special[f - 1][n++] = SP_LAB;
-    }
-    if (n > 3) n = 3;
+    n = std::min(3, n + (lab[f] ? 1 : 0));
     plan_special_n[f - 1] = (uint8_t)n;
-    for (int i = 0; i < n; i++) {
+    if (lab[f]) plan_special[f - 1][0] = SP_LAB;
+    for (int i = lab[f] ? 1 : 0; i < n; i++) {
       if (queue.empty()) break;
       int m = (int)queue.size();
       uint32_t r = rr() % 10;
@@ -578,6 +650,7 @@ void Game::gen_level() {
   respawn_t = 0;
   mob_cap = 0;
   rng = seed ^ (uint32_t)(floor * 2654435761u);
+  if (!rng) rng = 1;
   build_run_plan();
 
   int reg = region();
@@ -594,6 +667,7 @@ void Game::gen_level() {
                     // 5 shop, 6 quest
     uint8_t spec;
     bool locked;
+    int door_x = -1, door_y = -1;
   };
   enum { RK_ENTRANCE, RK_EXIT, RK_STANDARD, RK_SPECIAL, RK_SECRET, RK_SHOP,
          RK_QUEST };
@@ -624,53 +698,67 @@ void Game::gen_level() {
                (imp_shop ? 1 : 0) + (quest_extra ? 1 : 0);
   }
 
-  // 5x5 grid of 8x8 slots. Choose a connected set of cells by BFS.
+  // Adapt LoopBuilder's main loop + branches to the fixed save-map bounds.
+  // Reserve one slot per one-connection room before placing any rooms.
   const int GS = 5, CELL = 8;
-  int start = (int)(rnd(*this) % 4);
-  static const int CORNER[4] = {0, 4, 20, 24};
-  start = CORNER[start];
   bool chosen[25] = {};
   int parent[25];
   for (int i = 0; i < 25; i++) parent[i] = -1;
   std::vector<int> order;
-  chosen[start] = true;
-  order.push_back(start);
-  int head = 0;
-  while (head < (int)order.size() && (int)order.size() < required) {
-    int cur = order[head++];
-    int gx = cur % GS, gy = cur / GS;
-    int nb[4][2] = {{gx + 1, gy}, {gx - 1, gy}, {gx, gy + 1}, {gx, gy - 1}};
-    for (int k = 0; k < 4; k++) {
-      int nx = nb[k][0], ny = nb[k][1];
-      if (nx < 0 || ny < 0 || nx >= GS || ny >= GS) continue;
-      int ni = nx + ny * GS;
-      if (chosen[ni]) continue;
-      chosen[ni] = true;
-      parent[ni] = cur;
-      order.push_back(ni);
-      if ((int)order.size() >= required) break;
+  const int main_budget = nstd + 2;
+  int loop_size, start, exit_slot;
+  do {
+  order.clear();
+  std::fill_n(chosen, 25, false);
+  std::fill_n(parent, 25, -1);
+  int rw = 2 + ri(*this, 0, std::min(2, (main_budget - 4) / 2));
+  int rh = ri(*this, 2, std::min(4, (main_budget + 4) / 2 - rw));
+  if (!boss_floor && rw == 2 && rh == 2) rh = 3;
+  const int lx = ri(*this, 0, GS - rw), ly = ri(*this, 0, GS - rh);
+  auto loop_cell = [&](int x, int y) { order.push_back((ly + y) * GS + lx + x); };
+  for (int x = 0; x < rw; ++x) loop_cell(x, 0);
+  for (int y = 1; y < rh; ++y) loop_cell(rw - 1, y);
+  for (int x = rw - 2; x >= 0; --x) loop_cell(x, rh - 1);
+  for (int y = rh - 2; y > 0; --y) loop_cell(0, y);
+  if (rnd(*this) & 1) std::reverse(order.begin(), order.end());
+  loop_size = (int)order.size();
+  std::rotate(order.begin(), order.begin() + ri(*this, 0, loop_size - 1), order.end());
+  start = order.front(); exit_slot = order[loop_size / 2];
+  for (int i = 0; i < loop_size; ++i) {
+    chosen[order[i]] = true;
+    if (i) parent[order[i]] = order[i - 1];
+  }
+  while ((int)order.size() < required) {
+    std::vector<std::pair<int, int>> candidates, entrance_candidates;
+    const bool shop = (shop_here || imp_shop) && (int)order.size() == main_budget;
+    for (int i = 0; i < std::min((int)order.size(), main_budget); ++i) {
+      // The slots after the standard rooms are leaves and can't be branched from.
+      const int from = order[i];
+      int x = from % GS, y = from / GS;
+      const int nb[] = {x ? from - 1 : -1, x + 1 < GS ? from + 1 : -1,
+                        y ? from - GS : -1, y + 1 < GS ? from + GS : -1};
+      for (int to : nb) if (to >= 0 && !chosen[to]) {
+        candidates.push_back({from, to});
+        if (shop && from == start) entrance_candidates.push_back({from, to});
+      }
     }
+    if (candidates.empty()) break;
+    const auto& options = entrance_candidates.empty() ? candidates : entrance_candidates;
+    auto [from, to] = options[ri(*this, 0, (int)options.size() - 1)];
+    parent[to] = from;
+    chosen[to] = true;
+    order.push_back(to);
   }
-  required = (int)order.size();
-  int exit_slot = start;
-  int best = -1;
-  for (int idx : order) {
-    int d = absi(idx % GS - start % GS) + absi(idx / GS - start / GS);
-    if (d > best) { best = d; exit_slot = idx; }
-  }
+  } while ((int)order.size() != required);
 
   // Assign room kinds to the chosen slots.
   std::vector<std::pair<uint8_t, uint8_t>> assign;
   for (int i = 0; i < nstd; i++) assign.push_back({RK_STANDARD, SP_NONE});
+  if (shop_here || imp_shop) assign.push_back({RK_SHOP, SP_NONE});
+  if (quest_extra) assign.push_back({RK_QUEST, SP_NONE});
   for (int i = 0; i < nspec; i++)
     assign.push_back({RK_SPECIAL, plan_special[floor - 1][i]});
   for (int i = 0; i < nsecret; i++) assign.push_back({RK_SECRET, SP_NONE});
-  if (shop_here || imp_shop) assign.push_back({RK_SHOP, SP_NONE});
-  if (quest_extra) assign.push_back({RK_QUEST, SP_NONE});
-  for (int i = (int)assign.size() - 1; i > 0; i--) {
-    int j = ri(*this, 0, i);
-    std::swap(assign[i], assign[j]);
-  }
   // Build rooms in slot order, entrance first.
   int slot_to_room[25];
   for (int i = 0; i < 25; i++) slot_to_room[i] = -1;
@@ -678,9 +766,7 @@ void Game::gen_level() {
   for (int idx : order) {
     int gx = idx % GS, gy = idx / GS;
     int base_x = 1 + gx * CELL, base_y = 1 + gy * CELL;
-    int w = 5 + (int)(rnd(*this) % 2), h = 5 + (int)(rnd(*this) % 2);
-    if (w > 6) w = 6;
-    if (h > 6) h = 6;
+    int w = ri(*this, 5, 6), h = ri(*this, 5, 6);
     GRoom r;
     r.x = base_x + 1;
     r.y = base_y + 1;
@@ -708,55 +794,29 @@ void Game::gen_level() {
     rooms.push_back(r);
   }
 
-  // Special/shop/quest rooms have a single entrance in SPD (maxConnections 1).
-  // Move them onto leaf slots so the BFS tree cannot route through them.
-  int child_count[25] = {};
-  for (int idx : order)
-    if (parent[idx] >= 0) child_count[parent[idx]]++;
   auto one_door_kind = [](uint8_t k) {
     return k == RK_SPECIAL || k == RK_SECRET || k == RK_SHOP || k == RK_QUEST;
   };
-  for (int idx : order) {
-    int ri_room = slot_to_room[idx];
-    if (ri_room < 0 || !one_door_kind(rooms[ri_room].kind)) continue;
-    if (child_count[idx] == 0) continue;
-    for (int leaf : order) {
-      if (leaf == idx || child_count[leaf] != 0) continue;
-      int lr = slot_to_room[leaf];
-      if (lr < 0 || rooms[lr].kind != RK_STANDARD) continue;
-      std::swap(rooms[ri_room].kind, rooms[lr].kind);
-      std::swap(rooms[ri_room].spec, rooms[lr].spec);
-      std::swap(rooms[ri_room].locked, rooms[lr].locked);
-      break;
-    }
-  }
 
   // Carve rooms.
   for (const GRoom& r : rooms)
     for (int y = r.y; y < r.y + r.h; y++)
       for (int x = r.x; x < r.x + r.w; x++) tiles[y][x] = T_FLOOR;
 
-  auto carve_h = [&](int x0, int x1, int y) {
-    for (int x = std::min(x0, x1); x <= std::max(x0, x1); x++)
-      if (x > 0 && y > 0 && x < MW && y < MH && tiles[y][x] == T_WALL)
-        tiles[y][x] = T_FLOOR;
-  };
-  auto carve_v = [&](int y0, int y1, int x) {
-    for (int y = std::min(y0, y1); y <= std::max(y0, y1); y++)
-      if (x > 0 && y > 0 && x < MW && y < MH && tiles[y][x] == T_WALL)
-        tiles[y][x] = T_FLOOR;
-  };
   auto door_value = [&](const GRoom& r) -> uint8_t {
     if (r.kind == RK_SECRET) return T_SECRET;
     if (r.locked) return T_DOOR_LOCKED;
     return T_DOOR;
   };
-  auto set_door = [&](int x, int y, const GRoom& r) {
+  auto set_door = [&](int x, int y, GRoom& r) {
     if (x < 1 || y < 1 || x >= MW - 1 || y >= MH - 1) return;
     if (tiles[y][x] == T_FLOOR) tiles[y][x] = door_value(r);
+    if (one_door_kind(r.kind)) { r.door_x = x; r.door_y = y; }
   };
-  auto connect = [&](const GRoom& a, const GRoom& b) {
+  auto connect = [&](GRoom& a, GRoom& b) {
     int ax = a.cx, ay = a.cy, bx = b.cx, by = b.cy;
+    if (a.y == b.y) ay = by = a.y + ri(*this, 1, std::min(a.h, b.h) - 2);
+    if (a.x == b.x) ax = bx = a.x + ri(*this, 1, std::min(a.w, b.w) - 2);
     int dx = (bx > ax) - (bx < ax);
     int dy = (by > ay) - (by < ay);
     bool hf = (dx != 0 && dy != 0) ? ((rnd(*this) & 1) != 0) : (dy == 0);
@@ -785,18 +845,18 @@ void Game::gen_level() {
         tiles[p.second][p.first] = T_FLOOR;
     for (int i = 1; i < (int)path.size(); i++) {
       if (inside(a, path[i].first, path[i].second)) continue;
-      set_door(path[i].first, path[i].second, a);
+      if (!one_door_kind(b.kind)) set_door(path[i].first, path[i].second, a);
       break;
     }
     for (int i = (int)path.size() - 2; i >= 0; i--) {
       if (inside(b, path[i].first, path[i].second)) continue;
-      set_door(path[i].first, path[i].second, b);
+      if (!one_door_kind(a.kind)) set_door(path[i].first, path[i].second, b);
       break;
     }
   };
 
 
-  // Corridors along the BFS tree.
+  // Build the loop and attach the branches. Only ordinary rooms can gain shortcuts.
   std::vector<std::pair<int, int>> edges;
   for (int idx : order) {
     if (parent[idx] < 0) continue;
@@ -804,8 +864,11 @@ void Game::gen_level() {
     connect(rooms[a], rooms[b]);
     edges.push_back({a, b});
   }
-  // One or two loops (SPD LoopBuilder feel).
-  int loops = 1 + (int)(rnd(*this) % 2);
+  const int last = slot_to_room[order[loop_size - 1]];
+  const int first = slot_to_room[start];
+  connect(rooms[last], rooms[first]);
+  edges.push_back({last, first});
+  int loops = ri(*this, 0, 1);
   for (int tries = 0; tries < 24 && loops > 0; tries++) {
     int idx = order[(int)(rnd(*this) % order.size())];
     int gx = idx % GS, gy = idx / GS;
@@ -864,6 +927,16 @@ void Game::gen_level() {
   auto add_random_item = [&](const GRoom& r, uint8_t id, int level = 0) {
     auto p = room_cell(r);
     if (p.first >= 0) add_item_at(p.first, p.second, id, level);
+  };
+  auto place_loot = [&](int x, int y, const LootRoll& loot, int container = -1) {
+    if (container < 0) {
+      add_item_at(x, y, loot.id, loot.id == IT_GOLD ? loot.gold : loot.level);
+    } else {
+      Feature f;
+      f.x = x; f.y = y; f.type = container;
+      f.loot_id = loot.id; f.loot_level = loot.level; f.loot_gold = loot.gold;
+      features.push_back(f);
+    }
   };
 
   // Paint standard rooms (water/grass patches).
@@ -945,24 +1018,35 @@ void Game::gen_level() {
         add_random_item(r, IT_SEED_FIREBLOOM, 0);
         break;
       case SP_LIBRARY:
-        for (int x = r.x + 1; x < r.x + r.w - 1; x++) {
-          add_feature(F_BOOKSHELF, x, r.y + 1);
-          add_feature(F_BOOKSHELF, x, r.y + r.h - 2);
-        }
+        for (int x = r.x; x < r.x + r.w; x++)
+          if (!(r.door_y < r.y && x == r.door_x) &&
+              !(r.door_y == r.y && (x == r.x || x == r.x + r.w - 1)))
+            add_feature(F_BOOKSHELF, x, r.y);
         add_random_item(r, IT_SCROLL_IDENTIFY, 0);
-        add_random_item(r, IT_SCROLL_UP, 0);
+        add_random_item(r, IT_SCROLL_CURSE, 0);
         break;
       case SP_STORAGE:
-        add_feature(F_BARRICADE, r.cx, r.cy, 0, 2);
-        add_random_item(r, IT_FOOD_RATION, 0);
-        add_random_item(r, IT_POTION_FLAME, 0);
-        add_feature(F_CHEST, r.x + 1, r.y + 1);
+        tiles[r.door_y][r.door_x] = T_FLOOR;
+        add_feature(F_BARRICADE, r.door_x, r.door_y, 0, 2);
+        for (int i = 0, count = ri(*this, 3, 4); i < count; ++i) {
+          const uint8_t prizes[] = {IT_FOOD_RATION, IT_POTION_HEAL,
+                                    IT_SCROLL_IDENTIFY, IT_GOLD};
+          uint8_t id = prizes[ri(*this, 0, 3)];
+          add_random_item(r, id, id == IT_GOLD ? ri(*this, 30, 80) : 0);
+        }
         break;
-      case SP_LAB:
-        add_feature(F_ALCHEMY, r.cx, r.cy);
+      case SP_LAB: {
+        int x = (rnd(*this) & 1) ? r.x + 1 : r.x + r.w - 2;
+        int y = (rnd(*this) & 1) ? r.y + 1 : r.y + r.h - 2;
+        if (r.door_x < r.x) x = r.x + r.w - 2;
+        else if (r.door_x >= r.x + r.w) x = r.x + 1;
+        else if (r.door_y < r.y) y = r.y + r.h - 2;
+        else y = r.y + 1;
+        add_feature(F_ALCHEMY, x, y);
         add_random_item(r, IT_POTION_HEAL, 0);
         add_random_item(r, IT_POTION_STR, 0);
         break;
+      }
       case SP_STATUE:
         add_feature(F_STATUE, r.cx, r.cy);
         add_random_item(r, weapon_for_tier_rand(*this, (floor - 1) / 5 + 1), 0);
@@ -1039,50 +1123,49 @@ void Game::gen_level() {
   for (int y = 1; y < MH - 1; y++)
     for (int x = 1; x < MW - 1; x++)
       if (tiles[y][x] == T_DOOR_LOCKED) locked_count++;
+  for (const Feature& f : features)
+    if (f.type == F_CHEST_LOCKED) locked_count++;
   std::vector<int> std_rooms;
   for (int i = 0; i < (int)rooms.size(); i++)
     if (rooms[i].kind == RK_STANDARD) std_rooms.push_back(i);
-  for (int i = 0; i < locked_count; i++) {
-    if (std_rooms.empty()) break;
-    const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-    add_random_item(r, IT_KEY, 0);
+  auto drop_cell = [&]() {
+    if (!std_rooms.empty()) {
+      int start_room = ri(*this, 0, (int)std_rooms.size() - 1);
+      for (int i = 0; i < (int)std_rooms.size(); ++i) {
+        auto p = room_cell(rooms[std_rooms[(start_room + i) % std_rooms.size()]]);
+        if (p.first >= 0) return p;
+      }
+    }
+    return std::pair<int, int>{-1, -1};
+  };
+  auto drop_key = [&]() {
+    auto p = drop_cell();
+    if (p.first >= 0) add_item_at(p.first, p.second, IT_KEY, 0);
+    return p.first >= 0;
+  };
+  for (int i = 0; i < locked_count; i++) drop_key();
+  for (const GRoom& r : rooms) if (r.spec == SP_STORAGE) {
+    auto p = drop_cell();
+    if (p.first >= 0) add_item_at(p.first, p.second, IT_POTION_FLAME, 0);
   }
 
   // Standard loot (SPD RegularLevel.createItems).
   auto add_floor_item = [&](const LootRoll& lr) {
-    if (std_rooms.empty()) return;
-    const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-    auto p = room_cell(r);
+    auto p = drop_cell();
     if (p.first < 0) return;
     int roll = ri(*this, 0, 19);
     bool upgradable = item_def(lr.id).kind == K_WEAPON ||
                       item_def(lr.id).kind == K_ARMOR ||
-                      item_def(lr.id).kind == K_WAND;
-    if (upgradable && ri(*this, 0, 3 - std::min<int>(lr.level, 3)) == 0) {
-      Feature f;
-      f.x = p.first; f.y = p.second; f.type = F_CHEST_LOCKED;
-      f.loot_id = lr.id; f.loot_level = lr.level; f.loot_gold = lr.gold;
-      features.push_back(f);
-      if (!std_rooms.empty()) {
-        const GRoom& kr = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-        add_random_item(kr, IT_KEY, 0);
-      }
-      return;
-    }
-    if (roll == 0) {
-      add_item_at(p.first, p.second, lr.id, lr.level);
-    } else if (roll == 5 && floor > 1) {
-      Feature f;
-      f.x = p.first; f.y = p.second; f.type = F_CHEST_MIMIC;
-      f.loot_id = lr.id; f.loot_level = lr.level; f.loot_gold = lr.gold;
-      features.push_back(f);
-    } else if (roll <= 4) {
-      Feature f;
-      f.x = p.first; f.y = p.second; f.type = F_CHEST;
-      f.loot_id = lr.id; f.loot_level = lr.level; f.loot_gold = lr.gold;
-      features.push_back(f);
+                      item_def(lr.id).kind == K_WAND || item_def(lr.id).kind == K_RING;
+    if (roll == 5 && floor > 1) {
+      place_loot(p.first, p.second, lr, F_CHEST_MIMIC);
+    } else if (upgradable && ri(*this, 0, 3 - std::min<int>(lr.level, 3)) == 0) {
+      int type = floor > 1 && ri(*this, 0, 9) == 0 ? F_CHEST_MIMIC : F_CHEST_LOCKED;
+      place_loot(p.first, p.second, lr, type);
+      if (type == F_CHEST_LOCKED && !drop_key()) features.back().type = F_CHEST;
     } else {
-      add_item_at(p.first, p.second, lr.id, lr.level);
+      place_loot(p.first, p.second, lr, roll == 0 ? int(F_REMAINS) :
+                 roll <= 5 ? int(F_CHEST) : -1);
     }
   };
   int itemRoll = ri(*this, 0, 99);
@@ -1122,6 +1205,7 @@ void Game::gen_level() {
     m.hp = m.maxhp;
     m.atk = d.atk;
     m.def = d.def;
+    if (!is_npc(type) && !is_boss(type)) m.ai = Mob::Sleeping;
     mobs.push_back(m);
   };
 
@@ -1679,13 +1763,17 @@ void Game::use_feature(int idx) {
       m.maxhp = m.hp = mob_def(M_MIMIC).hp;
       m.atk = mob_def(M_MIMIC).atk;
       m.def = mob_def(M_MIMIC).def;
+      m.ai = Mob::Hunting;
+      m.target = py * MW + px;
+      f.type = F_MIMIC_LOOT;
+      f.aux = (int16_t)mobs.size();
       mobs.push_back(m);
-      features.erase(features.begin() + idx);
       message("宝箱怪扑了出来！");
       advance_turn();
       break;
     }
     case F_CHEST:
+    case F_REMAINS:
     case F_CHEST_LOCKED: {
       if (f.type == F_CHEST_LOCKED) {
         if (keys <= 0) { message("箱子锁住了，需要一把钥匙。"); return; }
@@ -1704,7 +1792,8 @@ void Game::use_feature(int idx) {
       }
       f.loot_id = IT_NONE;
       f.loot_gold = 0;
-      f.type = F_CHEST_OPEN;
+      if (f.type == F_REMAINS) features.erase(features.begin() + idx);
+      else f.type = F_CHEST_OPEN;
       advance_turn();
       break;
     }
@@ -2079,8 +2168,10 @@ void Game::close_door_if_clear(int x, int y) {
 }
 
 void Game::move_player(int dx, int dy) {
+  if ((!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
   int nx = px + dx, ny = py + dy;
   if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
+  if (feature_blocking(nx, ny)) return;
   if (tiles[ny][nx] == T_DOOR) {
     tiles[ny][nx] = T_DOOR_OPEN;
     message("你推开了门。");
@@ -2128,6 +2219,10 @@ void Game::damage_mob(int idx, int raw) {
   if (idx < 0 || idx >= (int)mobs.size()) return;
   Mob& m = mobs[idx];
   if (!m.alive) return;
+  if (!is_npc(m.type) && los(m.x, m.y, px, py) && invis_t == 0) {
+    m.ai = Mob::Hunting;
+    m.target = py * MW + px;
+  }
   int dmg = raw - m.def;
   if (dmg < 1) dmg = 1;
   m.hp -= dmg;
@@ -2152,9 +2247,18 @@ void Game::damage_mob(int idx, int raw) {
     gain_gold(*this, 150 + region() * 100);
     message("首领倒下了，掉落了强力装备。");
   } else if (m.type == M_MIMIC) {
-    gain_gold(*this, 30 + floor * 10);
-    items.push_back({m.x, m.y, IT_GOLD,
-                     (int16_t)ri(*this, 20 + floor * 5, 40 + floor * 8)});
+    auto payload = std::find_if(features.begin(), features.end(), [&](const Feature& f) {
+      return f.type == F_MIMIC_LOOT && f.aux == idx;
+    });
+    if (payload != features.end()) {
+      if (payload->loot_id != IT_NONE)
+        items.push_back({m.x, m.y, payload->loot_id, (int16_t)(payload->loot_id == IT_GOLD
+                         ? payload->loot_gold : payload->loot_level)});
+      features.erase(payload);
+    } else {
+      items.push_back({m.x, m.y, IT_GOLD,
+                       (int16_t)ri(*this, 20 + floor * 5, 40 + floor * 8)});
+    }
   } else {
     if ((rnd(*this) % 100) < 10) {
       items.push_back({m.x, m.y, IT_GOLD,
@@ -2191,14 +2295,14 @@ void Game::interact_at(int x, int y) {
   int m = mob_at(x, y);
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
-    if (absi(x - px) + absi(y - py) > 1) { message("距离太远，先靠近一点。"); return; }
+    if (grid_distance(x, y, px, py) > 1) { message("距离太远，先靠近一点。"); return; }
     attack(m, false);
     advance_turn();
     return;
   }
   int fi = feature_at(x, y);
   if (fi >= 0) {
-    if (absi(x - px) + absi(y - py) > 1) { message("走近一点才能交互。"); return; }
+    if (grid_distance(x, y, px, py) > 1) { message("走近一点才能交互。"); return; }
     use_feature(fi);
     return;
   }
@@ -2236,6 +2340,7 @@ void Game::interact_at(int x, int y) {
 
 void Game::act_at(int x, int y, bool interact) {
   if (dialog || dead || shop_open) return;
+  if (x < 0 || y < 0 || x >= MW || y >= MH) return;
   if (interact) { interact_at(x, y); return; }
   if (targeting) {
     if (target_item >= 0 && item_def(inv[target_item].id).kind == K_WAND)
@@ -2250,54 +2355,14 @@ void Game::act_at(int x, int y, bool interact) {
     message("你等待了一回合。");
     return;
   }
-  static int16_t prev[MH][MW];
-  memset(prev, -1, sizeof(prev));
-  static int16_t qx[MW * MH], qy[MW * MH];
-  int head = 0, tail = 0;
-  qx[tail] = (int16_t)px; qy[tail] = (int16_t)py; tail++;
-  prev[py][px] = (int16_t)(py * MW + px);
-  bool found = false;
-  while (head < tail) {
-    int cx = qx[head], cy = qy[head];
-    head++;
-    if (cx == x && cy == y) { found = true; break; }
-    static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
-    for (int k = 0; k < 4; k++) {
-      int nx = cx + DX[k], ny = cy + DY[k];
-      if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
-      if (!walkable(nx, ny) && tiles[ny][nx] != T_DOOR) continue;
-      if (mob_at(nx, ny) >= 0) continue;
-      if (prev[ny][nx] != -1) continue;
-      prev[ny][nx] = (int16_t)(cy * MW + cx);
-      qx[tail] = (int16_t)nx; qy[tail] = (int16_t)ny; tail++;
-    }
-  }
-  if (!found) {
-    int m = mob_at(x, y);
-    if (m >= 0 && absi(x - px) + absi(y - py) == 1) { attack(m, false); advance_turn(); }
-    else message("无法到达那里。");
-    return;
-  }
-  static int16_t path[MH * MW][2];
-  int n = 0;
-  int cx = x, cy = y;
-  while (!(cx == px && cy == py) && n < MH * MW) {
-    path[n][0] = (int16_t)cx; path[n][1] = (int16_t)cy;
-    n++;
-    int p = prev[cy][cx];
-    cx = p % MW; cy = p / MW;
-  }
-  std::reverse(path, path + n);
-  int steps = std::min(n, 8);
-  path_n = steps;
-  path_i = 0;
-  for (int i = 0; i < steps; i++) {
-    path_x[i] = path[i][0];
-    path_y[i] = path[i][1];
+  if (grid_distance(px, py, x, y) == 1) {
+    move_player(x - px, y - py);
+  } else {
+    path_goal = y * MW + x;
   }
 }
 
-void Game::clear_path() { path_n = path_i = 0; }
+void Game::clear_path() { path_goal = -1; }
 
 void Game::tick(int dt_ms) {
   if (dt_ms < 1) dt_ms = 1;
@@ -2330,9 +2395,19 @@ void Game::tick(int dt_ms) {
     m.anim_ms += dt_ms;
   }
   if (!dialog && !dead && !paused && !backpack && !shop_open &&
-      path_i < path_n && fabsf(pvx - px) < 0.02f && fabsf(pvy - py) < 0.02f) {
-    int nx = path_x[path_i], ny = path_y[path_i];
-    path_i++;
+      path_goal >= 0 && fabsf(pvx - px) < 0.02f && fabsf(pvy - py) < 0.02f) {
+    navigation.load_actors(*this);
+    const int goal = path_goal;
+    const int next = navigation.toward(py * MW + px, goal, [&](int p) {
+      const int x = p % MW, y = p / MW;
+      return (seen[y][x] || vis[y][x]) &&
+             (!navigation.occupied[y][x] || (p == goal && vis[y][x])) &&
+             (walkable(x, y) || (p == goal && keys > 0 &&
+               tiles[y][x] == T_DOOR_LOCKED && !feature_blocking(x, y)));
+    });
+    if (next < 0) { clear_path(); message("无法到达那里。"); return; }
+    if (next == goal) clear_path();
+    int nx = next % MW, ny = next / MW;
     int ox = px, oy = py;
     move_player(nx - px, ny - py);
     if ((px == ox && py == oy) || dialog || dead) clear_path();
@@ -2342,20 +2417,24 @@ void Game::tick(int dt_ms) {
 void Game::mob_turn(Mob& m) {
   if (!m.alive || is_npc(m.type)) return;
   if (m.sleep_t > 0) { m.sleep_t--; return; }
-  int dx = px - m.x, dy = py - m.y;
-  int dist = absi(dx) + absi(dy);
+  const int start = m.y * MW + m.x, hero = py * MW + px;
+  const int dist = grid_distance(m.x, m.y, px, py);
+  navigation.load_actors(*this);
+  auto passable = [&](int p) {
+    return !navigation.occupied[p / MW][p % MW] && walkable(p % MW, p / MW);
+  };
+  auto step_to = [&](int step) {
+    if (step < 0 || !passable(step)) return false;
+    int ox = m.x, oy = m.y;
+    m.vx = ox; m.vy = oy;
+    m.x = step % MW; m.y = step / MW;
+    if (tiles[m.y][m.x] == T_DOOR) tiles[m.y][m.x] = T_DOOR_OPEN;
+    close_door_if_clear(ox, oy);
+    return true;
+  };
   if (m.terror_t > 0) {
     m.terror_t--;
-    int ax = (dx > 0) ? -1 : 1, ay = (dy > 0) ? -1 : 1;
-    if (walkable(m.x + ax, m.y) && mob_at(m.x + ax, m.y) < 0) {
-      int ox = m.x, oy = m.y;
-      m.vx = (float)m.x; m.vy = (float)m.y; m.x += ax;
-      close_door_if_clear(ox, oy);
-    } else if (walkable(m.x, m.y + ay) && mob_at(m.x, m.y + ay) < 0) {
-      int ox = m.x, oy = m.y;
-      m.vx = (float)m.x; m.vy = (float)m.y; m.y += ay;
-      close_door_if_clear(ox, oy);
-    }
+    step_to(navigation.away(start, hero, passable));
     return;
   }
   if (rage_t > 0) {
@@ -2368,23 +2447,16 @@ void Game::mob_turn(Mob& m) {
       }
     }
   }
-  bool sees = dist <= 8 && los(m.x, m.y, px, py) && invis_t == 0;
-  if (!sees) {
-    if ((rnd(*this) % 100) < 15) {
-      int d = ri(*this, 0, 3);
-      static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
-      int nx = m.x + DX[d], ny = m.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return;
-      if (tiles[ny][nx] == T_DOOR) tiles[ny][nx] = T_DOOR_OPEN;
-      if (walkable(nx, ny) && mob_at(nx, ny) < 0 && !(nx == px && ny == py)) {
-        int ox = m.x, oy = m.y;
-        m.vx = (float)m.x; m.vy = (float)m.y; m.x = nx; m.y = ny;
-        close_door_if_clear(ox, oy);
-      }
-    }
+  const bool sees = dist <= fov_radius && invis_t == 0 && los(m.x, m.y, px, py);
+  if (m.ai != Mob::Hunting && sees &&
+      ri(*this, 0, (m.ai == Mob::Sleeping ? 2 * dist : dist) + 1) < 2) {
+    m.ai = Mob::Hunting;
+    m.target = hero;
     return;
   }
-  if (dist == 1) {
+  if (m.ai == Mob::Sleeping) return;
+  if (m.ai == Mob::Hunting && sees) m.target = hero;
+  if (m.ai == Mob::Hunting && sees && dist == 1) {
     int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus() -
                             ring_def() - talents[2]);
     if (shield > 0) {
@@ -2397,24 +2469,21 @@ void Game::mob_turn(Mob& m) {
     message(b);
     return;
   }
-  int sx = (dx > 0) - (dx < 0), sy = (dy > 0) - (dy < 0);
-  auto try_move = [&](int nx, int ny) {
-    if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return false;
-    if (tiles[ny][nx] == T_DOOR) tiles[ny][nx] = T_DOOR_OPEN;
-    if (!walkable(nx, ny) || mob_at(nx, ny) >= 0 || (nx == px && ny == py))
-      return false;
-    m.vx = (float)m.x; m.vy = (float)m.y;
-    int ox = m.x, oy = m.y;
-    m.x = nx; m.y = ny;
-    close_door_if_clear(ox, oy);
-    return true;
-  };
-  if (absi(dx) >= absi(dy)) {
-    if (try_move(m.x + sx, m.y)) return;
-    try_move(m.x, m.y + sy);
-  } else {
-    if (try_move(m.x, m.y + sy)) return;
-    try_move(m.x + sx, m.y);
+  if (m.target >= 0) {
+    const int goal = m.target;
+    const int step = navigation.toward(start, goal, [&](int p) {
+      // An occupied goal can guide the route, but step_to never enters it.
+      return passable(p) || (p == goal && walkable(p % MW, p / MW));
+    });
+    if (step_to(step)) return;
+    // Keep a visible target when another unit is temporarily in the way.
+    if (m.ai == Mob::Hunting && sees) return;
+  }
+  m.ai = Mob::Wandering;
+  m.target = -1;
+  for (int tries = 0; tries < 16; ++tries) {
+    const int p = ri(*this, 0, MW * MH - 1);
+    if (passable(p)) { m.target = p; break; }
   }
 }
 

@@ -111,6 +111,9 @@ static void draw_feature(const Feature& f, int camx, int camy) {
       draw_tile_world(A_items, (36 % 16) * 16, (36 / 16) * 16, wx, wy + 1, z,
                       camx, camy, 0x808080FF);
       break;
+    case F_REMAINS:
+      draw_tile_world(A_items, 0, 32, wx, wy + 1, z, camx, camy, 0);
+      break;
     case F_TOMB:
     case F_TOMB_USED:
       draw_tile_world(A_items, (34 % 16) * 16, (34 / 16) * 16, wx, wy + 1, z,

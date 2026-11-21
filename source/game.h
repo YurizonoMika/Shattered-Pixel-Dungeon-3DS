@@ -43,6 +43,8 @@ enum FeatureType : uint8_t {
   F_TRAP_FOUND,
   F_TOKEN,
   F_CHEST_MIMIC,
+  F_REMAINS,
+  F_MIMIC_LOOT, // hidden payload; aux is the index of the active mimic
 };
 
 struct Feature {
@@ -56,6 +58,7 @@ struct Feature {
 };
 
 struct Mob {
+  enum Ai : uint8_t { Sleeping, Wandering, Hunting };
   int x = 0, y = 0;
   float vx = 0, vy = 0;  // visual position (tile units)
   int anim_ms = 0;
@@ -63,6 +66,8 @@ struct Mob {
   int hp = 1, maxhp = 1, atk = 1, def = 0;
   bool alive = true;
   uint8_t sleep_t = 0, terror_t = 0;
+  Ai ai = Wandering;
+  int target = -1;
 };
 
 struct FloorItem {
@@ -154,7 +159,7 @@ struct Game {
   int keys = 0, gold = 0, shield = 0;
   int turns = 0;
   uint8_t tiles[MH][MW]{};
-  bool seen[MH][MW]{};
+  uint8_t seen[MH][MW]{};
   bool vis[MH][MW]{};
   std::vector<Mob> mobs;
   std::vector<FloorItem> items;
@@ -216,8 +221,7 @@ struct Game {
   std::vector<SearchFx> search_fx;
   int search_ms = 0;
   int panim_ms = 0;
-  int16_t path_x[32]{}, path_y[32]{};
-  int path_n = 0, path_i = 0;
+  int path_goal = -1;
   int fx_x = -1, fx_y = -1, fx_t = 0;
 
   bool paused = false, backpack = false;

@@ -348,8 +348,12 @@ tools/                # asset prep, font generation, dev helpers
 - All textures use `GPU_NEAREST` filtering to preserve pixel art.
 - Character frames follow SPD's sheets (hero/gnoll 12×15, rat 16×15, crab 16×16)
   with the same idle/run frame tables, drawn with SPD's tile-relative offsets.
-- Player movement is a queued BFS path: one tile per turn, with a short visual
-  interpolation, so turns stay deterministic while sprites move smoothly.
+- The hero and enemies use an eight-direction distance map for movement.
+  Hero routes stay on known terrain and are recomputed each step around actors.
+  Enemies sleep, wander, pursue their last seen target, or flee under terror.
+- The fixed-size 3DS maps adapt upstream `LoopBuilder`: the entrance and exit
+  sit on a loop, with single-entrance special rooms attached as branches.
+  This is not a seed-for-seed port of upstream's variable-size builders.
 - Text is a generated white-alpha glyph atlas tinted at runtime with `C2D_TintMult`.
 - Saves use a fixed-size `GameDisk` struct (`source/game.h`) with magic + version
   fields; `Game::slot_meta` reads just the header for the slot list.
@@ -469,6 +473,8 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 76 | Clean enemy gallery (no items/features) |
 | 77 | Jump next to a locked side door |
 | 85/86 | Door rendering comparison: closed, open, locked, left to right; side doors above front doors; 1× / 1.33× |
+| 87 | Check stair and key reachability on 32 seeds across all 25 floors |
+| 88 | Check long hero route, door closure, and pursuit of a last-seen target |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |
