@@ -800,8 +800,10 @@ int main() {
           G.new_run(0, 1);
           SCENE = Scene::GAME;
           int bad = 0;
+          int rule_failures = 0;
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
+            int strength = 0, upgrades = 0;
             for (int floor = 1; floor <= 25; ++floor) {
               G.floor = floor;
               G.gen_level();
@@ -826,6 +828,27 @@ int main() {
               for (const Feature& f : G.features) locks += f.type == F_CHEST_LOCKED;
               for (const FloorItem& it : G.items)
                 if (it.id == IT_KEY && reached[it.y][it.x]) ++available;
+              int regular = 0, sleeping = 0, food = 0;
+              bool overlapping = false;
+              for (const Mob& m : G.mobs) {
+                if (!(m.type >= M_GOO && m.type <= M_YOG) &&
+                    !(m.type >= M_NPC_GHOST && m.type <= M_NPC_IMP)) ++regular;
+                sleeping += m.ai == Mob::Sleeping;
+              }
+              for (const FloorItem& it : G.items) {
+                if ((it.id == IT_FOOD_RATION || it.id == IT_FOOD_PASTY) && reached[it.y][it.x]) ++food;
+                if (it.id == IT_POTION_STR && reached[it.y][it.x]) ++strength;
+                if (it.id == IT_SCROLL_UP && reached[it.y][it.x]) ++upgrades;
+                if (G.mob_at(it.x, it.y) >= 0) overlapping = true;
+              }
+              if (overlapping || (floor == 1 && sleeping != 8) ||
+                  (floor % 5 == 0 && (regular || strength < 2 || upgrades < 3 || !G.boss_alive())) ||
+                  (floor % 5 != 0 && food < (G.plan_feeling[floor - 1] == 3 ? 2 : 1))) {
+                ++rule_failures;
+                dlog("[floor rules] seed=%lu floor=%d ordinary=%d sleeping=%d food=%d strength=%d upgrades=%d overlap=%d",
+                     (unsigned long)G.seed, floor, regular, sleeping, food, strength, upgrades, overlapping);
+              }
+              if (floor % 5 == 0) strength = upgrades = 0;
               if (!exit || available < locks) {
                 ++bad;
                 dlog("[generation] seed=%lu floor=%d exit=%d keys=%d/%d",
@@ -834,6 +857,33 @@ int main() {
             }
           }
           dlog("[generation] 800 maps, %d failures", bad);
+          dlog("[floor rules] 800 maps, %d failures", rule_failures);
+          G.new_run(0, 0x12345678);
+          G.demo_lock = true;
+        }
+        else if (want == 91) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.floor = 2;
+          G.gen_level();
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          G.pvx = G.px = 2; G.pvy = G.py = 10;
+          G.tiles[10][2] = T_FLOOR;
+          G.tiles[10][15] = T_FLOOR;
+          G.spawn_rooms = {{14, 9, 3, 3}};
+          G.spawn_deck = {M_SNAKE, M_RAT};
+          G.respawn_t = 3;
+          G.recompute_fov();
+          G.advance_turn();
+          const bool retry = G.mobs.empty() && G.respawn_t == 3 && G.spawn_deck.size() == 1;
+          for (int x = 3; x < 15; ++x) G.tiles[10][x] = T_FLOOR;
+          G.tiles[10][8] = T_DOOR;
+          G.recompute_fov();
+          G.advance_turn();
+          const bool spawned = G.mobs.size() == 1 && G.mobs[0].type == M_SNAKE &&
+              G.mobs[0].ai == Mob::Wandering && G.respawn_t > 3;
+          dlog("[respawn] unreachable retry=%d, connected rotation=%d", retry, spawned);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }

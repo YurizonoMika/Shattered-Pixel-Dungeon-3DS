@@ -417,13 +417,15 @@ void Game::build_run_plan() {
     plan_special_n[i] = 0;
     plan_feeling[i] = 0;
     plan_secret[i] = 0;
-    plan_special[i][0] = plan_special[i][1] = plan_special[i][2] = SP_NONE;
+    std::fill_n(plan_special[i], 4, SP_NONE);
+    plan_guaranteed[i] = 0;
   }
 
-  // 50% chance of a level feeling on depth 2+, ~1/14 for each type (SPD Level).
+  // Level.create: each supported feeling occupies one of the 14 outcomes.
+  // Chasm is reserved until terrain and fall transitions support it.
   for (int f = 2; f <= 25; f++) {
-    if ((rr() >> 16) & 1) continue;
-    switch (rr() % 14) {
+    if (f % 5 == 0) continue;
+    switch ((rr() >> 16) % 14) {
       case 0: plan_feeling[f - 1] = 1; break;  // water
       case 1: plan_feeling[f - 1] = 2; break;  // grass
       case 2: plan_feeling[f - 1] = 3; break;  // large
@@ -436,7 +438,7 @@ void Game::build_run_plan() {
 
   // One laboratory per region, either on its 3rd or 4th floor.
   bool lab[26] = {};
-  for (int r = 0; r < 5; r++) lab[r * 5 + 3 + (int)(rr() % 2)] = true;
+  for (int r = 0; r < 5; r++) lab[r * 5 + 3 + (int)((rr() >> 16) % 2)] = true;
 
   static const uint8_t EQUIP[] = {
       SP_CRYPT, SP_POOL, SP_ARMORY, SP_SENTRY, SP_STATUE, SP_VAULT};
@@ -457,8 +459,15 @@ void Game::build_run_plan() {
   }
   std::vector<uint8_t> queue;
   queue.push_back(co[0]);                       // SPD starts with a consumable
-  for (int i = 1; i < (int)sizeof(co); i++) queue.push_back(co[i]);
-  queue.insert(queue.end(), eq, eq + sizeof(eq));
+  for (unsigned i = 0; i < sizeof(co) - 1; i++) {
+    if (i < sizeof(eq)) queue.push_back(eq[i]);
+    queue.push_back(co[i + 1]);
+  }
+
+  auto potion_room = [](uint8_t t) {
+    return t == SP_POOL || t == SP_SENTRY || t == SP_STORAGE ||
+           t == SP_TOXIC || t == SP_FIRE || t == SP_TRAPS;
+  };
 
   for (int f = 1; f <= 25; f++) {
     if (f % 5 == 0) continue;  // boss floors are separate layouts in SPD
@@ -471,18 +480,20 @@ void Game::build_run_plan() {
       case 3: n = 2 + ((rr() % 3) == 0 ? 1 : 0); break;
       default: n = 2 + (int)(rr() % 2); break;
     }
-    if (plan_feeling[f - 1] == 3) n++;  // large floors add a special
-    n = std::min(3, n + (lab[f] ? 1 : 0));
+    if (plan_feeling[f - 1] == 3) n = reg == 0 ? 3 : 4;
     plan_special_n[f - 1] = (uint8_t)n;
     if (lab[f]) plan_special[f - 1][0] = SP_LAB;
+    auto eligible = queue;
     for (int i = lab[f] ? 1 : 0; i < n; i++) {
-      if (queue.empty()) break;
-      int m = (int)queue.size();
+      int m = (int)eligible.size();
       uint32_t r = rr() % 10;
       int idx = r < 6 ? 0 : (r < 9 ? 1 : 2);
       if (idx >= m) idx = m - 1;
-      uint8_t v = queue[idx];
-      queue.erase(queue.begin() + idx);
+      uint8_t v = eligible[idx];
+      eligible.erase(std::remove_if(eligible.begin(), eligible.end(), [&](uint8_t t) {
+        return t == v || (potion_room(v) && potion_room(t));
+      }), eligible.end());
+      queue.erase(std::find(queue.begin(), queue.end(), v));
       queue.push_back(v);  // SPD useType(): move to the back
       plan_special[f - 1][i] = v;
     }
@@ -495,17 +506,25 @@ void Game::build_run_plan() {
     float frac = BASE_SECRETS[reg] - total;
     if ((rr() % 1000) < (uint32_t)(frac * 1000.0f)) total++;
     int left = total;
-    int floors = 5;
-    for (int j = 0; j < 5; j++) {
-      int depth = reg * 5 + 1 + j;
-      if (depth == 1) { floors--; continue; }
-      int take = 0;
-      if (left > 0 && floors > 0 && (int)(rr() % (uint32_t)floors) < left) {
-        take = 1;
-      }
+    for (int j = 1; j <= 4; j++) {
+      int depth = reg * 5 + j;
+      if (depth == 1) continue;
+      int floors = 5 - j;
+      int take = left / floors + (int(rr() % floors) < left % floors);
       plan_secret[depth - 1] = (uint8_t)take;
       left -= take;
-      floors--;
+    }
+  }
+
+  // Dungeon.posNeeded / souNeeded, for the default challenge-free run.
+  for (int reg = 0; reg < 5; ++reg) {
+    for (int j = 1; j <= 3; j += 2)
+      plan_guaranteed[reg * 5 + j - 1 + ((rr() >> 16) % 2)] |= 1;
+    int upgrades = 3;
+    for (int j = 1; j <= 4 && upgrades; ++j) {
+      if (int((rr() >> 16) % (5 - j)) >= upgrades) continue;
+      plan_guaranteed[reg * 5 + j - 1] |= 2;
+      --upgrades;
     }
   }
 }
@@ -584,6 +603,75 @@ static void mob_rotation(Game& g, int depth, std::vector<uint8_t>& out) {
   }
 }
 
+uint8_t Game::next_spawn_type() {
+  if (spawn_deck.empty()) mob_rotation(*this, floor, spawn_deck);
+  const uint8_t type = spawn_deck.back();
+  spawn_deck.pop_back();
+  return type;
+}
+
+static Mob make_floor_mob(uint8_t type, int x, int y, Mob::Ai ai) {
+  Mob m;
+  const MobDef& d = mob_def(type);
+  m.x = x; m.y = y; m.vx = x; m.vy = y;
+  m.type = type; m.hp = m.maxhp = d.hp; m.atk = d.atk; m.def = d.def;
+  m.ai = ai;
+  return m;
+}
+
+static void spawn_distances(const Game& g, int16_t (&dist)[MH][MW],
+                            bool open_doors, int limit = MW * MH) {
+  uint16_t queue[MW * MH];
+  for (auto& row : dist) std::fill_n(row, MW, int16_t(-1));
+  int head = 0, tail = 1;
+  queue[0] = g.py * MW + g.px;
+  dist[g.py][g.px] = 0;
+  while (head < tail) {
+    const int p = queue[head++], x = p % MW, y = p / MW;
+    if (dist[y][x] >= limit) continue;
+    for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+      int nx = x + dx, ny = y + dy;
+      if (!g.walkable(nx, ny) || dist[ny][nx] >= 0 ||
+          (!open_doors && g.tiles[ny][nx] == T_DOOR)) continue;
+      dist[ny][nx] = dist[y][x] + 1;
+      queue[tail++] = ny * MW + nx;
+    }
+  }
+}
+
+static bool floor_spawn_cell(const Game& g, int x, int y, uint8_t type) {
+  if (!g.walkable(x, y) || (x == g.px && y == g.py) || g.mob_at(x, y) >= 0) return false;
+  const auto t = g.tiles[y][x];
+  if (t != T_FLOOR && t != T_GRASS && t != T_WATER) return false;
+  if (type == M_DM200 || type == M_GOLEM) {
+    for (int dy : {-1, 1}) for (int dx : {-1, 1})
+      if (!g.blocks_sight(x + dx, y) && !g.blocks_sight(x, y + dy) &&
+          !g.blocks_sight(x + dx, y + dy)) return true;
+    return false;
+  }
+  return true;
+}
+
+bool Game::try_respawn() {
+  if (spawn_rooms.empty()) return false;
+  int16_t dist[MH][MW];
+  spawn_distances(*this, dist, true);
+  uint8_t type = next_spawn_type();
+  for (int attempt = 0; attempt < 30; ++attempt) {
+    for (int sample = 0; sample < 30; ++sample) {
+      const auto& r = spawn_rooms[ri(*this, 0, int(spawn_rooms.size()) - 1)];
+      int x = r.x + ri(*this, 1, r.w - 2), y = r.y + ri(*this, 1, r.h - 2);
+      if (vis[y][x] || !floor_spawn_cell(*this, x, y, type)) continue;
+      if (dist[y][x] >= 12) {
+        mobs.push_back(make_floor_mob(type, x, y, Mob::Wandering));
+        return true;
+      }
+      break;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Level generation
 // ---------------------------------------------------------------------------
@@ -599,6 +687,8 @@ void Game::gen_level() {
   features.clear();
   search_fx.clear();
   search_ms = 0;
+  spawn_rooms.clear();
+  spawn_deck.clear();
   respawn_t = 0;
   mob_cap = 0;
   rng = seed ^ (uint32_t)(floor * 2654435761u);
@@ -633,7 +723,10 @@ void Game::gen_level() {
     case 3: nstd = 6 + pick_weighted_5(rng); break;
     default: nstd = 8 + ((rnd(*this) % 3) ? 0 : 1); break;
   }
-  if (large) nstd = (int)ceilf(nstd * 1.5f);
+  if (large) {
+    static constexpr int max_std[] = {6, 6, 7, 8, 9};
+    nstd = (max_std[reg] * 3 + 1) / 2;
+  }
   if (boss_floor) nstd = 4;
 
   int nspec = boss_floor ? 0 : plan_special_n[floor - 1];
@@ -996,7 +1089,7 @@ void Game::gen_level() {
         else y = r.y + 1;
         add_feature(F_ALCHEMY, x, y);
         add_random_item(r, IT_POTION_HEAL, 0);
-        add_random_item(r, IT_POTION_STR, 0);
+        add_random_item(r, IT_STONE_AUG, 0);
         break;
       }
       case SP_STATUE:
@@ -1080,6 +1173,10 @@ void Game::gen_level() {
   std::vector<int> std_rooms;
   for (int i = 0; i < (int)rooms.size(); i++)
     if (rooms[i].kind == RK_STANDARD) std_rooms.push_back(i);
+  for (int i : std_rooms) {
+    const auto& r = rooms[i];
+    spawn_rooms.push_back({uint8_t(r.x), uint8_t(r.y), uint8_t(r.w), uint8_t(r.h)});
+  }
   auto drop_cell = [&]() {
     if (!std_rooms.empty()) {
       int start_room = ri(*this, 0, (int)std_rooms.size() - 1);
@@ -1095,12 +1192,6 @@ void Game::gen_level() {
     if (p.first >= 0) add_item_at(p.first, p.second, IT_KEY, 0);
     return p.first >= 0;
   };
-  for (int i = 0; i < locked_count; i++) drop_key();
-  for (const GRoom& r : rooms) if (r.spec == SP_STORAGE) {
-    auto p = drop_cell();
-    if (p.first >= 0) add_item_at(p.first, p.second, IT_POTION_FLAME, 0);
-  }
-
   // Standard loot (SPD RegularLevel.createItems).
   auto add_floor_item = [&](const LootRoll& lr) {
     auto p = drop_cell();
@@ -1120,13 +1211,10 @@ void Game::gen_level() {
                  roll <= 5 ? int(F_CHEST) : -1);
     }
   };
-  int itemRoll = ri(*this, 0, 99);
-  int nItems = 3 + (itemRoll < 60 ? 0 : (itemRoll < 90 ? 1 : 2));
-  if (large) nItems += 2;
-  for (int i = 0; i < nItems; i++) add_floor_item(roll_loot(*this, true));
-
   // Traps: Random.NormalIntRange(2, 3 + depth/5), doubled on trap floors.
-  int nTraps = ri(*this, 2, 3 + floor / 5);
+  const auto trap_roll_a = rnd(*this) >> 16;
+  const auto trap_roll_b = rnd(*this) >> 16;
+  int nTraps = boss_floor ? 0 : 2 + (trap_roll_a + trap_roll_b) * (2 + floor / 5) / 131072;
   if (traps_feeling) nTraps *= 2;
   for (int i = 0; i < nTraps; i++) {
     if (std_rooms.empty()) break;
@@ -1143,73 +1231,72 @@ void Game::gen_level() {
   }
 
   // Monsters.
-  auto spawn = [&](uint8_t type, int x, int y) {
-    if (x < 1 || y < 1 || x >= MW - 1 || y >= MH - 1) return;
-    if (tiles[y][x] == T_WALL || tiles[y][x] == T_DOOR_LOCKED ||
-        tiles[y][x] == T_SECRET)
-      return;
-    if (mob_at(x, y) >= 0 || feature_at(x, y) >= 0) return;
-    Mob m;
-    m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
-    m.type = type;
-    const MobDef& d = mob_def(type);
-    m.maxhp = d.hp;
-    m.hp = m.maxhp;
-    m.atk = d.atk;
-    m.def = d.def;
-    if (!is_npc(type) && !is_boss(type)) m.ai = Mob::Sleeping;
-    mobs.push_back(m);
-  };
-
   if (boss_floor) {
     if (!boss_dead[reg]) {
       static const int OFF[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
                                     {-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
       for (int i = 0; i < 8; i++) {
         int bx = xr.cx + OFF[i][0], by = xr.cy + OFF[i][1];
-        if (tiles[by][bx] != T_WALL && mob_at(bx, by) < 0) {
-          spawn(REGIONS[reg].boss, bx, by);
+        if (floor_spawn_cell(*this, bx, by, REGIONS[reg].boss)) {
+          mobs.push_back(make_floor_mob(REGIONS[reg].boss, bx, by, Mob::Wandering));
           break;
         }
       }
-    }
-    // Boss levels still have a handful of minions in SPD.
-    std::vector<uint8_t> rot;
-    mob_rotation(*this, floor, rot);
-    int minions = 3 + reg;
-    for (int i = 0; i < minions && !std_rooms.empty() && !rot.empty(); i++) {
-      const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-      auto p = room_cell(r);
-      if (p.first >= 0)
-        spawn(rot[(int)(rnd(*this) % rot.size())], p.first, p.second);
     }
   } else {
     int limit = floor == 1 ? 8 : 3 + floor % 5 + ri(*this, 0, 2);
     if (large) limit = (int)ceilf(limit * 1.33f);
     mob_cap = (floor == 1) ? 0 : limit;
-    std::vector<uint8_t> rot;
-    mob_rotation(*this, floor, rot);
-    if (rot.empty()) rot.push_back(M_RAT);
-    int spawn_idx = 0;
-    int placed = 0;
-    int guard = 0;
-    while (placed < limit && guard++ < 400) {
-      if (std_rooms.empty()) break;
-      const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-      auto p = room_cell(r);
-      if (p.first < 0) continue;
-      int d = std::max(absi(p.first - px), absi(p.second - py));
-      if (d <= 9) continue;
-      spawn(rot[spawn_idx++ % rot.size()], p.first, p.second);
-      placed++;
-      if (floor > 1 && placed < limit && (rnd(*this) % 4) == 0) {
-        auto q = room_cell(r);
-        if (q.first >= 0) {
-          spawn(rot[spawn_idx++ % rot.size()], q.first, q.second);
-          placed++;
-        }
+    respawn_t = plan_feeling[floor - 1] == 6 ? 100 : 150;
+    int16_t dist[MH][MW];
+    spawn_distances(*this, dist, false, 8);
+    for (int i = int(std_rooms.size()) - 1; i > 0; --i)
+      std::swap(std_rooms[i], std_rooms[ri(*this, 0, i)]);
+    int remaining = limit;
+    uint8_t type = next_spawn_type();
+    auto place = [&](const GRoom& r) {
+      for (int attempt = 0; attempt < 30; ++attempt) {
+        int x = r.x + ri(*this, 1, r.w - 2), y = r.y + ri(*this, 1, r.h - 2);
+        if (dist[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) || item_at(x, y) >= 0) continue;
+        if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
+        int f = feature_at(x, y);
+        if (f >= 0 && (features[f].type == F_TRAP || features[f].type == F_PLANT)) continue;
+        mobs.push_back(make_floor_mob(type, x, y, Mob::Sleeping));
+        if (--remaining) type = next_spawn_type();
+        return true;
+      }
+      return false;
+    };
+    for (int pass = 0; pass < 30 && remaining; ++pass) {
+      for (int i : std_rooms) {
+        if (!remaining) break;
+        if (place(rooms[i]) && remaining && floor > 1 && ri(*this, 0, 3) == 0)
+          place(rooms[i]);
       }
     }
+
+    // Guaranteed supplies are loose heaps, after population and traps are placed.
+    auto supply = [&](uint8_t id) {
+      auto p = drop_cell();
+      if (p.first >= 0) add_item_at(p.first, p.second, id, 0);
+    };
+    for (int i = 0; i < locked_count; i++) drop_key();
+    for (const GRoom& r : rooms) {
+      switch (r.spec) {
+        case SP_POOL: supply(IT_POTION_INVIS); break;
+        case SP_SENTRY: supply(IT_POTION_HASTE); break;
+        case SP_STORAGE: supply(IT_POTION_FLAME); break;
+        case SP_TRAPS: supply(IT_POTION_LEVITATE); break;
+      }
+    }
+    supply(ri(*this, 0, 4) ? IT_FOOD_RATION : IT_FOOD_PASTY);
+    if (large) supply(ri(*this, 0, 4) ? IT_FOOD_RATION : IT_FOOD_PASTY);
+    uint8_t guaranteed = plan_guaranteed[floor - 1];
+    if (guaranteed & 1) supply(IT_POTION_STR);
+    if (guaranteed & 2) supply(IT_SCROLL_UP);
+    int itemRoll = ri(*this, 0, 99);
+    int nItems = 3 + (itemRoll < 60 ? 0 : (itemRoll < 90 ? 1 : 2)) + (large ? 2 : 0);
+    for (int i = 0; i < nItems; i++) add_floor_item(roll_loot(*this, true));
   }
 
   cursor_x = px;
@@ -2677,55 +2764,40 @@ void Game::advance_turn() {
   if (ring_has(IT_RING_FORCE) && turns % 10 == 0) shield += 3;
   if (have_dust && wand_state == 1) {
     dust_timer++;
-    int wraiths = 0;
+    int wraiths = 1;
     for (const Mob& m : mobs)
       if (m.alive && m.type == M_WRAITH) wraiths++;
-    if (dust_timer >= 5 && wraiths < 4) {
-      dust_timer = 0;
-      for (int a = 0; a < 30; a++) {
-        int x = px + ri(*this, -3, 3), y = py + ri(*this, -3, 3);
-        if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
-        if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
-        Mob m;
-        m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
-        m.type = M_WRAITH;
-        m.hp = m.maxhp = 20 + floor;
-        m.atk = 6; m.def = 2;
-        mobs.push_back(m);
+    const int power = std::min(49, wraiths * wraiths);
+    if (dust_timer >= power) {
+      std::vector<int> cells;
+      const int min_dist = (fov_radius + 1) / 3;
+      for (int y = std::max(1, py - fov_radius); y <= std::min(MH - 2, py + fov_radius); ++y)
+        for (int x = std::max(1, px - fov_radius); x <= std::min(MW - 2, px + fov_radius); ++x)
+          if (vis[y][x] && grid_distance(x, y, px, py) > min_dist &&
+              walkable(x, y) && tiles[y][x] != T_DOOR && mob_at(x, y) < 0)
+            cells.push_back(y * MW + x);
+      if (!cells.empty()) {
+        const int p = cells[ri(*this, 0, int(cells.size()) - 1)];
+        mobs.push_back(make_floor_mob(M_WRAITH, p % MW, p / MW, Mob::Hunting));
+        dust_timer -= power;
         message("尸尘中冒出了一只怨灵！");
-        break;
+      } else {
+        dust_timer = std::min(dust_timer, 2 * wraiths);
       }
     }
   }
-  // SPD MobSpawner: refill the level up to mobLimit on a 50-turn cooldown.
-  if (floor % 5 != 0 && mob_cap > 0) {
-    int alive = 0;
-    for (const Mob& m : mobs)
-      if (m.alive && !is_npc(m.type)) alive++;
-    int cooldown = (plan_feeling[floor - 1] == 6) ? 33 : 50;
-    if (++respawn_t >= cooldown) {
-      respawn_t = 0;
-      if (alive < mob_cap) {
-        std::vector<uint8_t> rot;
-        mob_rotation(*this, floor, rot);
-        for (int a = 0; a < 80 && !rot.empty(); a++) {
-          int x = ri(*this, 1, MW - 2), y = ri(*this, 1, MH - 2);
-          if (!walkable(x, y) || vis[y][x]) continue;
-          if (tiles[y][x] == T_STAIRS || tiles[y][x] == T_WATER) continue;
-          if (mob_at(x, y) >= 0 || feature_at(x, y) >= 0) continue;
-          if (std::max(absi(x - px), absi(y - py)) < 12) continue;
-          Mob m;
-          m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
-          m.type = rot[(int)(rnd(*this) % rot.size())];
-          const MobDef& d = mob_def(m.type);
-          m.maxhp = m.hp = d.hp;
-          m.atk = d.atk;
-          m.def = d.def;
-          mobs.push_back(m);
-          break;
-        }
-      }
+  if (mob_cap > 0 && (respawn_t -= 3) <= 0) {
+    int half_weight = 0;
+    for (const Mob& m : mobs) {
+      if (!m.alive || is_npc(m.type) || is_boss(m.type) || m.type == M_MIMIC ||
+          m.type == M_WRAITH || m.type == M_RIPPER || m.type == M_FETID_RAT ||
+          m.type == M_TRICKSTER || m.type == M_GREAT_CRAB) continue;
+      half_weight += m.type == M_GHOUL ? 1 : 2;
     }
+    const int cap = 3 + floor % 5 + ri(*this, 0, 2);
+    const int limit = plan_feeling[floor - 1] == 3 ? (cap * 133 + 99) / 100 : cap;
+    if ((half_weight + 1) / 2 < limit && !try_respawn()) respawn_t += 3;
+    else respawn_t += plan_feeling[floor - 1] == 6 ? 100 : 150;
   }
   recharge_wands();
   bool skip = (haste_t > 0 || ring_has(IT_RING_HASTE)) && (turns % 2 == 0);
@@ -2965,6 +3037,14 @@ void Game::cast_or_throw(int x, int y) {
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
 static const uint16_t SAVE_VERSION = 9;
+// Optional trailer: the original V9 header and slot metadata stay readable.
+struct SpawnDisk {
+  uint32_t magic = 0x31575053; // SPW1
+  uint16_t remaining = 0;
+  uint8_t room_count = 0, deck_count = 0;
+  Game::SpawnRoom rooms[25]{};
+  uint8_t deck[16]{};
+};
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
@@ -3064,9 +3144,14 @@ bool Game::save(int slot) const {
   slot_path(slot, path, sizeof(path));
   FILE* f = fopen(path, "wb");
   if (!f) return false;
-  bool ok = fwrite(&d, sizeof(d), 1, f) == 1;
-  fclose(f);
-  return ok;
+  SpawnDisk sp;
+  sp.remaining = uint16_t(std::clamp(respawn_t, 0, 150));
+  sp.room_count = uint8_t(std::min<size_t>(25, spawn_rooms.size()));
+  sp.deck_count = uint8_t(std::min<size_t>(16, spawn_deck.size()));
+  std::copy_n(spawn_rooms.begin(), sp.room_count, sp.rooms);
+  std::copy_n(spawn_deck.begin(), sp.deck_count, sp.deck);
+  const bool ok = fwrite(&d, sizeof(d), 1, f) == 1 && fwrite(&sp, sizeof(sp), 1, f) == 1;
+  return fclose(f) == 0 && ok;
 }
 
 bool Game::load(int slot) {
@@ -3076,6 +3161,9 @@ bool Game::load(int slot) {
   if (!f) return false;
   GameDisk d{};
   bool ok = fread(&d, sizeof(d), 1, f) == 1;
+  SpawnDisk sp;
+  const bool have_spawn = fread(&sp, sizeof(sp), 1, f) == 1 &&
+      sp.magic == 0x31575053 && sp.room_count <= 25 && sp.deck_count <= 16 && sp.remaining <= 150;
   fclose(f);
   if (!ok || d.magic != SAVE_MAGIC || d.version != SAVE_VERSION) return false;
   if (d.floor < 1 || d.floor > 25) return false;
@@ -3170,8 +3258,20 @@ bool Game::load(int slot) {
   msg[0] = 0;
   build_run_plan();
   fov_radius = (plan_feeling[floor - 1] == 6) ? 5 : 8;
-  mob_cap = (floor % 5 == 0) ? 0 : 3 + floor % 5;
-  respawn_t = 0;
+  spawn_rooms.clear();
+  spawn_deck.clear();
+  if (have_spawn) {
+    for (int i = 0; i < sp.room_count; ++i) {
+      auto r = sp.rooms[i];
+      if (r.w >= 3 && r.h >= 3 && r.x > 0 && r.y > 0 &&
+          r.x + r.w < MW && r.y + r.h < MH) spawn_rooms.push_back(r);
+    }
+    if (std::all_of(sp.deck, sp.deck + sp.deck_count, [](uint8_t t) { return t < M_COUNT; }))
+      spawn_deck.assign(sp.deck, sp.deck + sp.deck_count);
+  }
+  // V9 files without room metadata cannot distinguish standard and secret rooms.
+  mob_cap = (floor == 1 || floor % 5 == 0 || spawn_rooms.empty()) ? 0 : 3 + floor % 5;
+  respawn_t = have_spawn ? sp.remaining : 0;
   check_talents();
   recompute_fov();
   return true;

@@ -187,8 +187,13 @@ struct Game {
   bool bag_potion = false, bag_scroll = false, bag_wand = false;
   bool shop_warned[25]{}, shop_gone[25]{};
   int dust_timer = 0;
-  int respawn_t = 0;
+  int respawn_t = 0;  // countdown in thirds of a turn
   int mob_cap = 0;
+  struct SpawnRoom { uint8_t x, y, w, h; };
+  std::vector<SpawnRoom> spawn_rooms;
+  std::vector<uint8_t> spawn_deck;
+  uint8_t next_spawn_type();
+  bool try_respawn();
   int room_count = 0;
   uint8_t talents[4]{}, talent_tier = 0;
   bool alchemy_open = false;
@@ -197,10 +202,11 @@ struct Game {
   float zoom = 1.0f;
   float zoom_target = 1.0f;
   // Deterministic per-run plan (rebuilt from the seed, not saved).
-  uint8_t plan_special[25][3]{};
+  uint8_t plan_special[25][4]{};
   uint8_t plan_special_n[25]{};
   uint8_t plan_feeling[25]{};
   uint8_t plan_secret[25]{};
+  uint8_t plan_guaranteed[25]{};  // bit 0 strength, bit 1 upgrade
   int alchemy_sel = 0;
   bool transmute_open = false;
   int transmute_sel = 0;
