@@ -178,6 +178,15 @@ character, renders it with **Fusion Pixel 12px** (OFL), packs a 512×N atlas and
 `source/font_glyphs.h` (codepoint → rect + metrics). Add UI text → rerun the script.
 Only the glyphs actually used are included, keeping the atlas small.
 
+Readability rules used by the renderer:
+
+- only **integer scales** (1× body, 2× headings) — fractional downscaling with
+  `GPU_NEAREST` drops pixel rows and makes CJK look broken;
+- every glyph is snapped to the integer pixel grid;
+- a 1 px dark shadow (2 px at 2×) is drawn behind text so it stays readable on the
+  dungeon background and on 9-patch panels;
+- body text uses high-contrast near-white instead of mid-grey.
+
 ## Debug
 
 Drop `sdmc:/3ds/spd/scene.txt` (Azahar:

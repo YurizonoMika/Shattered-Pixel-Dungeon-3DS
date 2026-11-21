@@ -30,7 +30,7 @@ struct Img {
 #define CLR_YELLOW C2D_Color32(0xFF, 0xD2, 0x3C, 0xFF)
 #define CLR_GREEN  C2D_Color32(0x3C, 0xE0, 0x6E, 0xFF)
 #define CLR_RED    C2D_Color32(0xE0, 0x40, 0x40, 0xFF)
-#define CLR_GREY   C2D_Color32(0xAA, 0xAA, 0xAA, 0xFF)
+#define CLR_GREY   C2D_Color32(0xD2, 0xD2, 0xD6, 0xFF)
 #define CLR_DARK   C2D_Color32(0x12, 0x14, 0x1A, 0xFF)
 #define CLR_BLUE   C2D_Color32(0x54, 0x8C, 0xF0, 0xFF)
 #define CLR_ORANGE C2D_Color32(0xFF, 0x9C, 0x30, 0xFF)
@@ -73,7 +73,8 @@ void draw_frame(float x, float y, float w, float h, float thickness, u32 color,
                 float z = 0.45f);
 
 // Corner-bracket selection cursor (SPD style).
-void draw_cursor(float x, float y, float w, float h, u32 color, float z = 0.6f);
+void draw_cursor(float x, float y, float w, float h, u32 color,
+                 float z = 0.6f, bool center_dot = true);
 
 // ---- text ------------------------------------------------------------------
 void text(const char* s, float x, float y, u32 color, float scale = 1.0f);

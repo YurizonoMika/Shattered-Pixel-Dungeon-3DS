@@ -15,7 +15,6 @@ for w in list {
     let ww = b["Width"] as? Double ?? 0
     let hh = b["Height"] as? Double ?? 0
     print("\(wid) \(Int(x)) \(Int(y)) \(Int(ww)) \(Int(hh))")
-    exit(0)
   }
 }
 exit(1)

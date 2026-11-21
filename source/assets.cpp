@@ -145,7 +145,8 @@ void draw_frame(float x, float y, float w, float h, float t, u32 color, float z)
   C2D_DrawRectSolid(x + w - t, y, z, t, h, color);
 }
 
-void draw_cursor(float x, float y, float w, float h, u32 color, float z) {
+void draw_cursor(float x, float y, float w, float h, u32 color, float z,
+                 bool center_dot) {
   const float c = 5, t = 2;
   // four corner brackets
   draw_box(x, y, c, t, color, z);
@@ -156,8 +157,7 @@ void draw_cursor(float x, float y, float w, float h, u32 color, float z) {
   draw_box(x, y + h - c, t, c, color, z);
   draw_box(x + w - c, y + h - t, c, t, color, z);
   draw_box(x + w - t, y + h - c, t, c, color, z);
-  // center dot
-  draw_box(x + w / 2 - 1, y + h / 2 - 1, 2, 2, color, z);
+  if (center_dot) draw_box(x + w / 2 - 1, y + h / 2 - 1, 2, 2, color, z);
 }
 
 // ---------------------------------------------------------------------------
@@ -199,9 +199,19 @@ static float glyph_w(uint32_t cp, float scale) {
   return g ? g->adv * scale : 0;
 }
 
+static void draw_glyph(const FontGlyph* g, float x, float y, float scale,
+                       u32 color) {
+  if (g->w <= 0 || g->h <= 0) return;
+  Tex3DS_SubTexture st = make_sub(A_font, g->x, g->y, g->w, g->h);
+  C2D_Image img{A_font.tex, &st};
+  C2D_ImageTint t = make_tint(color);
+  C2D_DrawImageAt(img, x, y, 0.5f, &t, scale, scale);
+}
+
 void text(const char* s, float x, float y, u32 color, float scale) {
   if (!A_font.ok()) return;
-  C2D_ImageTint t = make_tint(color);
+  const u32 shadow = C2D_Color32(0, 0, 0, 170);
+  const float sh = (scale >= 1.5f) ? 2.0f : 1.0f;
   float pen = x;
   const char* p = s;
   while (*p) {
@@ -210,10 +220,11 @@ void text(const char* s, float x, float y, u32 color, float scale) {
     const FontGlyph* g = find_glyph(cp);
     if (!g) { pen += 6 * scale; continue; }
     if (g->w > 0 && g->h > 0) {
-      Tex3DS_SubTexture st = make_sub(A_font, g->x, g->y, g->w, g->h);
-      C2D_Image img{A_font.tex, &st};
-      C2D_DrawImageAt(img, pen + g->xoff * scale, y + g->yoff * scale, 0.5f,
-                      &t, scale, scale);
+      // Integer-snapped placement keeps every source pixel on the grid.
+      float gx = roundf(pen + g->xoff * scale);
+      float gy = roundf(y + g->yoff * scale);
+      draw_glyph(g, gx + sh, gy + sh, scale, shadow);
+      draw_glyph(g, gx, gy, scale, color);
     }
     pen += g->adv * scale;
   }
