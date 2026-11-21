@@ -49,8 +49,10 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | ![Alchemy](docs/screens/alchemy.png) | ![Shop](docs/screens/shop.png) |
 | **Transmutation picker** | **Hero info** |
 | ![Transmute](docs/screens/transmute.png) | ![Hero info](docs/screens/hero_info.png) |
-| **Fog of war** | **Shop** |
-| ![Fog](docs/screens/fog.png) | ![Shop](docs/screens/shop.png) |
+| **Fog of war** | **Smooth shoulder zoom** |
+| ![Fog](docs/screens/fog.png) | ![Zoom](docs/screens/zoom.png) |
+| **Shop** | **Alchemy** |
+| ![Shop](docs/screens/shop.png) | ![Alchemy](docs/screens/alchemy.png) |
 | **Prison (6–10)** | **Caves (11–15)** |
 | ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
 | **City (16–20)** | **Halls boss (21–25)** |
@@ -120,6 +122,9 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   the tile below.
 - **Field of view**: radius 8 with wall-aware line of sight (radius 5 on dark
   floors), matching SPD's `viewDistance`.
+- **Smooth shoulder zoom**: hold **L** to zoom out / **R** to zoom in
+  (0.75×–2×, eased at ~14 units/s); the camera, tiles, actors, items, wall
+  layers and fog all scale together.
 - **Search** reproduces SPD's visual: per-tile blue square shrinking with distance
   delay, hero `operate` animation and a floating “搜索中” label.
 - **SPD-style backpack**: 5×5 (25-slot) grid, gold/capacity, equipped gear, item
@@ -231,7 +236,7 @@ ignored safely (delete `sdmc:/3ds/spd/slot*.bin` after upgrading if needed).
 | Settings | ← → switch tab, ↑ ↓ select, **A** change value |
 | Hero select | **A** select, **A** again on the same hero to start, **X** info popup |
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
-| Game actions | **B** pause menu (exit via the menu), **X** backpack, **L** wait, **R** search, **START** pause |
+| Game actions | **B** pause menu, **X** backpack, **L/R** hold to zoom the map smoothly, **ZL/ZR** wait/search (touch bar also has both), **START** pause |
 | Targeting | **A** cast/throw at cursor, **B** cancel |
 | Backpack | **L/R** switch tab (全部/药水/卷轴/法杖/装备/其他), D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; tabs and slots are touchable |
 | Dialog | **A / B / X / Y** pick the matching option |
@@ -461,6 +466,8 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 77 | Jump next to a locked side door |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
+| 80 | 1.6× zoom preview |
+| 81 | 0.75× zoom preview |
 | 71 | Pause menu with talent progress |
 | 40 | Backpack with rings/missiles/seeds |
 | 41 | Ring detail panel |

@@ -174,6 +174,8 @@ struct Game {
   bool alchemy_open = false;
   bool icon_test = false;
   uint8_t fov_radius = 8;
+  float zoom = 1.0f;
+  float zoom_target = 1.0f;
   // Deterministic per-run plan (rebuilt from the seed, not saved).
   uint8_t plan_special[25][3]{};
   uint8_t plan_special_n[25]{};

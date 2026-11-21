@@ -1255,6 +1255,7 @@ void Game::new_run(int hero_class, uint32_t s) {
   seed = s ? s : 0x9E3779B9u;
   rng = seed;
   floor = 1;
+  zoom = zoom_target = 1.0f;
   turns = 0;
   keys = gold = shield = 0;
   level = 1;

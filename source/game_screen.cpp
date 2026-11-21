@@ -29,11 +29,11 @@ static void tile_cell(uint8_t t, int& cx, int& cy) {
 }
 
 static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
-                        float y, u32 tint = 0) {
+                        float y, u32 tint = 0, float sc = 1.0f) {
   int cols = sheet.w / fw;
   int cx = (frame % cols) * fw;
   int cy = (frame / cols) * fh;
-  draw_cell(sheet, cx, cy, fw, fh, x, y, 1, 1, tint);
+  draw_cell(sheet, cx, cy, fw, fh, x, y, sc, sc, tint);
 }
 
 static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
@@ -46,8 +46,9 @@ static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
   } else {
     frame = moving ? 2 + (anim_ms / 100) % 6 : idle[(anim_ms / 1000) % 8];
   }
+  float z = G.zoom;
   draw_sprite(A_hero[hero % 6], 12, 15, frame,
-              vx * 16 - camx + 2, vy * 16 - camy + 1);
+              vx * 16 * z - camx + 2 * z, vy * 16 * z - camy + 1 * z, 0, z);
 }
 
 static void draw_mob(const Mob& m, int camx, int camy) {
@@ -60,81 +61,78 @@ static void draw_mob(const Mob& m, int camx, int camy) {
   } else {
     frame = (m.anim_ms / 400) % 2;
   }
+  float z = G.zoom;
   float ox = (16 - d.fw) * 0.5f;
   float oy = 16.0f - d.fh;
   float bob = 0;
   if (m.type == M_NPC_GHOST) bob = sinf(TIME_S * 2.0f) * 1.5f;
-  draw_sprite(sheet, d.fw, d.fh, frame, m.vx * 16 - camx + ox,
-              m.vy * 16 - camy + oy + bob, d.tint);
+  draw_sprite(sheet, d.fw, d.fh, frame, m.vx * 16 * z - camx + ox * z,
+              m.vy * 16 * z - camy + (oy + bob) * z, d.tint, z);
 }
 
 static void draw_feature(const Feature& f, int camx, int camy) {
   if (!G.vis[f.y][f.x] && G.mind_t == 0) return;
-  float x = (float)(f.x * 16 - camx);
-  float y = (float)(f.y * 16 - camy);
+  float z = G.zoom;
+  float x = (float)(f.x * 16 * z - camx);
+  float y = (float)(f.y * 16 * z - camy);
+  auto tile16 = [&](int idx, u32 tint = 0) {
+    draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
+              x, y, z, z, tint);
+  };
   switch (f.type) {
     case F_WELL:
-    case F_WELL_USED: {
-      int idx = f.type == F_WELL ? 18 : 19;
-      draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-                x, y, 1, 1, 0);
+    case F_WELL_USED:
+      tile16(f.type == F_WELL ? 18 : 19);
       break;
-    }
     case F_BOOKSHELF:
-    case F_BOOKSHELF_USED: {
-      u32 tint = f.type == F_BOOKSHELF_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 12 * 16, 5 * 16, 16, 16, x, y, 1, 1, tint);
+    case F_BOOKSHELF_USED:
+      tile16(12 + 5 * 16, f.type == F_BOOKSHELF_USED ? 0x808080FF : 0);
       break;
-    }
     case F_ALCHEMY:
-    case F_ALCHEMY_USED: {
-      u32 tint = f.type == F_ALCHEMY_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 8 * 16, 7 * 16, 16, 16, x, y, 1, 1, tint);
+    case F_ALCHEMY_USED:
+      tile16(8 + 7 * 16, f.type == F_ALCHEMY_USED ? 0x808080FF : 0);
       break;
-    }
     case F_STATUE:
-    case F_STATUE_USED: {
-      u32 tint = f.type == F_STATUE_USED ? 0x808080FF : 0;
-      draw_cell(A_tiles[G.region()], 0, 8 * 16, 16, 16, x, y, 1, 1, tint);
+    case F_STATUE_USED:
+      tile16(8 * 16, f.type == F_STATUE_USED ? 0x808080FF : 0);
       break;
-    }
     case F_BARRICADE:
-      draw_cell(A_tiles[G.region()], 9 * 16, 7 * 16, 16, 16, x, y, 1, 1, 0);
+      tile16(9 + 7 * 16);
       break;
     case F_CHEST:
     case F_CHEST_LOCKED:
     case F_CHEST_MIMIC: {
-      // SPD ItemSpriteSheet.CHEST (36) / LOCKED_CHEST (37).
       int spr = f.type == F_CHEST_LOCKED ? 37 : 36;
-      draw_cell(A_items, (spr % 16) * 16, (spr / 16) * 16, 16, 16, x, y + 1, 1, 1, 0);
+      draw_cell(A_items, (spr % 16) * 16, (spr / 16) * 16, 16, 16, x,
+                y + 1 * z, z, z, 0);
       break;
     }
     case F_CHEST_OPEN:
-      draw_cell(A_items, (36 % 16) * 16, (36 / 16) * 16, 16, 16, x, y + 1, 1, 1,
-                0x808080FF);
+      draw_cell(A_items, (36 % 16) * 16, (36 / 16) * 16, 16, 16, x, y + 1 * z,
+                z, z, 0x808080FF);
       break;
     case F_TOMB:
-    case F_TOMB_USED: {
-      // SPD ItemSpriteSheet.TOMB (34); spent tombs are dimmed.
-      u32 tint = f.type == F_TOMB_USED ? 0x808080FF : 0;
-      draw_cell(A_items, (34 % 16) * 16, (34 / 16) * 16, 16, 16, x, y + 1, 1, 1,
-                tint);
+    case F_TOMB_USED:
+      draw_cell(A_items, (34 % 16) * 16, (34 / 16) * 16, 16, 16, x,
+                y + 1 * z, z, z, f.type == F_TOMB_USED ? 0x808080FF : 0);
       break;
-    }
     case F_PLANT:
-      draw_cell(A_tiles[G.region()], 2 * 16, 0, 16, 16, x, y, 1, 1, 0x80FFB0FF);
+      tile16(2, 0x80FFB0FF);
       break;
     case F_SIGN:
-      draw_box(x + 6, y + 4, 4, 9, C2D_Color32(90, 60, 30, 255), 0.5f);
-      draw_box(x + 2, y + 3, 12, 6, C2D_Color32(150, 105, 55, 255), 0.51f);
-      draw_box(x + 4, y + 5, 8, 1, C2D_Color32(80, 50, 20, 255), 0.52f);
+      draw_box(x + 6 * z, y + 4 * z, 4 * z, 9 * z,
+               C2D_Color32(90, 60, 30, 255), 0.5f);
+      draw_box(x + 2 * z, y + 3 * z, 12 * z, 6 * z,
+               C2D_Color32(150, 105, 55, 255), 0.51f);
+      draw_box(x + 4 * z, y + 5 * z, 8 * z, 1 * z,
+               C2D_Color32(80, 50, 20, 255), 0.52f);
       break;
     case F_TRAP_FOUND:
-      draw_icon(32, 32, 14, 14, x + 1, y + 1, 1.0f, CLR_RED);
+      draw_icon(32, 32, 14, 14, x + 1 * z, y + 1 * z, z, CLR_RED);
       break;
     case F_TOKEN: {
       float bob = sinf(TIME_S * 3.0f + f.x) * 1.5f;
-      draw_item_icon(IT_DWARF_TOKEN, x, y + bob, 1.0f);
+      draw_item_icon(IT_DWARF_TOKEN, x, y + bob * z, z);
       break;
     }
     default:
@@ -161,17 +159,21 @@ static u32 fog_color(int lvl) {
 }
 
 static void draw_fog(int camx, int camy) {
-  int tx0 = std::max(0, camx / 16 - 1), ty0 = std::max(0, camy / 16 - 1);
-  int tx1 = std::min(MW - 1, camx / 16 + 26), ty1 = std::min(MH - 1, camy / 16 + 17);
+  float z = G.zoom;
+  float cell = 16 * z;
+  int tx0 = std::max(0, (int)(camx / cell) - 1);
+  int ty0 = std::max(0, (int)(camy / cell) - 1);
+  int tx1 = std::min(MW - 1, tx0 + (int)(TOP_W / cell) + 3);
+  int ty1 = std::min(MH - 1, ty0 + (int)(TOP_H / cell) + 3);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) {
-        draw_box((float)(x * 16 - camx), (float)(y * 16 - camy), 16, 16,
+        draw_box((float)(x * cell - camx), (float)(y * cell - camy), cell, cell,
                  C2D_Color32(0, 0, 0, 255), 0.45f);
         continue;
       }
       uint8_t tile = G.tiles[y][x];
-      float px = (float)(x * 16 - camx), py = (float)(y * 16 - camy);
+      float px = (float)(x * cell - camx), py = (float)(y * cell - camy);
       if (wall_like(tile) && y + 1 < MH && wall_like(G.tiles[y + 1][x])) {
         // Internal wall: fog the two halves separately, like SPD.
         int l = fog_level(x, y);
@@ -195,36 +197,40 @@ static void draw_fog(int camx, int camy) {
           }
         } else rr = 3;
         u32 cl = fog_color(l), cr = fog_color(rr);
-        if (cl) draw_box(px, py, 8, 16, cl, 0.45f);
-        if (cr) draw_box(px + 8, py, 8, 16, cr, 0.45f);
+        if (cl) draw_box(px, py, 8 * z, cell, cl, 0.45f);
+        if (cr) draw_box(px + 8 * z, py, 8 * z, cell, cr, 0.45f);
       } else {
         int l = fog_level(x, y);
         if (wall_like(tile) && !(y + 1 < MH && wall_like(G.tiles[y + 1][x])))
           l = std::max(l, fog_level(x, y + 1));
         u32 c = fog_color(l);
-        if (c) draw_box(px, py, 16, 16, c, 0.45f);
+        if (c) draw_box(px, py, cell, cell, c, 0.45f);
       }
     }
   }
 }
 
 static void draw_map() {
-  int camx = G.px * 16 - TOP_W / 2 + 8;
-  int camy = G.py * 16 - TOP_H / 2 + 8;
-  int cx = G.cursor_x * 16 + 8, cy = G.cursor_y * 16 + 8;
+  float z = G.zoom;
+  float cell = 16 * z;
+  int camx = (int)roundf((G.px * 16 + 8) * z - TOP_W / 2);
+  int camy = (int)roundf((G.py * 16 + 8) * z - TOP_H / 2);
+  int cx = (int)((G.cursor_x * 16 + 8) * z), cy = (int)((G.cursor_y * 16 + 8) * z);
   if (cx < camx + 44) camx = cx - 44;
   if (cx > camx + TOP_W - 44) camx = cx - (TOP_W - 44);
   if (cy < camy + 44) camy = cy - 44;
   if (cy > camy + TOP_H - 44) camy = cy - (TOP_H - 44);
-  camx = std::max(0, std::min(camx, MW * 16 - TOP_W));
-  camy = std::max(0, std::min(camy, MH * 16 - TOP_H));
+  camx = std::max(0, std::min(camx, (int)(MW * cell) - TOP_W));
+  camy = std::max(0, std::min(camy, (int)(MH * cell) - TOP_H));
   G.camx = camx;
   G.camy = camy;
 
   draw_box(0, 0, TOP_W, TOP_H, C2D_Color32(6, 8, 12, 255), 0.2f);
 
-  int tx0 = std::max(0, camx / 16 - 1), ty0 = std::max(0, camy / 16 - 1);
-  int tx1 = std::min(MW - 1, camx / 16 + 26), ty1 = std::min(MH - 1, camy / 16 + 17);
+  int tx0 = std::max(0, (int)(camx / cell) - 1);
+  int ty0 = std::max(0, (int)(camy / cell) - 1);
+  int tx1 = std::min(MW - 1, tx0 + (int)(TOP_W / cell) + 3);
+  int ty1 = std::min(MH - 1, ty0 + (int)(TOP_H / cell) + 3);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
       if (!(G.seen[y][x] & 3)) continue;
@@ -232,7 +238,7 @@ static void draw_map() {
       uint8_t tt = G.tiles[y][x];
       tile_cell(tt, scx, scy);
       u32 tint = 0;
-      float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
+      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       bool is_door = (tt == T_DOOR || tt == T_DOOR_OPEN ||
                       tt == T_DOOR_LOCKED);
       if (is_door) {
@@ -250,7 +256,7 @@ static void draw_map() {
           if (x + 1 >= MW || !wall_like(G.tiles[y][x + 1])) idx += 1;
           if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
           draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                    16, 16, tx, ty, 1, 1, tint);
+                    cell, cell, tx, ty, z, z, tint);
         }
       } else if (tt == T_WATER) {
         // +1 top land, +2 right, +4 bottom, +8 left (SPD stitchWaterTile).
@@ -259,14 +265,14 @@ static void draw_map() {
         if (x + 1 >= MW || G.tiles[y][x + 1] != T_WATER) idx += 2;
         if (y + 1 >= MH || G.tiles[y + 1][x] != T_WATER) idx += 4;
         if (x <= 0 || G.tiles[y][x - 1] != T_WATER) idx += 8;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-                  tx, ty, 1, 1, tint);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
+                  cell, tx, ty, z, z, tint);
       } else {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-                  tx, ty, 1, 1, tint);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
+                  cell, tx, ty, z, z, tint);
       }
     }
   }
@@ -279,17 +285,17 @@ static void draw_map() {
       if (tt != T_DOOR && tt != T_DOOR_OPEN && tt != T_DOOR_LOCKED)
         continue;
       uint32_t tint = 0;
-      float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
+      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
       if (above_wall) {
         // Door in a vertical wall: SPD passes the cell ABOVE to
         // getRaisedDoorTile, which selects the sideways threshold.
         draw_cell(A_tiles[G.region()], (116 % 16) * 16, (116 / 16) * 16,
-                  16, 16, tx, ty, 1, 1, tint);
+                  cell, cell, tx, ty, z, z, tint);
       } else {
         int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
         draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                  16, 16, tx, ty, 1, 1, tint);
+                  cell, cell, tx, ty, z, z, tint);
       }
     }
   }
@@ -297,9 +303,10 @@ static void draw_map() {
   // Search effect: SPD's CheckedCell (blue square shrinking after a delay).
   for (const SearchFx& f : G.search_fx) {
     if (f.delay > 0 || f.alpha <= 0) continue;
-    float s = 16.0f * f.alpha;
+    float s = 16.0f * z * f.alpha;
     int a = (int)(f.alpha * 255);
-    draw_box(f.x * 16 - camx + 8 - s * 0.5f, f.y * 16 - camy + 8 - s * 0.5f,
+    draw_box(f.x * 16 * z - camx + 8 * z - s * 0.5f,
+             f.y * 16 * z - camy + 8 * z - s * 0.5f,
              s, s, C2D_Color32(0x55, 0xAA, 0xFF, a), 0.52f);
   }
 
@@ -317,11 +324,12 @@ static void draw_map() {
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x] && G.mind_t == 0) continue;
-    float ix = (float)(it.x * 16 - camx);
-    float iy = (float)(it.y * 16 - camy);
-    float bob = sinf(TIME_S * 3.2f + it.x * 0.9f + it.y * 1.7f) * 1.5f;
-    draw_box(ix + 4, iy + 12, 8, 3, C2D_Color32(0, 0, 0, 90), 0.45f);
-    draw_item_icon(it.id, ix, iy + bob, 1.0f);
+    float ix = (float)(it.x * 16 * z - camx);
+    float iy = (float)(it.y * 16 * z - camy);
+    float bob = sinf(TIME_S * 3.2f + it.x * 0.9f + it.y * 1.7f) * 1.5f * z;
+    draw_box(ix + 4 * z, iy + 12 * z, 8 * z, 3 * z,
+             C2D_Color32(0, 0, 0, 90), 0.45f);
+    draw_item_icon(it.id, ix, iy + bob, z);
   }
 
   // interactables / decorations
@@ -335,8 +343,9 @@ static void draw_map() {
 
   // spell / bomb impact spark
   if (G.fx_t > 0 && G.fx_x >= 0) {
-    draw_box((float)(G.fx_x * 16 - camx + 6), (float)(G.fx_y * 16 - camy + 6),
-             4, 4, CLR_YELLOW, 0.7f);
+    draw_box((float)(G.fx_x * 16 * z - camx + 6 * z),
+             (float)(G.fx_y * 16 * z - camy + 6 * z), 4 * z, 4 * z,
+             CLR_YELLOW, 0.7f);
   }
 
   // player (hero frames are 12x15 inside the sheet)
@@ -345,8 +354,8 @@ static void draw_map() {
             G.search_ms, camx, camy);
   if (G.search_ms > 0) {
     const char* txt = "搜索中";
-    text(txt, G.pvx * 16 - camx + 8 - text_w(txt, 1.0f) * 0.5f,
-         G.pvy * 16 - camy - 14, CLR_WHITE, 1.0f);
+    text(txt, G.pvx * 16 * z - camx + 8 * z - text_w(txt, 1.0f) * 0.5f,
+         G.pvy * 16 * z - camy - 14 * z, CLR_WHITE, 1.0f);
   }
 
   // SPD upper wall layers: internal wall tops (144..159) and overhangs (192..207).
@@ -356,14 +365,14 @@ static void draw_map() {
       uint8_t tt = G.tiles[y][x];
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = 0;
-      float tx = (float)(x * 16 - camx), ty = (float)(y * 16 - camy);
+      float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
                             below == T_DOOR_OPEN)) {
         // Wall cell directly above a door: SPD's side-door face.
         if (below == T_DOOR || below == T_DOOR_LOCKED) {
           int di = below == T_DOOR_LOCKED ? 228 : 227;
           draw_cell(A_tiles[G.region()], (di % 16) * 16, (di / 16) * 16,
-                    16, 16, tx, ty, 1, 1, tint);
+                    cell, cell, tx, ty, z, z, tint);
         }
       } else if (wall_like(tt) && wall_like(below)) {
         // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
@@ -373,8 +382,8 @@ static void draw_map() {
         int left = (x > 0 && wall_like(G.tiles[y][x - 1])) ? 1 : 0;
         int idx = 144 + (right ? 0 : 1) + (rb ? 0 : 2) + (lb ? 0 : 4) +
                   (left ? 0 : 8);
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-                  tx, ty, 1, 1, tint);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
+                  cell, tx, ty, z, z, tint);
       } else if (!wall_like(tt) && wall_like(below)) {
         // Shadow/edge over the tile directly above a wall (SPD overhang layer).
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
@@ -384,12 +393,12 @@ static void draw_map() {
         // the floor cell above a wall (this is what makes the bottom wall
         // visible from inside the room).
         draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                  16, 16, tx, ty, 1, 1, tint);
+                  cell, cell, tx, ty, z, z, tint);
       } else if (!wall_like(tt) && (below == T_DOOR || below == T_DOOR_OPEN ||
                                     below == T_DOOR_LOCKED)) {
         int idx = below == T_DOOR_OPEN ? 225 : 224;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-                  tx, ty, 1, 1, tint);
+        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
+                  cell, tx, ty, z, z, tint);
       }
     }
   }
@@ -399,8 +408,8 @@ static void draw_map() {
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
-  draw_cursor((float)(G.cursor_x * 16 - camx), (float)(G.cursor_y * 16 - camy),
-              16, 16, cc);
+  draw_cursor((float)(G.cursor_x * 16 * z - camx),
+              (float)(G.cursor_y * 16 * z - camy), 16 * z, 16 * z, cc);
 
   if (G.targeting) {
     bool wand = G.target_item >= 0 && G.target_item < G.inv_n &&
@@ -860,6 +869,17 @@ void game_update() {
   static u64 last_tick = 0;
   u64 now_tick = osGetTime();
   int dt = last_tick ? (int)(now_tick - last_tick) : 16;
+  if (dt < 1) dt = 1;
+  if (dt > 100) dt = 100;
+  // Shoulder zoom only while the map is the active UI.
+  if (!G.backpack && !G.paused && !G.shop_open && !G.alchemy_open &&
+      !G.transmute_open && !G.dialog) {
+    float sdt = dt / 1000.0f;
+    if (IN.holding(KEY_L)) G.zoom_target -= sdt * 1.25f;
+    if (IN.holding(KEY_R)) G.zoom_target += sdt * 1.25f;
+    G.zoom_target = std::max(0.75f, std::min(2.0f, G.zoom_target));
+    G.zoom += (G.zoom_target - G.zoom) * std::min(1.0f, sdt * 14.0f);
+  }
   last_tick = now_tick;
   G.tick(dt);
   if (G.msg_timer > 0) G.msg_timer--;
@@ -1057,8 +1077,8 @@ void game_update() {
   if (IN.pressed(KEY_A)) G.act_at(G.cursor_x, G.cursor_y, false);
   if (IN.pressed(KEY_Y)) G.act_at(G.cursor_x, G.cursor_y, true);
   if (IN.pressed(KEY_X)) { G.clear_path(); G.backpack = true; g_bag_sel = 0; g_bag_tab = 0; g_bag_action = false; }
-  if (IN.pressed(KEY_L)) { G.wait_turns(1); G.message("你等待了一回合。"); }
-  if (IN.pressed(KEY_R)) do_search();
+  if (IN.pressed(KEY_ZL)) { G.wait_turns(1); G.message("你等待了一回合。"); }
+  if (IN.pressed(KEY_ZR)) do_search();
 
   // Touch: quickslots and action buttons.
   if (IN.tap) {

@@ -766,6 +766,11 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 80 || want == 81) {
+          start_new_game(0);
+          G.zoom = G.zoom_target = (want == 80) ? 1.6f : 0.75f;
+          G.demo_lock = true;
+        }
         else if (want == 79) {
           start_new_game(0);
           int dx = -1, dy = -1;
