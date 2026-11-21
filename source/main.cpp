@@ -766,9 +766,26 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
-        else if (want == 80 || want == 81) {
+        else if (want == 84) {
           start_new_game(0);
-          G.zoom = G.zoom_target = (want == 80) ? 1.6f : 0.75f;
+          G.mobs.clear();
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
+          G.demo_lock = true;
+        }
+        else if (want == 83) {
+          start_new_game(0);
+          G.zoom = G.zoom_target = 1.33f;
+          G.mobs.clear();
+          for (int y = 0; y < MH; y++)
+            for (int x = 0; x < MW; x++) G.seen[y][x] = G.vis[y][x] = true;
+          for (const Feature& f : G.features)
+            dlog("[f83] type%d x%d y%d", f.type, f.x, f.y);
+          G.demo_lock = true;
+        }
+        else if (want >= 80 && want <= 82) {
+          start_new_game(0);
+          G.zoom = G.zoom_target = (want == 80) ? 1.6f : (want == 81 ? 0.75f : 1.33f);
           G.demo_lock = true;
         }
         else if (want == 79) {
@@ -828,7 +845,6 @@ int main() {
           G.floor = 14;
           G.gen_level();
           G.mobs.clear();
-          G.features.clear();
           G.items.clear();
           static const uint8_t types[] = {
               M_SNAKE, M_SWARM, M_SLIME, M_DM100, M_NECROMANCER,

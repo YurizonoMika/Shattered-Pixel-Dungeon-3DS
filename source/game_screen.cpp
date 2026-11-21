@@ -28,12 +28,25 @@ static void tile_cell(uint8_t t, int& cx, int& cy) {
   cy = (idx / 16) * 16;
 }
 
+// Draw a 16x16 world tile at integer destination boundaries so scaled
+// neighbours never leave seams or sample adjacent atlas cells.
+static void draw_tile_world(const Img& im, int cx, int cy, float wx, float wy,
+                            float z, int camx, int camy, u32 tint = 0) {
+  int x0 = (int)roundf(wx * z - camx);
+  int x1 = (int)roundf((wx + 16) * z - camx);
+  int y0 = (int)roundf(wy * z - camy);
+  int y1 = (int)roundf((wy + 16) * z - camy);
+  draw_rect_src(im, cx, cy, 16, 16, x0, y0, x1 - x0, y1 - y0, tint);
+}
+
 static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
                         float y, u32 tint = 0, float sc = 1.0f) {
   int cols = sheet.w / fw;
   int cx = (frame % cols) * fw;
   int cy = (frame / cols) * fh;
-  draw_cell(sheet, cx, cy, fw, fh, x, y, sc, sc, tint);
+  int x0 = (int)roundf(x), y0 = (int)roundf(y);
+  int w = (int)roundf(fw * sc), h = (int)roundf(fh * sc);
+  draw_rect_src(sheet, cx, cy, fw, fh, x0, y0, w, h, tint);
 }
 
 static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
@@ -75,9 +88,10 @@ static void draw_feature(const Feature& f, int camx, int camy) {
   float z = G.zoom;
   float x = (float)(f.x * 16 * z - camx);
   float y = (float)(f.y * 16 * z - camy);
+  float wx = f.x * 16.0f, wy = f.y * 16.0f;
   auto tile16 = [&](int idx, u32 tint = 0) {
-    draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, 16, 16,
-              x, y, z, z, tint);
+    draw_tile_world(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                    wx, wy, z, camx, camy, tint);
   };
   switch (f.type) {
     case F_WELL:
@@ -103,18 +117,19 @@ static void draw_feature(const Feature& f, int camx, int camy) {
     case F_CHEST_LOCKED:
     case F_CHEST_MIMIC: {
       int spr = f.type == F_CHEST_LOCKED ? 37 : 36;
-      draw_cell(A_items, (spr % 16) * 16, (spr / 16) * 16, 16, 16, x,
-                y + 1 * z, z, z, 0);
+      draw_tile_world(A_items, (spr % 16) * 16, (spr / 16) * 16, wx, wy + 1,
+                      z, camx, camy, 0);
       break;
     }
     case F_CHEST_OPEN:
-      draw_cell(A_items, (36 % 16) * 16, (36 / 16) * 16, 16, 16, x, y + 1 * z,
-                z, z, 0x808080FF);
+      draw_tile_world(A_items, (36 % 16) * 16, (36 / 16) * 16, wx, wy + 1, z,
+                      camx, camy, 0x808080FF);
       break;
     case F_TOMB:
     case F_TOMB_USED:
-      draw_cell(A_items, (34 % 16) * 16, (34 / 16) * 16, 16, 16, x,
-                y + 1 * z, z, z, f.type == F_TOMB_USED ? 0x808080FF : 0);
+      draw_tile_world(A_items, (34 % 16) * 16, (34 / 16) * 16, wx, wy + 1, z,
+                      camx, camy,
+                      f.type == F_TOMB_USED ? 0x808080FF : 0);
       break;
     case F_PLANT:
       tile16(2, 0x80FFB0FF);
@@ -167,13 +182,18 @@ static void draw_fog(int camx, int camy) {
   int ty1 = std::min(MH - 1, ty0 + (int)(TOP_H / cell) + 3);
   for (int y = ty0; y <= ty1; y++) {
     for (int x = tx0; x <= tx1; x++) {
+      int x0 = (int)roundf(x * cell - camx);
+      int x1 = (int)roundf((x + 1) * cell - camx);
+      int y0 = (int)roundf(y * cell - camy);
+      int y1 = (int)roundf((y + 1) * cell - camy);
+      float fw = (float)(x1 - x0), fh = (float)(y1 - y0);
       if (!(G.seen[y][x] & 3)) {
-        draw_box((float)(x * cell - camx), (float)(y * cell - camy), cell, cell,
-                 C2D_Color32(0, 0, 0, 255), 0.45f);
+        draw_box((float)x0, (float)y0, fw, fh, C2D_Color32(0, 0, 0, 255),
+                 0.45f);
         continue;
       }
       uint8_t tile = G.tiles[y][x];
-      float px = (float)(x * cell - camx), py = (float)(y * cell - camy);
+      float px = (float)x0, py = (float)y0;
       if (wall_like(tile) && y + 1 < MH && wall_like(G.tiles[y + 1][x])) {
         // Internal wall: fog the two halves separately, like SPD.
         int l = fog_level(x, y);
@@ -197,14 +217,15 @@ static void draw_fog(int camx, int camy) {
           }
         } else rr = 3;
         u32 cl = fog_color(l), cr = fog_color(rr);
-        if (cl) draw_box(px, py, 8 * z, cell, cl, 0.45f);
-        if (cr) draw_box(px + 8 * z, py, 8 * z, cell, cr, 0.45f);
+        float half = (float)((x0 + x1) / 2 - x0);
+        if (cl) draw_box(px, py, half, fh, cl, 0.45f);
+        if (cr) draw_box(px + half, py, fw - half, fh, cr, 0.45f);
       } else {
         int l = fog_level(x, y);
         if (wall_like(tile) && !(y + 1 < MH && wall_like(G.tiles[y + 1][x])))
           l = std::max(l, fog_level(x, y + 1));
         u32 c = fog_color(l);
-        if (c) draw_box(px, py, cell, cell, c, 0.45f);
+        if (c) draw_box(px, py, fw, fh, c, 0.45f);
       }
     }
   }
@@ -255,8 +276,9 @@ static void draw_map() {
           int idx = below_door ? 88 : 80;  // RAISED_WALL_DOOR / RAISED_WALL
           if (x + 1 >= MW || !wall_like(G.tiles[y][x + 1])) idx += 1;
           if (x <= 0 || !wall_like(G.tiles[y][x - 1])) idx += 2;
-          draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                    cell, cell, tx, ty, z, z, tint);
+          draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                          (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                          tint);
         }
       } else if (tt == T_WATER) {
         // +1 top land, +2 right, +4 bottom, +8 left (SPD stitchWaterTile).
@@ -265,14 +287,16 @@ static void draw_map() {
         if (x + 1 >= MW || G.tiles[y][x + 1] != T_WATER) idx += 2;
         if (y + 1 >= MH || G.tiles[y + 1][x] != T_WATER) idx += 4;
         if (x <= 0 || G.tiles[y][x - 1] != T_WATER) idx += 8;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
-                  cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
-                  cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       }
     }
   }
@@ -290,12 +314,14 @@ static void draw_map() {
       if (above_wall) {
         // Door in a vertical wall: SPD passes the cell ABOVE to
         // getRaisedDoorTile, which selects the sideways threshold.
-        draw_cell(A_tiles[G.region()], (116 % 16) * 16, (116 / 16) * 16,
-                  cell, cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
+                        (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else {
         int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                  cell, cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       }
     }
   }
@@ -324,12 +350,9 @@ static void draw_map() {
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x] && G.mind_t == 0) continue;
-    float ix = (float)(it.x * 16 * z - camx);
-    float iy = (float)(it.y * 16 * z - camy);
-    float bob = sinf(TIME_S * 3.2f + it.x * 0.9f + it.y * 1.7f) * 1.5f * z;
-    draw_box(ix + 4 * z, iy + 12 * z, 8 * z, 3 * z,
-             C2D_Color32(0, 0, 0, 90), 0.45f);
-    draw_item_icon(it.id, ix, iy + bob, z);
+    float ix = roundf((float)(it.x * 16 * z - camx));
+    float iy = roundf((float)(it.y * 16 * z - camy));
+    draw_item_icon(it.id, ix, iy, z);
   }
 
   // interactables / decorations
@@ -371,8 +394,9 @@ static void draw_map() {
         // Wall cell directly above a door: SPD's side-door face.
         if (below == T_DOOR || below == T_DOOR_LOCKED) {
           int di = below == T_DOOR_LOCKED ? 228 : 227;
-          draw_cell(A_tiles[G.region()], (di % 16) * 16, (di / 16) * 16,
-                    cell, cell, tx, ty, z, z, tint);
+          draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
+                          (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                          tint);
         }
       } else if (wall_like(tt) && wall_like(below)) {
         // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
@@ -382,8 +406,9 @@ static void draw_map() {
         int left = (x > 0 && wall_like(G.tiles[y][x - 1])) ? 1 : 0;
         int idx = 144 + (right ? 0 : 1) + (rb ? 0 : 2) + (lb ? 0 : 4) +
                   (left ? 0 : 8);
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
-                  cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else if (!wall_like(tt) && wall_like(below)) {
         // Shadow/edge over the tile directly above a wall (SPD overhang layer).
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
@@ -392,13 +417,15 @@ static void draw_map() {
         // Full wall-overhang material: brick lip + contact shadow, drawn on
         // the floor cell above a wall (this is what makes the bottom wall
         // visible from inside the room).
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
-                  cell, cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else if (!wall_like(tt) && (below == T_DOOR || below == T_DOOR_OPEN ||
                                     below == T_DOOR_LOCKED)) {
         int idx = below == T_DOOR_OPEN ? 225 : 224;
-        draw_cell(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16, cell,
-                  cell, tx, ty, z, z, tint);
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
+                        (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       }
     }
   }
@@ -408,8 +435,9 @@ static void draw_map() {
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
-  draw_cursor((float)(G.cursor_x * 16 * z - camx),
-              (float)(G.cursor_y * 16 * z - camy), 16 * z, 16 * z, cc);
+  draw_cursor(roundf((float)(G.cursor_x * 16 * z - camx)),
+              roundf((float)(G.cursor_y * 16 * z - camy)), roundf(16 * z),
+              roundf(16 * z), cc);
 
   if (G.targeting) {
     bool wand = G.target_item >= 0 && G.target_item < G.inv_n &&

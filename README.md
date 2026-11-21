@@ -124,7 +124,9 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   floors), matching SPD's `viewDistance`.
 - **Smooth shoulder zoom**: hold **L** to zoom out / **R** to zoom in
   (0.75×–2×, eased at ~14 units/s); the camera, tiles, actors, items, wall
-  layers and fog all scale together.
+  layers and fog all scale together. Tiles/features/fog are drawn into integer
+  destination rectangles so fractional zoom cannot create texture seams or
+  sample neighbouring atlas cells.
 - **Search** reproduces SPD's visual: per-tile blue square shrinking with distance
   delay, hero `operate` animation and a floating “搜索中” label.
 - **SPD-style backpack**: 5×5 (25-slot) grid, gold/capacity, equipped gear, item
