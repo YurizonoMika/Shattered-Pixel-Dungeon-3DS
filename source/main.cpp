@@ -766,6 +766,35 @@ int main() {
           G.recompute_fov();
           G.demo_lock = true;
         }
+        else if (want == 89 || want == 90) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          const int x = G.px, y = G.py;
+          Mob m;
+          m.type = M_GNOLL;
+          m.x = x + (want == 89 ? 1 : 3); m.y = y;
+          m.vx = m.x; m.vy = m.y;
+          m.hp = m.maxhp = 100;
+          m.atk = 4;
+          m.ai = Mob::Hunting;
+          G.mobs.push_back(m);
+          if (want == 89) {
+            G.act_at(m.x, m.y, false);
+          } else {
+            G.add_item(IT_WAND_FIRE, 1);
+            for (int i = 0; i < G.inv_n; ++i) if (G.inv[i].id == IT_WAND_FIRE) {
+              G.cast_wand(i, m.x, m.y);
+              break;
+            }
+          }
+          dlog("[combat] scene=%d hero attack=%d mob attack=%d mob hp=%d effects=%d",
+               want, G.hero_combat.age >= 0, G.mobs[0].combat.age >= 0,
+               G.mobs[0].hp, (int)G.combat_fx.size());
+          G.tick(100);
+          G.zoom = G.zoom_target = 2.f;
+          G.freeze_anim = G.demo_lock = true;
+        }
         else if (want == 87) {
           // Do not create or overwrite a regular save slot for the audit.
           G.new_run(0, 1);

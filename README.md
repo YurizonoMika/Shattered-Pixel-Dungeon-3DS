@@ -478,6 +478,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 85/86 | Door rendering comparison: closed, open, locked, left to right; side doors above front doors; 1× / 1.33× |
 | 87 | Check stair and key reachability on 32 seeds across all 25 floors |
 | 88 | Check long hero route, door closure, and pursuit of a last-seen target |
+| 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |

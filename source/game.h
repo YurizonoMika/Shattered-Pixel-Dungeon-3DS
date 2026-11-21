@@ -57,6 +57,20 @@ struct Feature {
   int16_t loot_gold = 0;
 };
 
+enum class CombatStyle : uint8_t { Melee, Arcane, Fire, Frost, Lightning, Throw, Blast };
+
+struct CombatPose {
+  int age = -1, hit_age = 1000;
+  int dx = 0, dy = 0;
+  CombatStyle style = CombatStyle::Melee;
+};
+
+struct CombatFx {
+  int x, y, tx, ty, age, delay, damage;
+  CombatStyle style;
+  uint8_t item = IT_NONE;
+};
+
 struct Mob {
   enum Ai : uint8_t { Sleeping, Wandering, Hunting };
   int x = 0, y = 0;
@@ -68,6 +82,7 @@ struct Mob {
   uint8_t sleep_t = 0, terror_t = 0;
   Ai ai = Wandering;
   int target = -1;
+  CombatPose combat;
 };
 
 struct FloorItem {
@@ -222,7 +237,12 @@ struct Game {
   int search_ms = 0;
   int panim_ms = 0;
   int path_goal = -1;
-  int fx_x = -1, fx_y = -1, fx_t = 0;
+  CombatPose hero_combat;
+  std::vector<CombatFx> combat_fx;
+  int combat_delay = 0;
+  void combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
+                     CombatStyle style, uint8_t item = IT_NONE);
+  void combat_hit(CombatPose& pose, int x, int y, int damage);
 
   bool paused = false, backpack = false;
   bool dialog = false;

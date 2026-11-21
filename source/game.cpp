@@ -588,6 +588,9 @@ static void mob_rotation(Game& g, int depth, std::vector<uint8_t>& out) {
 // Level generation
 // ---------------------------------------------------------------------------
 void Game::gen_level() {
+  hero_combat = {};
+  combat_fx.clear();
+  combat_delay = 0;
   memset(tiles, T_WALL, sizeof(tiles));
   memset(seen, 0, sizeof(seen));
   memset(vis, 0, sizeof(vis));
@@ -1569,6 +1572,16 @@ void Game::use_item(int idx) {
   advance_turn();
 }
 
+static CombatStyle wand_style(uint8_t id) {
+  switch (id) {
+    case IT_WAND_FIRE: return CombatStyle::Fire;
+    case IT_WAND_FROST: return CombatStyle::Frost;
+    case IT_WAND_LIGHTNING: return CombatStyle::Lightning;
+    case IT_WAND_BLAST: return CombatStyle::Blast;
+    default: return CombatStyle::Arcane;
+  }
+}
+
 void Game::cast_wand(int idx, int tx, int ty) {
   if (idx < 0 || idx >= inv_n) { targeting = false; return; }
   Item& it = inv[idx];
@@ -1582,6 +1595,8 @@ void Game::cast_wand(int idx, int tx, int ty) {
     if (m.alive && is_shopkeeper(m.type, floor) && absi(m.x - tx) <= 2 &&
         absi(m.y - ty) <= 2)
       harm_shopkeeper();
+  combat_strike(hero_combat, px, py, tx, ty, wand_style(it.id));
+  combat_delay = 170;
   int dmg = d.power + it.level * 2 + ri(*this, 0, 2);
   auto hit_area = [&](int radius, int bonus) {
     int hits = 0;
@@ -1694,7 +1709,7 @@ void Game::cast_wand(int idx, int tx, int ty) {
       break;
   }
   it.charges--;
-  fx_x = tx; fx_y = ty; fx_t = 8;
+  combat_delay = 0;
   targeting = false;
   target_item = -1;
   advance_turn();
@@ -2164,6 +2179,22 @@ void Game::move_player(int dx, int dy) {
   advance_turn();
 }
 
+void Game::combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
+                         CombatStyle style, uint8_t item) {
+  pose.age = 0;
+  pose.dx = (tx > x) - (tx < x);
+  pose.dy = (ty > y) - (ty < y);
+  pose.style = style;
+  if (combat_fx.size() < 48)
+    combat_fx.push_back({x, y, tx, ty, 0, 0, -1, style, item});
+}
+
+void Game::combat_hit(CombatPose& pose, int x, int y, int damage) {
+  pose.hit_age = -combat_delay;
+  if (combat_fx.size() < 48)
+    combat_fx.push_back({x, y, x, y, 0, combat_delay, damage, CombatStyle::Melee});
+}
+
 void Game::damage_mob(int idx, int raw) {
   if (idx < 0 || idx >= (int)mobs.size()) return;
   Mob& m = mobs[idx];
@@ -2175,6 +2206,7 @@ void Game::damage_mob(int idx, int raw) {
   int dmg = raw - m.def;
   if (dmg < 1) dmg = 1;
   m.hp -= dmg;
+  combat_hit(m.combat, m.x, m.y, dmg);
   char b[96];
   snprintf(b, sizeof(b), "%s受到了 %d 点伤害", mob_def(m.type).name, dmg);
   message(b);
@@ -2237,7 +2269,11 @@ void Game::attack(int idx, bool ranged, int bonus) {
             ri(*this, 0, 2) + bonus;
   if (might_t > 0) raw += 3;
   if (ranged) raw += 1;
+  combat_strike(hero_combat, px, py, m.x, m.y,
+                ranged ? CombatStyle::Arcane : CombatStyle::Melee);
+  combat_delay = ranged ? 170 : 70;
   damage_mob(idx, raw);
+  combat_delay = 0;
 }
 
 void Game::interact_at(int x, int y) {
@@ -2318,6 +2354,15 @@ void Game::tick(int dt_ms) {
   if (dt_ms > 100) dt_ms = 100;
   const float sp = dt_ms * 0.014f;
   if (!freeze_anim) {
+    auto advance_pose = [&](CombatPose& p) {
+      if (p.age >= 0 && (p.age += dt_ms) >= 420) p.age = -1;
+      if (p.hit_age < 200) p.hit_age += dt_ms;
+    };
+    advance_pose(hero_combat);
+    for (Mob& m : mobs) advance_pose(m.combat);
+    for (CombatFx& f : combat_fx) f.age += dt_ms;
+    combat_fx.erase(std::remove_if(combat_fx.begin(), combat_fx.end(),
+        [](const CombatFx& f) { return f.age >= f.delay + 640; }), combat_fx.end());
     if (pvx < px) pvx = std::min((float)px, pvx + sp);
     else if (pvx > px) pvx = std::max((float)px, pvx - sp);
     if (pvy < py) pvy = std::min((float)py, pvy + sp);
@@ -2400,7 +2445,10 @@ void Game::mob_turn(Mob& m) {
       Mob& o = mobs[i];
       if (!o.alive || &o == &m || is_npc(o.type)) continue;
       if (absi(o.x - m.x) <= 1 && absi(o.y - m.y) <= 1) {
+        combat_strike(m.combat, m.x, m.y, o.x, o.y, CombatStyle::Melee);
+        combat_delay = 70;
         damage_mob((int)i, m.atk + ri(*this, 0, 2));
+        combat_delay = 0;
         return;
       }
     }
@@ -2422,6 +2470,10 @@ void Game::mob_turn(Mob& m) {
       shield -= a; dmg -= a;
     }
     if (dmg > 0) hp -= dmg;
+    combat_strike(m.combat, m.x, m.y, px, py, CombatStyle::Melee);
+    combat_delay = 70;
+    combat_hit(hero_combat, px, py, dmg);
+    combat_delay = 0;
     char b[96];
     snprintf(b, sizeof(b), "%s攻击了你，造成 %d 点伤害", mob_def(m.type).name, dmg);
     message(b);
@@ -2684,7 +2736,6 @@ void Game::advance_turn() {
     }
   }
   recompute_fov();
-  if (fx_t > 0) fx_t--;
   if (hp <= 0) {
     int ankh = -1;
     for (int i = 0; i < inv_n; i++)
@@ -2865,6 +2916,11 @@ void Game::cast_or_throw(int x, int y) {
   uint8_t kind = item_def(it.id).kind;
   if (kind != K_BOMB && kind != K_MISSILE) { targeting = false; return; }
   if (absi(x - px) + absi(y - py) > 6) { message("太远了，够不到。"); return; }
+  const CombatStyle style = kind == K_MISSILE ? CombatStyle::Throw :
+      it.id == IT_BOMB_FIRE ? CombatStyle::Fire :
+      it.id == IT_BOMB_FROST ? CombatStyle::Frost : CombatStyle::Blast;
+  combat_strike(hero_combat, px, py, x, y, style, it.id);
+  combat_delay = 170;
 
   if (kind == K_MISSILE) {
     int mi = -1;
@@ -2903,7 +2959,7 @@ void Game::cast_or_throw(int x, int y) {
   if (it.count <= 0) remove_item(target_item, 1);
   targeting = false;
   target_item = -1;
-  fx_x = x; fx_y = y; fx_t = 8;
+  combat_delay = 0;
   advance_turn();
 }
 
@@ -3101,6 +3157,9 @@ bool Game::load(int slot) {
   search_fx.clear();
   search_ms = 0;
   pvx = (float)px; pvy = (float)py; panim_ms = 0;
+  hero_combat = {};
+  combat_fx.clear();
+  combat_delay = 0;
   clear_path();
   cursor_x = px; cursor_y = py;
   targeting = false;

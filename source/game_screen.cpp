@@ -27,12 +27,48 @@ static void draw_tile_world(const Img& im, int cx, int cy, float wx, float wy,
 
 static void draw_sprite(const Img& sheet, int fw, int fh, int frame, float x,
                         float y, u32 tint = 0, float sc = 1.0f) {
+  if (!sheet.ok() || fw > sheet.w || fh > sheet.h) return;
   int cols = sheet.w / fw;
+  if (frame < 0 || frame >= cols * (sheet.h / fh)) frame = 0;
   int cx = (frame % cols) * fw;
   int cy = (frame / cols) * fh;
   int x0 = (int)roundf(x), y0 = (int)roundf(y);
   int w = (int)roundf(fw * sc), h = (int)roundf(fh * sc);
   draw_rect_src(sheet, cx, cy, fw, fh, x0, y0, w, h, tint);
+}
+
+struct AttackFrames {
+  uint8_t fps, count, frame[5];
+};
+
+// Base variants from the upstream CharSprite subclasses. Missing sequences
+// retain the sprite's current frame and still use the directional lunge.
+static constexpr AttackFrames mob_attacks[] = {
+  {15,5,{2,3,4,5,0}}, {12,3,{2,3,0}}, {12,3,{7,8,9}},
+  {15,3,{14,15,16}}, {12,4,{10,11,12,0}}, {12,3,{8,9,10}},
+  {12,4,{2,3,0,1}}, {12,3,{2,3,0}}, {12,3,{2,3,0}},
+  {12,4,{0,4,5,0}}, {12,3,{6,7,8}}, {12,4,{3,4,3,4}},
+  {12,3,{0,5,6}}, {12,3,{9,10,11}}, {12,2,{4,3}}, {},
+  {12,3,{0,2,3}}, {12,5,{8,9,10,9,0}}, {12,4,{6,7,8,9}},
+  {12,5,{2,3,4,6,5}}, {12,4,{2,3,4,0}}, {}, {12,3,{4,5,6}},
+  {12,3,{0,8,9}}, {12,3,{4,5,6}}, {12,3,{0,3,4}},
+  {12,4,{3,7,8,9}}, {10,3,{8,9,10}}, {12,4,{6,7,7,0}},
+  {12,3,{3,4,5}}, {12,3,{9,10,11}}, {}
+};
+
+static void combat_sprite(const CombatPose& pose, const AttackFrames& frames,
+                          int& frame, float& x, float& y, u32& tint) {
+  if (pose.age >= 0) {
+    if (frames.count && pose.age * frames.fps / 1000 < frames.count)
+      frame = frames.frame[pose.age * frames.fps / 1000];
+    if (pose.age < 210) {
+      const float reach = pose.style == CombatStyle::Melee ? 5.f : 2.f;
+      float shift = sinf(pose.age * (3.141593f / 210.f)) * reach * G.zoom;
+      x += shift * pose.dx;
+      y += shift * pose.dy;
+    }
+  }
+  if (pose.hit_age >= 0 && pose.hit_age < 100) tint = 0xFFE1D8FF;
 }
 
 static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
@@ -46,8 +82,11 @@ static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
     frame = moving ? 2 + (anim_ms / 100) % 6 : idle[(anim_ms / 1000) % 8];
   }
   float z = G.zoom;
-  draw_sprite(A_hero[hero % 6], 12, 15, frame,
-              vx * 16 * z - camx + 2 * z, vy * 16 * z - camy + 1 * z, 0, z);
+  float x = vx * 16 * z - camx + 2 * z, y = vy * 16 * z - camy + z;
+  u32 tint = 0;
+  static constexpr AttackFrames attack{15,4,{13,14,15,0}};
+  combat_sprite(G.hero_combat, attack, frame, x, y, tint);
+  draw_sprite(A_hero[hero % 6], 12, 15, frame, x, y, tint, z);
 }
 
 static void draw_mob(const Mob& m, int camx, int camy) {
@@ -65,8 +104,78 @@ static void draw_mob(const Mob& m, int camx, int camy) {
   float oy = 16.0f - d.fh;
   float bob = 0;
   if (m.type == M_NPC_GHOST) bob = sinf(TIME_S * 2.0f) * 1.5f;
-  draw_sprite(sheet, d.fw, d.fh, frame, m.vx * 16 * z - camx + ox * z,
-              m.vy * 16 * z - camy + (oy + bob) * z, d.tint, z);
+  float x = m.vx * 16 * z - camx + ox * z;
+  float y = m.vy * 16 * z - camy + (oy + bob) * z;
+  u32 tint = d.tint;
+  static constexpr AttackFrames no_frames{};
+  combat_sprite(m.combat, d.asset < sizeof(mob_attacks) / sizeof(*mob_attacks)
+                             ? mob_attacks[d.asset] : no_frames,
+                frame, x, y, tint);
+  draw_sprite(sheet, d.fw, d.fh, frame, x, y, tint, z);
+}
+
+static void draw_combat_fx(int camx, int camy, bool numbers) {
+  const float z = G.zoom;
+  for (const CombatFx& f : G.combat_fx) {
+    const int age = f.age - f.delay;
+    if (age < 0 || numbers != (f.damage >= 0)) continue;
+    if (!G.vis[f.ty][f.tx] && !G.vis[f.y][f.x]) continue;
+    const float x = (f.tx * 16 + 8) * z - camx;
+    const float y = (f.ty * 16 + 8) * z - camy;
+    if (numbers) {
+      if (age >= 550) continue;
+      char label[16];
+      snprintf(label, sizeof(label), "-%d", f.damage);
+      const float sy = roundf(y - (10.f + age * 0.023f) * z);
+      const float sx = roundf(x - text_w(label) * 0.5f);
+      const int alpha = std::min(255, (550 - age) * 2);
+      text(label, sx, sy, f.damage ? C2D_Color32(255, 133, 107, alpha)
+                                 : C2D_Color32(189, 220, 246, alpha));
+      continue;
+    }
+
+    const bool melee = f.style == CombatStyle::Melee;
+    const int arrival = melee ? 70 : 170;
+    int r = 255, g = 220, b = 156;
+    switch (f.style) {
+      case CombatStyle::Fire: g = 106; b = 35; break;
+      case CombatStyle::Frost: r = 91; g = 205; b = 255; break;
+      case CombatStyle::Lightning: g = 249; b = 100; break;
+      case CombatStyle::Arcane: r = 168; g = 138; b = 255; break;
+      case CombatStyle::Blast: g = 156; b = 64; break;
+      default: break;
+    }
+    auto spark = [&](float px, float py, float size, int alpha) {
+      draw_box(roundf(px), roundf(py), std::max(1.f, roundf(size * z)),
+               std::max(1.f, roundf(size * z)), C2D_Color32(r, g, b, alpha));
+    };
+    if (age < arrival) {
+      if (melee) continue;
+      const float sx = (f.x * 16 + 8) * z - camx;
+      const float sy = (f.y * 16 + 6) * z - camy;
+      const float p = age / float(arrival);
+      const float px = sx + (x - sx) * p;
+      const float py = sy + (y - sy) * p;
+      if (f.item != IT_NONE) {
+        draw_item_icon(f.item, roundf(px - 8 * z),
+                       roundf(py - (8 + sinf(p * 3.141593f) * 7) * z), z);
+      } else {
+        for (int i = 1; i <= 4; ++i) {
+          const float t = std::max(0.f, p - i * .045f);
+          spark(sx + (x - sx) * t, sy + (y - sy) * t, 2, 220 - 40 * i);
+        }
+        spark(px - z, py - z, 3, 255);
+      }
+    } else if (age < arrival + 240 && G.vis[f.ty][f.tx]) {
+      const float p = (age - arrival) / 240.f;
+      const float radius = (2 + p * (melee ? 9 : 16)) * z;
+      for (int i = 0; i < (melee ? 5 : 9); ++i) {
+        const float a = i * 2.399963f;
+        spark(x + cosf(a) * radius, y + sinf(a) * radius, p < .45f ? 2 : 1,
+              int(255 * (1 - p)));
+      }
+    }
+  }
 }
 
 static void draw_feature(const Feature& f, int camx, int camy) {
@@ -322,21 +431,16 @@ static void draw_map() {
 
   // mobs
   for (const Mob& m : G.mobs) {
-    if (!m.alive || (!G.vis[m.y][m.x] && G.mind_t == 0)) continue;
+    if ((!m.alive && m.combat.hit_age >= 45) ||
+        (!G.vis[m.y][m.x] && G.mind_t == 0)) continue;
     draw_mob(m, camx, camy);
-  }
-
-  // spell / bomb impact spark
-  if (G.fx_t > 0 && G.fx_x >= 0) {
-    draw_box((float)(G.fx_x * 16 * z - camx + 6 * z),
-             (float)(G.fx_y * 16 * z - camy + 6 * z), 4 * z, 4 * z,
-             CLR_YELLOW, 0.7f);
   }
 
   // player (hero frames are 12x15 inside the sheet)
   draw_hero(G.hero, G.pvx, G.pvy, G.panim_ms,
             fabsf(G.pvx - G.px) > 0.01f || fabsf(G.pvy - G.py) > 0.01f,
             G.search_ms, camx, camy);
+  draw_combat_fx(camx, camy, false);
   if (G.search_ms > 0) {
     const char* txt = "搜索中";
     text(txt, G.pvx * 16 * z - camx + 8 * z - text_w(txt, 1.0f) * 0.5f,
@@ -393,6 +497,7 @@ static void draw_map() {
 
 
   draw_fog(camx, camy);
+  draw_combat_fx(camx, camy, true);
 
   // cursor
   u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
