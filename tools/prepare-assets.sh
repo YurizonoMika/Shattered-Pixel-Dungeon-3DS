@@ -43,6 +43,7 @@ done
 
 copy sprites/rat.png    mob_rat.png
 copy sprites/gnoll.png  mob_gnoll.png
+copy sprites/crab.png   mob_crab.png
 
 copy splashes/title/archs.png         title_archs.png
 copy splashes/title/back_clusters.png title_back.png

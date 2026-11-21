@@ -50,16 +50,30 @@ static void draw_map() {
   // floor items
   for (const FloorItem& it : G.items) {
     if (!G.vis[it.y][it.x]) continue;
-    draw_item_icon(it.type, (float)(it.x * 16 - camx), (float)(it.y * 16 - camy), 1.0f);
+    draw_item_icon(it.id, (float)(it.x * 16 - camx), (float)(it.y * 16 - camy), 1.0f);
   }
 
   // mobs
   for (const Mob& m : G.mobs) {
     if (!m.alive || !G.vis[m.y][m.x]) continue;
-    const Img& sheet = m.type == 0 ? A_rat : A_gnoll;
-    u32 tint = m.type == 2 ? 0x9FC0FFFF : 0;
-    draw_cell(sheet, 0, 0, 16, 16, (float)(m.x * 16 - camx),
+    const Img* sheet = &A_rat;
+    u32 tint = 0;
+    switch (m.type) {
+      case M_RAT: sheet = &A_rat; break;
+      case M_ALBINO: sheet = &A_rat; tint = 0xFFD6E6FF; break;
+      case M_GNOLL: sheet = &A_gnoll; break;
+      case M_CRAB: sheet = &A_crab; break;
+      case M_BOSS: sheet = &A_gnoll; tint = 0xFF9090FF; break;
+      default: sheet = &A_gnoll; tint = 0x9FC0FFFF; break;
+    }
+    draw_cell(*sheet, 0, 0, 16, 16, (float)(m.x * 16 - camx),
               (float)(m.y * 16 - camy), 1, 1, tint);
+  }
+
+  // spell / bomb impact spark
+  if (G.fx_t > 0 && G.fx_x >= 0) {
+    draw_box((float)(G.fx_x * 16 - camx + 6), (float)(G.fx_y * 16 - camy + 6),
+             4, 4, CLR_YELLOW, 0.7f);
   }
 
   // player
@@ -72,7 +86,10 @@ static void draw_map() {
               16, 16, cc);
 
   if (G.targeting) {
-    text("选择目标: A 投掷   B 取消", 10, 8, CLR_YELLOW, 1.0f);
+    bool wand = G.target_item >= 0 && G.target_item < G.inv_n &&
+                item_def(G.inv[G.target_item].id).kind == K_WAND;
+    text(wand ? "选择目标: A 施法   B 取消" : "选择目标: A 投掷   B 取消",
+         10, 8, CLR_YELLOW, 1.0f);
   }
 
   // bottom hint bar
@@ -89,9 +106,13 @@ static void draw_dialog() {
   // left 3/4: portrait + name + text
   float lx = 20, ly = 20;
   draw_button(lx, ly, 56, 56, "", false, 1.6f);
-  draw_cell(A_gnoll, 0, 0, 16, 16, lx + 12, ly + 12, 2.0f, 2.0f,
-            G.dlg_type == 2 ? 0xCC8888FF : 0x9FC0FFFF);
-  text(G.dlg_name, lx + 66, ly + 2, CLR_YELLOW, 2.0f);
+  if (G.dlg_type >= 2)
+    draw_cell(A_hero[G.hero], 0, 0, 16, 16, lx + 12, ly + 12, 2.0f, 2.0f,
+              G.dlg_type == 2 ? 0xBBBBBBFF : 0xFFFFFF);
+  else
+    draw_cell(A_gnoll, 0, 0, 16, 16, lx + 12, ly + 12, 2.0f, 2.0f, 0x9FC0FFFF);
+  text(G.dlg_name, lx + 66, ly + 2,
+       G.dlg_type == 2 ? CLR_RED : CLR_YELLOW, 2.0f);
   text_wrap(G.dlg_text, lx, ly + 68, 268, CLR_WHITE, 1.0f, 2.0f);
 
   // right 1/4: ABXY actions
@@ -128,6 +149,7 @@ static void draw_status() {
   if (f < 0) f = 0;
   draw_box(6, 5, 108 * f, 9, C2D_Color32(210, 46, 46, 255), 0.41f);
   textf(6, 16, CLR_WHITE, 1.0f, "HP %d/%d", G.hp, G.maxhp);
+  if (G.shield > 0) textf(78, 16, CLR_BLUE, 1.0f, "盾%d", G.shield);
   // level + xp
   textf(122, 3, CLR_YELLOW, 1.0f, "Lv %d", G.level);
   draw_box(122, 16, 70, 6, C2D_Color32(30, 34, 46, 255), 0.4f);
@@ -135,7 +157,7 @@ static void draw_status() {
   draw_box(122, 16, 70 * xf, 6, C2D_Color32(80, 150, 240, 255), 0.41f);
   // depth (top right), keys + gold on the second line
   textf(206, 3, CLR_WHITE, 1.0f, "第 %d 层", G.floor);
-  draw_item_icon(I_KEY, 196, 15, 0.8f);
+  draw_item_icon(IT_KEY, 196, 15, 0.8f);
   textf(214, 17, CLR_WHITE, 1.0f, "x%d", G.keys);
   textf(252, 17, CLR_YELLOW, 1.0f, "%d 金", G.gold);
 }
@@ -145,9 +167,11 @@ static void draw_quickslots() {
     float x = SLOT_X + i * SLOT_SIZE;
     draw_cell(A_toolbar, 0, 0, 32, 32, x, SLOT_Y, 1, 1, 0, 0.4f);
     if (i < G.inv_n) {
-      draw_item_icon(G.inv[i].type, x + 8, SLOT_Y + 6, 1.0f);
-      if (G.inv[i].count > 1)
-        textf(x + 22, SLOT_Y + 21, CLR_WHITE, 1.0f, "%d", G.inv[i].count);
+      const ItemDef& d = item_def(G.inv[i].id);
+      draw_item_icon(G.inv[i].id, x + 8, SLOT_Y + 6, 1.0f);
+      int num = d.kind == K_WAND ? G.inv[i].charges : G.inv[i].count;
+      if (d.kind == K_WAND || num > 1)
+        textf(x + 22, SLOT_Y + 18, CLR_WHITE, 1.0f, "%d", num);
     }
     if (G.targeting && G.target_item == i)
       draw_cursor(x, SLOT_Y, SLOT_SIZE, SLOT_SIZE, CLR_YELLOW);
@@ -175,28 +199,40 @@ static void draw_messages() {
   }
   text_wrap("摇杆/十字键移动光标，A 走向目标，Y 交互。", 10, 104, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
-  text_wrap("快捷栏：点击道具使用；炸弹可进入投掷模式。", 10, 134, BOT_W - 20,
+  text_wrap("快捷栏：点击道具使用；法杖/炸弹可进入瞄准模式。", 10, 134, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
   textf(10, 166, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
 }
 
 static void draw_backpack() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.6f);
-  draw_panel(8, 38, BOT_W - 16, 182, 2.0f);
-  text("背包", 20, 44, CLR_YELLOW, 2.0f);
-  textf(BOT_W - 128, 48, CLR_GREY, 1.0f, "%d 金  %d 钥匙", G.gold, G.keys);
+  draw_panel(8, 38, BOT_W - 16, 184, 2.0f);
+  text("背包", 20, 40, CLR_YELLOW, 2.0f);
+  textf(BOT_W - 130, 46, CLR_GREY, 1.0f, "%d 金  %d 钥匙", G.gold, G.keys);
+  // equipped gear
+  textf(20, 68, CLR_GREY, 1.0f, "武器: %s", item_name(G.weapon));
+  if (G.weapon_level) textf(168, 68, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
+  textf(20, 82, CLR_GREY, 1.0f, "护甲: %s", item_name(G.armor));
+  if (G.armor_level) textf(168, 82, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+
   for (int i = 0; i < 8; i++) {
-    float x = 18 + (i % 2) * 148, y = 70 + (i / 2) * 32;
-    draw_button(x, y, 140, 32, "", false, 1.4f);
+    float x = 18 + (i % 2) * 148, y = 98 + (i / 2) * 28;
+    draw_button(x, y, 140, 26, "", false, 1.4f);
     if (i < G.inv_n) {
-      draw_item_icon(G.inv[i].type, x + 6, y + 8, 1.0f);
-      text(item_name(G.inv[i].type), x + 28, y + 9, CLR_WHITE, 1.0f);
-      textf(x + 112, y + 10, CLR_GREY, 1.0f, "x%d", G.inv[i].count);
+      const ItemDef& d = item_def(G.inv[i].id);
+      draw_item_icon(G.inv[i].id, x + 6, y + 5, 1.0f);
+      text(item_name(G.inv[i].id), x + 28, y + 6, CLR_WHITE, 1.0f);
+      char right[16];
+      if (d.kind == K_WAND) snprintf(right, sizeof(right), "%d", G.inv[i].charges);
+      else if (d.kind == K_WEAPON || d.kind == K_ARMOR)
+        snprintf(right, sizeof(right), "%s%d", G.inv[i].level ? "+" : "", G.inv[i].level);
+      else snprintf(right, sizeof(right), "x%d", G.inv[i].count);
+      text(right, x + 140 - text_w(right, 1.0f) - 6, y + 6, CLR_GREY, 1.0f);
     } else {
-      text("—", x + 10, y + 9, C2D_Color32(140, 140, 150, 255), 1.0f);
+      text("—", x + 10, y + 6, C2D_Color32(140, 140, 150, 255), 1.0f);
     }
   }
-  text_c("点击道具使用   B 关闭", 0, BOT_W, 224, CLR_GREY, 1.0f);
+  text_c("点击装备/使用   B 关闭", 0, BOT_W, 210, CLR_GREY, 1.0f);
 }
 
 static void draw_pause() {
@@ -206,7 +242,7 @@ static void draw_pause() {
   draw_button(76, 84, 168, 30, "继续游戏", G.paused == 1, 1.8f);
   draw_button(76, 118, 168, 30, "设置", G.paused == 2, 1.8f);
   draw_button(76, 152, 168, 30, "返回主菜单", G.paused == 3, 1.8f);
-  text_c("↑↓ 选择  A 确认  B 继续", 0, BOT_W, 212, CLR_GREY, 1.0f);
+  text_c("上下键 选择  A 确认  B 继续", 0, BOT_W, 210, CLR_GREY, 1.0f);
 }
 
 void game_draw_bottom() {
@@ -216,7 +252,7 @@ void game_draw_bottom() {
   draw_status();
   draw_quickslots();
   draw_messages();
-  draw_action_bar();
+  if (!G.backpack && !G.paused) draw_action_bar();
   if (G.backpack) draw_backpack();
   if (G.paused) draw_pause();
 }
@@ -264,8 +300,8 @@ void game_update() {
     else if (IN.pressed(KEY_B)) G.dialog_choose(1);
     else if (IN.pressed(KEY_X)) G.dialog_choose(2);
     else if (IN.pressed(KEY_Y)) G.dialog_choose(3);
-    if (!G.dialog && G.dlg_type == 2) {
-      record_death();
+    if (!G.dialog && (G.dlg_type == 2 || G.dlg_type == 3)) {
+      record_run_end(G.won);
       go_scene(Scene::SAVES);
     }
     return;
@@ -297,8 +333,8 @@ void game_update() {
     if (IN.pressed(KEY_B)) { G.backpack = false; return; }
     if (IN.tap) {
       for (int i = 0; i < 8; i++) {
-        float x = 18 + (i % 2) * 148, y = 76 + (i / 2) * 38;
-        if (in_rect(IN.tap_x, IN.tap_y, x, y, 140, 32) && i < G.inv_n) {
+        float x = 18 + (i % 2) * 148, y = 98 + (i / 2) * 28;
+        if (in_rect(IN.tap_x, IN.tap_y, x, y, 140, 26) && i < G.inv_n) {
           G.use_item(i);
           return;
         }

@@ -40,7 +40,7 @@ static u64 g_last_ms = 0;
 // ---------------------------------------------------------------------------
 // Data files
 // ---------------------------------------------------------------------------
-#define DATA_DIR "sdmc:/3ds/spd"
+#define DATA_DIR SPD_DATA_DIR
 
 static void ensure_dir();
 
@@ -81,12 +81,9 @@ void settings_save(const Settings& s) {
 void slots_load(SlotMeta slots[3]) {
   ensure_dir();
   for (int i = 0; i < 3; i++) {
-    char path[64];
-    snprintf(path, sizeof(path), DATA_DIR "/slot%d.bin", i);
-    FILE* f = fopen(path, "rb");
-    if (!f) continue;
-    fread(&slots[i], sizeof(SlotMeta), 1, f);
-    fclose(f);
+    SlotMeta m{};
+    if (Game::slot_meta(i, m)) slots[i] = m;
+    else slots[i] = SlotMeta{};
   }
 }
 void slot_save(int i, const SlotMeta& m) {
@@ -221,16 +218,9 @@ void draw_icon(int sx, int sy, int sw, int sh, float x, float y, float scale,
   draw_rect_src(A_icons, sx, sy, sw, sh, x, y, sw * scale, sh * scale, tint);
 }
 
-void draw_item_icon(int type, float x, float y, float scale) {
+void draw_item_icon(uint8_t id, float x, float y, float scale) {
   int cx = 0, cy = 0;
-  switch (type) {
-    case I_POTION: cx = 0; cy = 22 * 16; break;   // POTIONS+0
-    case I_SCROLL: cx = 0; cy = 19 * 16; break;   // SCROLLS+0
-    case I_FOOD: cx = 0; cy = 27 * 16; break; // meat ration
-    case I_BOMB: cx = 0; cy = 5 * 16; break;      // BOMB
-    case I_GOLD: cx = 2 * 16; cy = 1 * 16; break; // GOLD
-    case I_KEY: cx = 7 * 16; cy = 3 * 16; break;  // IRON_KEY
-  }
+  item_sprite_cell(id, cx, cy);
   draw_cell(A_items, cx, cy, 16, 16, x, y, scale, scale);
 }
 
@@ -380,42 +370,35 @@ void start_new_game(int hero) {
     if (!SLOTS[i].used) { ACTIVE_SLOT = i; break; }
   }
   if (ACTIVE_SLOT < 0) ACTIVE_SLOT = 0;
+  G.save(ACTIVE_SLOT);
   SLOTS[ACTIVE_SLOT] = G.meta();
-  slot_save(ACTIVE_SLOT, SLOTS[ACTIVE_SLOT]);
   dlog("start_new_game done floor=%d", G.floor);
   SCENE = Scene::GAME;
 }
 
 void load_slot(int i) {
   if (!SLOTS[i].used) return;
-  SlotMeta m = SLOTS[i];
-  G.new_run(m.hero % 6, m.seed);
-  G.floor = m.depth ? m.depth : 1;
-  G.maxhp = m.maxhp > 0 ? m.maxhp : G.maxhp;
-  G.hp = m.hp > 0 ? m.hp : G.maxhp;
-  G.level = m.level ? m.level : 1;
-  G.gold = m.gold;
-  G.turns = (int)m.turns;
-  G.gen_level();
-  G.hp = std::min(G.hp, G.maxhp);
+  if (!G.load(i)) {
+    G.new_run(SLOTS[i].hero % 6, SLOTS[i].seed);
+  }
   ACTIVE_SLOT = i;
   SCENE = Scene::GAME;
 }
 
 void leave_game_to_saves(bool save) {
   if (save && ACTIVE_SLOT >= 0) {
+    G.save(ACTIVE_SLOT);
     SLOTS[ACTIVE_SLOT] = G.meta();
-    slot_save(ACTIVE_SLOT, SLOTS[ACTIVE_SLOT]);
   }
   SCENE = Scene::SAVES;
   g_save_sel = 0;
 }
 
-void record_death() {
+void record_run_end(bool victory) {
   ScoreEntry e{};
   e.hero = (uint8_t)G.hero;
   e.depth = (uint8_t)G.floor;
-  e.score = G.meta().score;
+  e.score = G.meta().score + (victory ? 500 : 0);
   e.stamp = (uint32_t)(osGetTime() / 1000);
   scores_add(e);
   if (ACTIVE_SLOT >= 0) {
@@ -424,11 +407,6 @@ void record_death() {
     slot_save(ACTIVE_SLOT, empty);
   }
   ACTIVE_SLOT = -1;
-}
-
-const char* item_name(int type) {
-  static const char* n[6] = {"治疗药水", "探图卷轴", "钥匙", "金币", "干粮", "炸弹"};
-  return n[type % 6];
 }
 
 // ---------------------------------------------------------------------------
@@ -735,6 +713,56 @@ int main() {
         else if (want == 4) { SCENE = Scene::HEROES; g_hero_sel = 0; }
         else if (want == 5) { dlog("jump to game"); start_new_game(0); }
         else if (want == 14) { SCENE = Scene::HEROES; g_hero_sel = 0; g_hero_info = true; }
+        else if (want == 6) {
+          if (SLOTS[0].used) load_slot(0); else start_new_game(0);
+        }
+        else if (want == 7) {
+          start_new_game(0);
+          G.hp -= 7; G.gold += 99; G.keys += 3; G.quest = 1;
+          G.add_item(IT_WAND_FIRE, 1, 0);
+          G.save(2);
+        }
+        else if (want == 8) {
+          load_slot(2);
+        }
+        else if (want == 18) {
+          start_new_game(0);
+          G.floor = 3; G.gen_level();
+          for (Mob& m : G.mobs)
+            if (m.type == M_BOSS) { G.px = m.x - 1; G.py = m.y; break; }
+          G.cursor_x = G.px; G.cursor_y = G.py;
+          G.recompute_fov();
+        }
+        else if (want == 19) {
+          start_new_game(0);
+          G.quest = 1; G.floor = 2; G.gen_level();
+          for (FloorItem& it : G.items)
+            if (it.id == IT_AMULET) { G.px = it.x; G.py = it.y + 1; break; }
+          G.cursor_x = G.px; G.cursor_y = G.py;
+          G.recompute_fov();
+        }
+        else if (want >= 15 && want <= 17) {
+          start_new_game(0);
+          G.add_item(IT_SHORTSWORD, 1, 1);
+          G.add_item(IT_LEATHER_ARMOR, 1, 0);
+          G.add_item(IT_WAND_MAGIC, 1, 0);
+          G.add_item(IT_WAND_FIRE, 1, 0);
+          G.add_item(IT_SCROLL_UP, 2);
+          G.add_item(IT_POTION_HEAL, 3);
+          G.add_item(IT_BOMB, 2);
+          G.keys += 2;
+          G.gold += 40;
+          G.quest = 1;
+          if (want == 16) G.backpack = true;
+          if (want == 17) {
+            for (int i = 0; i < G.inv_n; i++)
+              if (item_def(G.inv[i].id).kind == K_WAND) {
+                G.targeting = true;
+                G.target_item = i;
+                break;
+              }
+          }
+        }
         else if (want >= 10 && want <= 13) {
           start_new_game(0);
           if (want == 10)
@@ -744,7 +772,7 @@ int main() {
           else if (want == 11) G.backpack = true;
           else if (want == 12) G.paused = 1;
           else if (want == 13) {
-            G.add_item(I_BOMB, 1);
+            G.add_item(IT_BOMB, 1);
             G.targeting = true;
             G.target_item = G.inv_n - 1;
           }

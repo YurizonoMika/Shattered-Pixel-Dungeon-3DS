@@ -12,6 +12,8 @@
 
 #include "font_glyphs.h"
 
+#define SPD_DATA_DIR "sdmc:/3ds/spd"
+
 #define TOP_W 400
 #define TOP_H 240
 #define BOT_W 320
@@ -48,7 +50,7 @@ extern Img A_itemicons;  // 128x64   item category icons (16x16 grid)
 extern Img A_tiles;      // 256x256  terrain tiles (16x16 grid)
 extern Img A_hero[6];    // 256x128  hero walk sheets (16x16 grid)
 extern Img A_art[6];     // 400x225  hero splash art
-extern Img A_rat, A_gnoll;
+extern Img A_rat, A_gnoll, A_crab;
 extern Img A_t_archs, A_t_back, A_t_front;
 extern Img A_font;
 

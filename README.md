@@ -14,15 +14,16 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
 [中文简介](#中文简介) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-> **Status: playable vertical slice.** The dual-screen shell, hero select, dungeon
-> generation and turn-based loop are working. It is not a complete 1:1 port of SPD's
-> content yet — see [Roadmap](#roadmap).
+> **Status: playable 3-floor slice, full save/load.** The dual-screen shell, hero
+> select, dungeon generation, turn loop, equipment, wands, a floor-3 boss and complete
+> run snapshots are working. It is not yet the full 25-floor game — see
+> [Roadmap](#roadmap).
 
 ## 中文简介
 
 这是 Shattered Pixel Dungeon 的 **3DS 原生 C++ 移植原型**：不运行 JVM、不运行 APK、
-不用转译器。上下双屏菜单、6 英雄选择、地牢生成、回合制移动/战斗、道具、HUD、
-对话、存档都已跑通，并且直接使用原版美术素材。完整游戏内容仍在持续移植中。
+不用转译器。上下双屏菜单、6 英雄选择、前三层地牢、回合制移动/战斗、装备/法杖/
+消耗品、Boss、任务 NPC、HUD、对话和**完整存档**都已跑通，并且直接使用原版美术素材。
 
 - 目标机型：Old 3DS / New 3DS（主要按 Old 3DS 的 400×240 + 320×240 设计）
 - 开发环境：macOS + devkitPro（Linux 同样可用）
@@ -54,20 +55,30 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
   the bottom; the info popup shows title and description; tap the selected hero twice
   to start.
 
-### Dungeon slice
+### Dungeon (floors 1–3)
 
 - Room-and-corridor generation, doors, secret doors, stairs, water and grass.
 - Bresenham line-of-sight, explored/fogged tiles, camera follows the player/cursor.
 - Turn-based movement: cursor moves tile-by-tile, **A** auto-walks (BFS), **Y**
   interacts (attack / pick up / open secret door / descend).
-- Two enemy types plus a friendly NPC, melee combat, XP and level-ups.
-- Items: healing potion, mapping scroll, food, key, gold, bomb.
-- **Targeting mode**: select the bomb in the quick slot, the cursor turns yellow,
-  **A** throws, **B** cancels.
-- Bottom HUD: HP, level/XP, floor, keys, gold, 2×4 quick slots, and four actions:
-  wait (**hold to keep waiting until HP drops**), search, backpack, pause menu.
+- Mobs: giant rat, gnoll, sewer crab, albino rat; a **floor-3 boss** guards the exit,
+  and a friendly ghost NPC gives a quest.
+- Weapons and armor with upgrade levels, two wands with charges and recharging,
+  bombs, three potions, mapping/upgrade/teleport scrolls, food, keys and gold.
+- Backpack equips gear and shows stats; quick slots show stack counts or wand charges.
+- **Targeting mode** for bombs and wands: cursor turns yellow, **A** uses, **B** cancels.
+- Bottom HUD: HP/shield, level/XP, floor, keys, gold, 2×4 quick slots, and four
+  actions: wait (**hold to keep waiting until HP drops**), search, backpack, pause menu.
 - ABXY dialog overlay on the top screen: NPC portrait/name/text on the left, action
   buttons on the right.
+- Floor 3 stairs end the slice with a score/victory screen.
+
+### Saves
+
+Each slot is a versioned binary snapshot (~4–5 KB): seed/RNG, floor, player stats,
+inventory, equipped weapon/armor, wand charges, map tiles, explored tiles, mobs,
+floor items, quest and boss flags. Load restores the exact run; leaving the game
+auto-saves. Slots written by older builds are detected and ignored safely.
 
 ## Controls
 
@@ -78,7 +89,8 @@ input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 | Hero select | **A** select, **A** again on the same hero to start, **X** info popup |
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
 | Game actions | **B** back to save list (auto-save), **X** backpack, **L** wait, **R** search, **START** pause |
-| Targeting | **A** throw at cursor, **B** cancel |
+| Targeting | **A** cast/throw at cursor, **B** cancel |
+| Backpack | tap a consumable to use, tap a weapon/armor to equip |
 | Dialog | **A / B / X / Y** pick the matching option |
 
 ## Building
@@ -159,8 +171,8 @@ tools/                # asset prep, font generation, dev helpers
 - `C3D_DepthTest(true, GPU_ALWAYS, ...)` keeps strict submission order for 2D UI.
 - All textures use `GPU_NEAREST` filtering to preserve pixel art.
 - Text is a generated white-alpha glyph atlas tinted at runtime with `C2D_TintMult`.
-- Save files store run metadata; the floor itself is regenerated deterministically
-  from `(seed, depth)`.
+- Saves use a fixed-size `GameDisk` struct (`source/game.h`) with magic + version
+  fields; `Game::slot_meta` reads just the header for the slot list.
 
 ### Asset pipeline
 
@@ -204,6 +216,11 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 12 | Game + pause |
 | 13 | Game + targeting |
 | 14 | Hero select + info popup |
+| 15 | Game with starter gear/wands/bombs |
+| 16 | Same as 15 + backpack open |
+| 17 | Same as 15 + wand targeting |
+| 18 | Floor 3 next to the boss |
+| 19 | Floor 2 next to the quest amulet |
 
 The app appends boot/scene-boot diagnostics to `log.txt` in the same folder, which is
 useful when the emulator shows an exception dialog.
@@ -213,9 +230,11 @@ useful when the emulator shows an exception dialog.
 - [x] Dual-screen shell, settings, saves, hero select
 - [x] Dungeon generation, FOV, turn loop, mobs, items, HUD
 - [x] CJK bitmap font pipeline
-- [ ] Expand content: 25 floors, bosses, talents, full item/mob/spell tables
+- [x] Full save/load (map, mobs, inventory, equipment, quest/boss state)
+- [x] Floors 1–3 content: four mob types, floor-3 boss, gear, wands, potions,
+      scrolls, quest NPC, victory screen
+- [ ] Remaining floors 4–25, shops, talents, full item/mob/spell tables
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
-- [ ] Full saves (map, inventory, quest state)
 - [ ] CIA packaging (makerom/bannertool, banner + icon, RSF permissions)
 - [ ] Old 3DS performance and memory tuning
 - [ ] GitHub Actions build (devkitPro container)

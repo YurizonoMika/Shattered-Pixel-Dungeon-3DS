@@ -19,7 +19,7 @@ void go_scene(Scene s);
 void start_new_game(int hero);
 void load_slot(int i);
 void leave_game_to_saves(bool save);
-void record_death();
+void record_run_end(bool victory);
 
 // Shared widgets (main.cpp)
 void draw_button(float x, float y, float w, float h, const char* label,
@@ -27,12 +27,11 @@ void draw_button(float x, float y, float w, float h, const char* label,
 void draw_panel(float x, float y, float w, float h, float scale = 2.0f);
 void draw_icon(int sx, int sy, int sw, int sh, float x, float y, float scale,
                u32 tint = 0);
-void draw_item_icon(int type, float x, float y, float scale);
+void draw_item_icon(uint8_t id, float x, float y, float scale);
 void draw_hero_icon(int hero, float x, float y, float scale);
 void draw_top_hint(const char* s);
 void draw_bg(bool bottom);
 
-const char* item_name(int type);
 
 // game_screen.cpp
 void game_update();

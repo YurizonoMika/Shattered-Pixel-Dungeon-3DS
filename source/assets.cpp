@@ -6,7 +6,7 @@
 Img A_banners, A_chrome, A_toolbar, A_status, A_icons, A_heroicons, A_avatars,
     A_items, A_itemicons, A_tiles;
 Img A_hero[6], A_art[6];
-Img A_rat, A_gnoll;
+Img A_rat, A_gnoll, A_crab;
 Img A_t_archs, A_t_back, A_t_front;
 Img A_font;
 
@@ -52,6 +52,7 @@ bool assets_load() {
   }
   A_rat = load_img("romfs:/gfx/mob_rat.t3x", 256, 64);
   A_gnoll = load_img("romfs:/gfx/mob_gnoll.t3x", 256, 64);
+  A_crab = load_img("romfs:/gfx/mob_crab.t3x", 256, 64);
   A_t_archs = load_img("romfs:/gfx/title_archs.t3x", 1024, 256);
   A_t_back = load_img("romfs:/gfx/title_back.t3x", 512, 512);
   A_t_front = load_img("romfs:/gfx/title_front.t3x", 1024, 512);
