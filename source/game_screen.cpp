@@ -310,30 +310,14 @@ static void draw_map() {
         continue;
       uint32_t tint = 0;
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
-      auto passable = [&](int nx, int ny) {
-        if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) return false;
-        uint8_t t2 = G.tiles[ny][nx];
-        return t2 == T_FLOOR || t2 == T_GRASS || t2 == T_WATER ||
-               t2 == T_DOOR || t2 == T_DOOR_OPEN || t2 == T_STAIRS;
-      };
-      int hpass = (passable(x - 1, y) ? 1 : 0) + (passable(x + 1, y) ? 1 : 0);
-      int vpass = (passable(x, y - 1) ? 1 : 0) + (passable(x, y + 1) ? 1 : 0);
-      bool sideways = hpass > vpass;
-      if (sideways) {
-        if (tt == T_DOOR || tt == T_DOOR_LOCKED) {
-          // Lower half of the dedicated side-door material. The wall cell
-          // above draws the upper half (227/228), producing one full vertical
-          // door with horizontal planks.
-          int di = tt == T_DOOR_LOCKED ? 228 : 227;
-          draw_cell_rot(A_tiles[G.region()], (di % 16) * 16, (di / 16) * 16,
-                        16, 16, tx, ty, z, (float)M_PI, tint);
-        } else {
-          draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
-                          (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
-                          tint);
-        }
+      bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
+      if (above_wall) {
+        // SPD RAISED_DOOR_SIDEWAYS belongs to a door in a vertical wall.
+        draw_tile_world(A_tiles[G.region()], (116 % 16) * 16,
+                        (116 / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                        tint);
       } else {
+        int idx = tt == T_DOOR_OPEN ? 113 : (tt == T_DOOR_LOCKED ? 114 : 112);
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
                         (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                         tint);
@@ -404,7 +388,15 @@ static void draw_map() {
       uint8_t below = (y + 1 < MH) ? G.tiles[y + 1][x] : T_WALL;
       uint32_t tint = 0;
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
-      if (wall_like(tt) && wall_like(below)) {
+      if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
+                            below == T_DOOR_OPEN)) {
+        if (below == T_DOOR || below == T_DOOR_LOCKED) {
+          int di = below == T_DOOR_LOCKED ? 228 : 227;
+          draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
+                          (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
+                          tint);
+        }
+      } else if (wall_like(tt) && wall_like(below)) {
         // Wall top surface, stitched with neighbours (SPD stitchInternalWallTile).
         int right = (x + 1 < MW && wall_like(G.tiles[y][x + 1])) ? 1 : 0;
         int rb = (x + 1 < MW && y + 1 < MH && wall_like(G.tiles[y + 1][x + 1])) ? 1 : 0;
