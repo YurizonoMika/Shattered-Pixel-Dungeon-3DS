@@ -313,7 +313,7 @@ static void draw_map() {
       bool above_wall = (y > 0 && wall_like(G.tiles[y - 1][x]));
       if (above_wall) {
         if (tt == T_DOOR || tt == T_DOOR_LOCKED) {
-          int di = tt == T_DOOR_LOCKED ? 228 : 227;
+          int di = tt == T_DOOR_LOCKED ? 216 : 212;
           draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
                           (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                           tint);
@@ -398,9 +398,8 @@ static void draw_map() {
       float tx = (float)(x * cell - camx), ty = (float)(y * cell - camy);
       if (wall_like(tt) && (below == T_DOOR || below == T_DOOR_LOCKED ||
                             below == T_DOOR_OPEN)) {
-        // Dedicated door-adjacent wall cap. 212 closed, 216 locked, 220
-        // crystal; 208 is the open-door cap.
-        int di = below == T_DOOR_OPEN ? 208 : (below == T_DOOR_LOCKED ? 216 : 212);
+        // Upper door half on the wall cell above; the door cell holds 212/216.
+        int di = below == T_DOOR_OPEN ? 208 : (below == T_DOOR_LOCKED ? 228 : 227);
         draw_tile_world(A_tiles[G.region()], (di % 16) * 16,
                         (di / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                         tint);
