@@ -3,11 +3,20 @@
 #include "common.h"
 #include "items.h"
 #include "content.h"
+#include "status_rules.h"
+#include "ballistica.h"
+#include "blob_rules.h"
+#include "identification_rules.h"
 
 constexpr int MW = 64, MH = 64;
 constexpr int LEGACY_MAP_SIZE = 41;
 #define BAG_CAP 25
 #define BAG_MAX 40
+
+enum ItemFlags : uint8_t {
+  IF_IDENTIFIED = 1, IF_CURSED = 2, IF_CURSE_KNOWN = 4,
+  IF_KNOWN = IF_IDENTIFIED | IF_CURSE_KNOWN
+};
 
 enum TileType : uint8_t {
   T_WALL = 0,
@@ -20,6 +29,7 @@ enum TileType : uint8_t {
   T_DOOR_OPEN,  // walkable, still drawn as a door frame
   T_DOOR_LOCKED,// needs a key
   T_CHASM,      // visible across, not traversable until floor returns exist
+  T_STAIRS_UP,
 };
 
 
@@ -58,6 +68,7 @@ struct Feature {
   uint8_t loot_id = 0;
   uint8_t loot_level = 0;
   int16_t loot_gold = 0;
+  uint8_t loot_flags = IF_KNOWN;
 };
 
 // Feature::aux stores the trap type. Keep the two older IDs readable.
@@ -112,6 +123,18 @@ struct Mob {
   uint8_t sleep_t = 0, terror_t = 0;
   Ai ai = Wandering;
   int target = -1;
+  float next_action = 0.f;
+  uint8_t variant = 0;
+  bool beam_charged = false;
+  uint8_t beam_cooldown = 0;
+  int beam_target = -1;
+  bool chains_used=false,focused=false;
+  float focus_cooldown=0.f;
+  int minion=-1,summoning_pos=-1,owner=-1;
+  bool first_summon=true,has_raged=false;
+  int rage_shield=0;
+  uint8_t adrenaline=0;
+  uint8_t pumped_up=0;
   CombatPose combat;
 };
 
@@ -119,6 +142,11 @@ struct FloorItem {
   int x = 0, y = 0;
   uint8_t id = IT_NONE;
   int16_t level = 0;  // upgrade level, or coin amount for IT_GOLD
+  uint8_t flags = IF_KNOWN;
+  uint8_t charges=0;
+  float partial_charge=0.f;
+  uint8_t augment=0;
+  Identification identification{0.f,item_def(id).kind==K_ARMOR || item_def(id).kind==K_WAND ? 5.f : 10.f};
 };
 
 struct Item {
@@ -126,6 +154,10 @@ struct Item {
   uint8_t count = 1;
   uint8_t level = 0;    // upgrades for weapons/armor, unused otherwise
   uint8_t charges = 0;  // wands
+  uint8_t flags = IF_KNOWN;
+  float partial_charge=0.f;
+  uint8_t augment=0;
+  Identification identification{0.f,item_def(id).kind==K_ARMOR || item_def(id).kind==K_WAND ? 5.f : 10.f};
 };
 
 // Binary save layout. Fixed-size on purpose: 3DS homebrew, no protobuf.
@@ -195,6 +227,24 @@ struct GameDisk {
   uint8_t talents[4], talent_tier;
 };
 
+struct FloorState {
+  int depth=0,width=0,height=0,entrance=-1;
+  uint8_t tiles[MH][MW]{},seen[MH][MW]{};
+  std::vector<Mob> mobs;
+  std::vector<FloorItem> items;
+  std::vector<Feature> features;
+  blob_rules::Gas<MW,MH> gas;
+  int keys=0,golden_keys=0,crystal_keys=0,respawn=0,mob_cap=0;
+  bool legacy_keys=false;
+  struct Room { uint8_t x,y,w,h; };
+  std::vector<Room> rooms;
+  std::vector<uint8_t> weights,deck;
+  int shop_n=0,shop_floor=-1;
+  Item shop_items[20]{};
+  int shop_prices[20]{};
+  bool shop_sold[20]{};
+};
+
 struct Game {
   uint32_t seed = 1, rng = 1;
   int floor = 1;
@@ -202,9 +252,15 @@ struct Game {
   int px = 1, py = 1;
   int hp = 20, maxhp = 20, level = 1, xp = 0, xpnext = 10;
   int strength = 10;
+  int hp_boost = 0;
   int hunger = 0, starvation_damage = 0, regen_ticks = 0, healing_left = 0;
   int blessed_t = 0;
   float action_remainder = 0.f;
+  // Actor clocks share a whole-turn origin; action_remainder is hero time.
+  // At a tie, hero acts first.
+  float health_time = 0.f, world_time = 0.f, buff_time = 0.f;
+  float actor_time = 0.f; // current event time; transient, restored from hero time
+  uint8_t debuffs[status_rules::Count]{};
   int keys = 0, gold = 0, shield = 0;
   int golden_keys = 0;
   int crystal_keys = 0;
@@ -222,13 +278,20 @@ struct Game {
   std::vector<Mob> mobs;
   std::vector<FloorItem> items;
   std::vector<Feature> features;
+  std::vector<FloorState> visited_floors;
+  int entrance_cell=-1;
+  bool ascending=false;
+  uint8_t highest_ascent=26;
+  float ascent_stacks=0.f,ascent_damage=0.f;
+  int flat_healing=0;
+  blob_rules::Gas<MW,MH> toxic_gas;
   uint8_t boss_dead[5]{};
   uint8_t tokens = 0;
   uint8_t token_quest = 0;
   uint8_t smith_used = 0;
   uint8_t imp_state = 0;
   bool bag_potion = false, bag_scroll = false, bag_wand = false;
-  bool shop_warned[25]{}, shop_gone[25]{};
+  bool shop_warned[27]{}, shop_gone[27]{};
   int dust_timer = 0;
   int respawn_t = 0;  // countdown in thirds of a turn
   int mob_cap = 0;
@@ -256,6 +319,8 @@ struct Game {
   bool transmute_open = false;
   int transmute_sel = 0;
   int transmute_page = 0;
+  uint8_t selection_scroll = IT_SCROLL_TRANSMUTE;
+  int augment_target=0;
   bool shop_open = false;
   int shop_sel = 0, shop_n = 0, shop_floor = -1;
   int shop_mode = 0, shop_page = 0;  // 0 buy, 1 sell, 2 buyback
@@ -276,6 +341,10 @@ struct Game {
   uint8_t armor = IT_CLOTH_ARMOR, armor_level = 0;
   uint8_t ring1 = IT_NONE, ring1_level = 0;
   uint8_t ring2 = IT_NONE, ring2_level = 0;
+  uint8_t weapon_flags = IF_KNOWN, armor_flags = IF_KNOWN;
+  uint8_t ring1_flags = IF_KNOWN, ring2_flags = IF_KNOWN;
+  uint8_t weapon_augment=0,armor_augment=0;
+  Identification weapon_identification,armor_identification,ring1_identification,ring2_identification;
   uint8_t haste_t = 0, invis_t = 0, might_t = 0, levit_t = 0, mind_t = 0, rage_t = 0;
   uint8_t quest = 0;     // 0 none, 1 accepted, 2 complete
   int cursor_x = 1, cursor_y = 1;
@@ -300,7 +369,8 @@ struct Game {
   void take_damage(int damage, bool bypass_shield = false);
   bool hero_hits(Mob& mob, bool ranged);
 
-  bool paused = false, backpack = false;
+  uint8_t paused = 0;
+  bool backpack = false;
   bool dialog = false;
   int dlg_type = 0;  // 0 stairs, 1 npc, 2 death, 3 victory
   char dlg_name[32]{};
@@ -321,6 +391,7 @@ struct Game {
   void build_run_plan();
   void debug_dump();
   void recompute_fov();
+  bool mob_sees_hero(const Mob& mob) const;
   bool los(int x0, int y0, int x1, int y1) const;
   bool walkable(int x, int y) const;
   bool blocks_sight(int x, int y) const;
@@ -335,27 +406,47 @@ struct Game {
   void advance_turn();
   void spend_action(float duration);
   void earn_exp(int amount);
+  void identify_on_exp(int amount);
+  void identify_use(uint8_t& flags,Identification& progress,float total);
   void tick_survival();
+  void tick_health();
+  void tick_hunger();
+  void tick_world();
+  void tick_buffs();
   int effective_strength() const;
+  void update_maxhp(bool boost_hp = false);
   int roll_armor();
   int roll_weapon(const Mob& target);
   int roll_mob_damage(const Mob& mob);
   float hero_evasion() const;
+  float melee_delay() const;
+  int buffed_level(int level) const;
+  int wand_capacity(const Item& item) const;
+  bool bolt_reaches(int x, int y, int tx, int ty) const;
+  ballistica::Ray cast_ray(int from, int to, int flags) const;
   void tick(int dt_ms);
   void clear_path();
   void wait_turns(int n);
-  void mob_turn(Mob& m);
+  float mob_turn(Mob& m);
   void message(const char* s);
   void use_item(int idx);
   void equip_item(int idx);
   void cast_wand(int idx, int tx, int ty);
   void pick_item(int idx);
   void descend();
+  void ascend();
+  void remember_floor();
+  void capture_floor(FloorState& state) const;
+  void apply_floor(const FloorState& state);
+  bool restore_floor(int depth,bool at_exit);
+  void transition_prompt();
+  float mob_modifier(const Mob& mob) const;
+  void ascent_level_switch();
   void open_dialog(int type, const char* name, const char* text,
                    const char* o0 = nullptr, const char* o1 = nullptr,
                    const char* o2 = nullptr, const char* o3 = nullptr);
   void dialog_choose(int i);
-  void add_item(uint8_t id, int count = 1, int level = 0);
+  void add_item(uint8_t id, int count = 1, int level = 0, uint8_t flags = IF_KNOWN);
   void close_door_if_clear(int x, int y);
   bool remove_item(int idx, int count = 1);
   int region() const { return region_of_floor(floor); }
@@ -375,6 +466,10 @@ struct Game {
   void alchemy_brew(int recipe);
   bool can_transmute(int idx) const;
   void transmute_choose(int idx);
+  Item selection_item(int idx) const;
+  bool can_select_item(int idx) const;
+  void select_item(int idx);
+  void augment_item(int choice);
   void check_talents();
   int shop_sell_price(uint8_t id, int count, int level) const;
   void spawn_quest_miniboss();

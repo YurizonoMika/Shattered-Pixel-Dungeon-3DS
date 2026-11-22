@@ -14,7 +14,7 @@ int main() {
   const uint8_t armors[] = {IT_CLOTH_ARMOR,IT_LEATHER_ARMOR,IT_MAIL,IT_SCALE,IT_PLATE};
   for (int tier = 1; tier <= 5; ++tier) {
     assert(equipment_tier(armor_for_tier(tier)) == tier);
-    for (int choice = 0; choice < 3; ++choice)
+    for (int choice = 0; choice < weapon_count(tier); ++choice)
       assert(equipment_tier(weapon_for_tier(tier,choice)) == tier);
     for (int level = 0; level <= 30; ++level) {
       const auto dr = armor_range(armors[tier-1], level);

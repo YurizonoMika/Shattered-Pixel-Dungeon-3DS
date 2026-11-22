@@ -8,14 +8,15 @@
 
 ## 下载和安装
 
-v0.1.11alpha 开始按 Wiki 复盘并修正力量、饥饿、食物、治疗、升级和装备规则。
-怪物生成改为按房间尺寸档位加权，撤去移植版自定的房间数量上限。
+v0.1.12alpha 继续按 Wiki 和固定 v4.0.2 源码对齐机制，新增独立行动时间、
+装备鉴定与诅咒状态、强化石选项、原版弹道/视野/毒气扩散，以及部分怪物能力。
+支持保存已访问楼层、上下楼、第 26 层护符和携带护符返回地表。
 完整来源、冲突和未完成项见 [Wiki 机制复盘](docs/wiki-mechanics-audit.md)，目前尚未实现所有机制一致。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
@@ -31,7 +32,8 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 
 ## 功能与进度
 
-- 可从第 1 层玩到第 25 层，包含五个区域和五位首领。支持六位英雄、三个存档槽、本地排行榜和双屏菜单。
+- 可探索五个区域和五位首领，第 26 层取得护符后选择结束或返回地表。已访问楼层保留地图、怪物、物品、钥匙、商店和毒气。支持六位英雄、三个存档槽、本地排行榜和双屏菜单。
+- 英雄和怪物按各自行动时间调度；移动与攻击速度分开。31 种普通近战武器已补齐基础公式，12 种戒指已有条目，但奥术/神射之戒的附魔/投掷耐久效果仍未实现。卷轴可选择背包或已装备的目标，强化石调整速度/伤害或闪避/防御；使用和经验可推进基础鉴定。
 - 回合制移动与战斗、装备和消耗品、快捷栏、商店买卖与回购、任务、炼金及简化天赋。铁钥匙、金钥匙和水晶钥匙各有对应的锁；搜索能揭示暗门和陷阱，但不会解除陷阱。
 - 怪物初始生成按普通房尺寸档位加权，补怪会检查视野和路径距离。飞镖、毒气、警报、寒霜、火焰和电击陷阱有各自的图块与触发提示。毒气会扩散并在后续回合造成伤害，警报会发出红色波纹并吸引整层怪物。
 - 普通层使用移植自 v4.0.2 的单环和双环构建器，支持可变尺寸布局、支路、连接房与迷宫。水草区域使用原版斑块算法和五个区域的参数。普通层会投放食物，大型楼层额外投放一份。
@@ -49,9 +51,11 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 
 ### 存档兼容
 
-当前存档格式为 **V11**，另存力量、饥饿、持续治疗、行动小数耗时和生成房间权重。
-V9/V10 仍可读取，保留已有生命和怪物，但缺失力量初始化为10、饥饿为0，升级门槛采用新公式。
-建议备份并开新局验证机制。旧版本不能读取 V11 存档。
+当前存档格式为 **V12**，保存已访问楼层、完整实体列表、行动/AI 时间、状态、
+装备已知/诅咒标记、属性调整、鉴定进度、法杖充能和毒气浓度。保存失败时保留原文件。
+V9/V10/V11 仍可读取；缺失力量初始化为10、饥饿为0，保留已有生命和怪物，升级门槛采用新公式。
+旧装备导入为已鉴定且无诅咒；旧档未记录的历史楼层无法还原。
+建议备份并开新局验证机制。旧版本不能读取 V12 存档；不承诺不同平台间交换存档。
 
 ## 操作
 
@@ -97,6 +101,7 @@ make cia  # 可选，需要 makerom
 - `source/game.cpp` 负责楼层生成、回合、寻路调用和存档，`source/game_screen.cpp` 负责双屏渲染。`gfx/` 存放素材，构建时由 `tex3ds` 打包。角色、地图和字库采用最近邻采样，保留像素边缘。
 - 可在 `sdmc:/3ds/spd/scene.txt` 写入场景编号后重启：`85/86` 检查门与缩放，`87` 检查 800 层生成，`88` 检查寻路，`91` 检查补怪，`92` 检查钥匙、陷阱与存读档，`93–97` 检查五个区域的水纹和雾，`98` 预览生成的深渊通道。Azahar 的日志位于 `~/Library/Application Support/Azahar/sdmc/3ds/spd/log.txt`；完整场景表见[英文 README](README.md#debug)。
 - `bash tools/check-floor-layout.sh ../spd-upstream` 用相同输入对照 v4.0.2 的房间构建、斑块和迷宫；`bash tools/check-pathfinder.sh ../spd-upstream` 对照寻路。Java 只用于在电脑上跑对照测试，不参与游戏构建或运行。
+- `bash tools/check-game-rules.sh` 在隔离目录中编译实际游戏逻辑，以 ASan/UBSan 检查行动、物品、怪物、毒气、楼层和存档。`check-equipment.sh`、`check-ballistica.sh`、`check-shadowcaster.sh`、`check-blob.sh` 分别与固定上游 Java 方法对照基础武器、弹道、视野和扩散。通过这些测试不代表全游戏一致。
 
 ## 开发计划
 

@@ -6,6 +6,12 @@
 #include "hero_rules.h"
 
 namespace mob_rules {
+inline float movement_delay(uint8_t type) {
+  return type == M_CRAB || type == M_BAT ? .5f : 1.f;
+}
+inline float attack_delay(uint8_t type) {
+  return type == M_RIPPER || type == M_MONK || type == M_THIEF ? .5f : 1.f;
+}
 struct Base { int min, max, xp, max_level; };
 inline Base base(uint8_t type, int depth, bool half_health = false) {
   switch (type) {

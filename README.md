@@ -4,8 +4,8 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.11alpha-e60012)
-![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
+![Version](https://img.shields.io/badge/version-0.1.12alpha-e60012)
+![Status](https://img.shields.io/badge/status-mechanics%20alignment%20in%20progress-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -15,21 +15,22 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.11alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.11alpha)**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.12alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.12alpha)**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-v0.1.11alpha begins the [Wiki mechanics audit](docs/wiki-mechanics-audit.md),
-with strength, hunger, food, healing, XP and equipment corrections. Monster
-room weights replace the port's occupancy cap. **Many mechanics remain partial**;
-the audit records sources, conflicts, completed work and outstanding systems.
+v0.1.12alpha continues the [Wiki mechanics audit](docs/wiki-mechanics-audit.md)
+with individual actor clocks, selected equipment actions, default use/XP
+identification, augmentation, original Ballistica/ShadowCaster/Blob algorithms,
+selected enemy abilities, remembered floors and the Amulet ascent.
+**Many mechanics remain partial**; the audit records sources, conflicts,
+verification scope and outstanding systems.
 
-> **Status: complete 25-floor run, five regions, full save/load.** All five SPD
-> regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
-> bosses, NPCs, shops, interactables and area events. Content breadth is still smaller
-> than upstream SPD — see [Roadmap](#roadmap).
+> **Status: five regions, floor 26 and a return to the surface.** Visited floors
+> retain their map, entities, keys, shops and gas. Boss arenas/phases, classes,
+> items and other systems still differ from upstream SPD; see [Roadmap](#roadmap).
 
 ## 中文简介
 
@@ -106,11 +107,16 @@ the audit records sources, conflicts, completed work and outstanding systems.
   quest tokens. Search reveals traps and secret doors with SPD's blue
   `CheckedCell` pulse.
 - **Shops**: shops on depths 6/11/16 plus the Imp's depth-20 shop after his quest.
-- **90 item definitions**: 15 weapons (tiers 1–5), 6 armor tiers, 13 wands,
-  11 potions, 11 scrolls, 8 rings, 3 food types, 3 bombs, 3 throwing weapons,
-  3 seeds, keys/gold/quest items.
+- **Equipment** includes all 31 normally generated melee weapons with pinned
+  base formulas, legacy weapon/armor entries, 13 native wand types and a partial
+  consumable/missile/seed catalog. Exact generation decks and many effects remain.
 - **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
-  energy, force and elements, each with passive combat/economy effects.
+  energy, force, elements, furor, tenacity, sharpshooting and arcana. Arcana and
+  Sharpshooting effects remain absent; wealth and missile interactions are partial.
+- **Equipment state** survives swapping, drops, floor changes, shops and saves:
+  known level, curse lock, augmentation, use/XP identification and wand recharge.
+  Identify, Remove Curse and Upgrade offer a target picker including equipped gear.
+  Augmentation offers speed/damage or evasion/defense without raising item level.
 - **Scroll of Transmutation** now opens an inventory selector and changes the
   chosen item into a random item of the same category (weapon tier is preserved),
   instead of rolling a random inventory item.
@@ -128,8 +134,9 @@ the audit records sources, conflicts, completed work and outstanding systems.
   `0x99193366` veil, unseen cells are black. Internal walls use SPD's split
   left/right fog halves; camera-facing walls take the darker of the wall and
   the tile below.
-- **Field of view**: radius 8 with wall-aware line of sight (radius 5 on dark
-  floors), matching SPD's `viewDistance`.
+- **Field of view and rays** use the ported ShadowCaster and Ballistica methods.
+  Default radius is 8, 5 on dark floors and 4 on floor 26. Special terrain/sight
+  interactions remain incomplete.
 - **Smooth shoulder zoom**: hold **L** to zoom out / **R** to zoom in
   (0.75×–2×, eased at ~14 units/s); the camera, tiles, actors, items, wall
   layers and fog all scale together. Tiles/features/fog are drawn into integer
@@ -247,15 +254,19 @@ Implementation was cross-checked against:
 
 ### Saves
 
-The current save format is **V11**. Slots store the run seed, current map and fog,
-inventory, actors, quest and boss state, typed keys, and loot and respawn state.
+The current save format is **V12**. Slots store the run seed, current/visited maps
+and fog, full entity vectors, actor/AI clocks, selected ability/status state,
+equipment flags/augmentation/identification, wand recharge, gas, quests, bosses,
+typed keys, shops and respawn state. Failed writes retain the previous file.
 Leaving the game auto-saves. **V9 saves from v0.1.0alpha still load**: the current
 floor keeps its old shared key balance until descent, and newly generated floors
-use the current rules. V10 saves also load. Older saves lack strength and hunger:
+use the current rules. V10/V11 saves also load. V9/V10 saves lack strength and hunger:
 strength starts at 10 and hunger at 0, existing HP/enemies are retained, and XP
-uses the corrected threshold. V11 additionally saves survival state, room weights
-and fractional action costs. Older builds cannot load V11; back up `sdmc:/3ds/spd/`
-before updating. A fresh run is recommended for comparing mechanics.
+uses the corrected threshold. Imported equipment is known and uncursed; previously
+visited floors absent from old saves cannot be reconstructed. Older builds cannot
+load V12; back up `sdmc:/3ds/spd/` before updating. The extended archive uses native
+value layouts; cross-platform save exchange is not claimed. A fresh run is
+recommended for comparing mechanics.
 
 Select an occupied slot and press **X**, or tap its **删除** button. Press **A**
 to permanently delete the selected save or **B** to cancel. Both choices are
@@ -425,7 +436,7 @@ Readability rules used by the renderer:
 ### Sprite fidelity
 
 Every item's sprite index is taken from SPD's `ItemSpriteSheet.java`
-(`xy(x, y) = (x-1) + 16*(y-1)`); the 90 entries are checked by rendering each
+(`xy(x, y) = (x-1) + 16*(y-1)`); the native entries are checked by rendering each
 definition next to its real `items.png` cell:
 
 ```bash
@@ -433,7 +444,7 @@ tools/venv/bin/python tools/item_audit.py
 # → docs/item_audit.png
 ```
 
-[Open the full 90-item audit sheet](docs/item_audit.png).
+[Open the native item audit sheet](docs/item_audit.png).
 
 Map tiles follow `DungeonTileSheet.java` instead of the old flat-wall look:
 
@@ -503,7 +514,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 65 | Generate all 25 floors (smoke test) |
 | 70 | Alchemy UI |
 | 72 | Scroll of Transmutation item selector |
-| 73 | All 90 item icons on one screen (sprite audit) |
+| 73 | Native item icons (sprite audit) |
 | 74 | Generate all floors and print room/mob/item/door audit |
 | 75 | Spawn the new depth-rotation enemies for a visual check |
 | 76 | Clean enemy gallery (no items/features) |
@@ -521,6 +532,9 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 102/103 | Inspect toxic gas, alarm waves and trap names |
 | 104 | Check strength, food, hunger, regen, healing, XP, action costs and save migration |
 | 105 | Check trap avoidance, whole-floor alarm and mapping discovery |
+| 106/107 | Check fractional actors/curse selection or preview the item picker |
+| 108 | Preview Eye charge and saved aim |
+| 109/110 | Check floor returns, floor 26 and saves / preview the Amulet |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |
@@ -540,8 +554,8 @@ useful when the emulator shows an exception dialog.
 - [x] Full save/load (map, mobs, inventory, equipment, quest/boss state)
 - [x] All 25 floors and 5 regions with region mobs, bosses, NPCs, shops,
       interactables and area events
-- [x] Full item table across all categories (weapons/armor/wands/potions/
-      scrolls/rings/bombs/missiles/seeds) with gameplay effects
+- [ ] Complete upstream item catalog, generation decks, identities, enchants,
+      curses and effects (native catalog is partial)
 - [x] Shopkeeper warn/flee, bags, alchemy UI, Stone of Augmentation, tipped darts
 - [x] Integer-scaled, shadow-free UI text; fixed multiline wrapping measurement
 - [x] Wandmaker wraith spawns, pickaxe/ore mine area

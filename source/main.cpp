@@ -396,7 +396,8 @@ void start_new_game(int hero) {
 void load_slot(int i) {
   if (!SLOTS[i].used) return;
   if (!G.load(i)) {
-    G.new_run(SLOTS[i].hero % 6, SLOTS[i].seed);
+    dlog("Could not load slot %d; preserving original file",i+1);
+    return;
   }
   ACTIVE_SLOT = i;
   SCENE = Scene::GAME;
@@ -1017,6 +1018,59 @@ int main() {
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
+        else if(want==109 || want==110) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.mob_cap=0;G.keys=3;G.golden_keys=2;
+          G.descend();G.mobs.clear();G.mob_cap=0;
+          G.ascend();
+          const bool returned=G.floor==1 && G.keys==3 && G.golden_keys==2;
+          G.floor=25;G.boss_dead[4]=1;G.gen_level();G.mobs.clear();G.descend();
+          const bool last=G.floor==26 && G.map_width==16 && G.map_height==64 &&
+              G.items.size()==1 && G.items[0].id==IT_AMULET;
+          const bool saved=G.save(109);
+          const bool loaded=saved && G.load(109) && G.floor==26 && G.visited_floors.size()>=3;
+          if(saved) remove(DATA_DIR "/slot109.bin");
+          dlog("[wiki floors] return=%d last=%d saved=%d loaded=%d",returned,last,saved,loaded);
+          if(want==110) {G.pvx=G.px=8;G.pvy=G.py=12;G.recompute_fov();}
+          G.demo_lock=true;
+        }
+        else if (want == 106 || want == 107 || want == 108) {
+          G.new_run(0,0x12345678);
+          SCENE=Scene::GAME;
+          G.map_width=23; G.map_height=15;
+          G.mobs.clear(); G.items.clear(); G.features.clear(); G.mob_cap=0;
+          memset(G.tiles,T_WALL,sizeof(G.tiles));
+          memset(G.seen,1,sizeof(G.seen));
+          for (int y=1; y<14; ++y) for (int x=1; x<22; ++x) G.tiles[y][x]=T_FLOOR;
+          G.pvx=G.cursor_x=G.px=10; G.pvy=G.cursor_y=G.py=7;
+          Mob mob;
+          mob.type=want==108 ? M_EYE : M_CRAB;
+          mob.x=mob.vx=6; mob.y=mob.vy=7;
+          mob.hp=mob.maxhp=100; mob.ai=Mob::Hunting; mob.target=7*MW+10;
+          G.mobs.push_back(mob); G.recompute_fov();
+          G.spend_action(.1f);
+          if (want==108) {
+            dlog("[wiki eye] charged=%d aimed=%d delayed=%d",G.mobs[0].beam_charged,
+                G.mobs[0].beam_target==7*MW+10,G.mobs[0].next_action==2.f);
+          } else {
+            const bool first=G.mobs[0].x==7 && G.mobs[0].next_action==.5f;
+            G.spend_action(.4f);
+            const bool tie=G.mobs[0].x==7;
+            G.spend_action(.01f);
+            const bool second=G.mobs[0].x==8;
+            G.inv_n=0;
+            G.add_item(IT_LONGSWORD,1,2,IF_CURSED); G.equip_item(0);
+            const bool cursed=G.weapon_flags==(IF_CURSED|IF_CURSE_KNOWN);
+            G.add_item(IT_SCROLL_CURSE); G.use_item(G.inv_n-1);
+            const bool selector=G.transmute_open && G.can_select_item(-1);
+            if (want==106) {
+              G.select_item(-1);
+              dlog("[wiki actors/items] first=%d tie=%d second=%d cursed=%d selector=%d cleansed=%d",
+                  first,tie,second,cursed,selector,!(G.weapon_flags&IF_CURSED));
+            }
+          }
+          G.demo_lock=true;
+        }
         else if (want == 104) {
           G.new_run(0, 0x12345678);
           SCENE = Scene::GAME;
@@ -1092,7 +1146,7 @@ int main() {
             }
             fixture = fopen(filename, "r+b");
             if (fixture) {
-              const uint16_t version = 11;
+              const uint16_t version = 12;
               fseek(fixture, 4, SEEK_SET);
               const bool changed = fwrite(&version, sizeof(version), 1, fixture) == 1;
               fseek(fixture, 0, SEEK_END);
@@ -1173,11 +1227,13 @@ int main() {
           G.mobs.push_back(sleeper);
           G.recompute_fov();
           G.trigger_trap(0);
+          const int source=6*MW+7;
+          const bool seeded=G.toxic_gas.cur[source]==320;
           G.tick_trap_clouds();
-          const int before = G.hp;
+          const int before=G.toxic_gas.volume;
           G.tick_trap_clouds();
-          const bool cloud = G.features[0].state == TOXIC_TURNS - 2 && G.hp < before &&
-              G.in_toxic_cloud(G.features[0], 9, 6) && !G.in_toxic_cloud(G.features[0], 10, 6);
+          const bool cloud=seeded && G.toxic_gas.volume>0 && G.toxic_gas.volume!=before &&
+              G.in_toxic_cloud(G.features[0],7,6);
           if (want == 103) G.trigger_trap(1);
           const bool alarm = G.mobs[0].ai == Mob::Hunting && G.mobs[0].sleep_t == 0 &&
               G.mobs[0].target == 6 * MW + 9 && G.trap_notice == TR_ALARM;
@@ -1247,6 +1303,8 @@ int main() {
           G.mobs.clear(); G.items.clear(); G.features.clear();
           memset(G.tiles, T_WALL, sizeof(G.tiles));
           G.pvx = G.px = 42; G.pvy = G.py = 8;
+          G.entrance_cell=8*MW+42;
+          G.spawn_rooms.clear();G.spawn_weights.clear();G.spawn_deck.clear();
           for (int y = 5; y < 12; ++y)
             for (int x = 39; x < 47; ++x) G.tiles[y][x] = T_FLOOR;
           G.tiles[8][43] = T_DOOR_LOCKED;

@@ -44,42 +44,76 @@ formulas pass tests. No whole-game or whole-floor parity is claimed.
 | System / 系统 | Before this audit / 旧实现 | Current work and remaining gaps / 本轮及后续 |
 | --- | --- | --- |
 | Hero progression | Different class HP; next XP `level×10`; uncapped; generic automatic talent buffs | Base HP and XP corrected; class starts, unlocks, talent choices, subclasses and armor abilities still incomplete |
-| Strength | Absent; potion adds HP | Persistent STR, +1 potion, equipment requirements; Ring of Might HT multiplier, mastery and cursed levels still missing |
+| Strength | Absent; potion adds HP | Persistent STR, +1 potion, equipment requirements, Might HT multiplier and cursed ring penalties; mastery and negative item levels remain |
 | Hunger and food | Food heals directly; unconditional regen every 12 turns | Persistent hunger, satiety, three-turn food, starvation and 10-turn regen; food talents/holiday effects and full hunger modifiers remain |
 | Healing potion | Instant +15 HP | Healing pool and per-turn recovery; complete cleansing, challenge and trinket effects remain |
-| Physical combat | Fixed weapon power and ad hoc armor upper bound | Base weapon ranges, reach, armor bounds/encumbrance and cumulative action costs corrected; full per-actor scheduler, procs, augmentation, curses and enchantments remain |
-| Item catalog | Around 90 entries, including native substitutes | 12 basic/exotic potions and scrolls, complete missiles/seeds/stones, artifacts, trinkets and unique hero items remain missing |
-| Identification/curse | Identify/Remove Curse only print success | Need stored identity, known state, curse state, equip restrictions and item selection; do not claim implemented |
-| Upgrade/transmutation | Automatically chooses equipped weapon; category reroll | Need selected-target upgrades and complete category decks, equip state, charges and durability |
+| Physical combat | Fixed weapon power and ad hoc armor upper bound | Individual actor clocks/priorities, base weapon ranges/reach/DR, encumbrance, augmentation and selected debuffs implemented. Buffs still share category clocks; complete procs, enchanted/cursed effects and per-effect application clocks remain |
+| Item catalog | Around 90 entries, including native substitutes | 31 normally generated melee weapons now present with base formulas; 12 ring entries. Arcana/enchantments and Sharpshooting/missile durability effects remain absent. Full consumables, missiles/seeds/stones, artifacts, trinkets and unique hero items remain |
+| Identification/curse | Identify/Remove Curse only print success | Stored known/curse state, equip locks, selected scroll targets and default use/XP identification. Random appearances, global type knowledge, complete curse effects, class/trinket ID modifiers and negative levels remain |
+| Upgrade/transmutation | Automatically chooses equipped weapon; category reroll | Selected upgrades/removal/identification, augmentation picker, wand charge preservation and no armor transmutation. Exotic pairs, full category decks, item metadata and durability remain |
 | RNG/loot | Native run plan, category decks; wrong weapon/armor tier mappings; artifacts become rings | Supported equipment now maps to actual tiers; complete per-category decks, artifact uniqueness, depth seed schedule and exact guaranteed drops remain |
 | Normal map | Builders and several masks matched on identical explicit inputs | Complete painters, room constraints, merging, door hiding, terrain vetoes and full-floor fixtures remain |
 | Population | Area-based 1–4 cap added to address crowded rooms | Removed this non-upstream cap; restored size-category weights, 25% second-spawn attempt and bounded room sampling. Full eligibility, original AI/scheduler and same-seed population fixtures remain |
-| Traps | Six custom types and region weights; radius/turn gas | Need original trap tables, every effect, original gas diffusion, item activation and glyphs. Full-floor alarm and visible-trap avoidance are corrected in this pass |
-| Monster combat | Base HP and hit/DR partly present; generic attack strength | Basic melee ranges, kill-XP caps, and normal boss HP/XP now explicit; cooldowns, AI, immunities, statuses, variants, death procs and boss phases remain. Summon-only necromancer and Yog still have native placeholder attacks |
-| Terrain/FOV | Native LOS and simplified grass; chasms block walking | Original shadow casting, high grass trampling, fire/water/gas, flying and fall/return transitions remain |
+| Traps | Six custom types and region weights; radius/turn gas | ToxicGas/Blob diffusion and depth damage now ported; alarm/avoidance corrected. Full trap tables/effects, fire/freezing/electricity, item activation and glyphs remain |
+| Monster combat | Base HP and hit/DR partly present; generic attack strength | Added base movement/attack delays; magic bolts/debuffs; Scorpio retreat; Eye charge; necromancer summon/heal; guard chains; monk focus; brute rage; bat healing; skeleton explosion; slime reduction; Goo pumping/water heal. Variant scripts, full AI/immunities/loot, ghoul revival, webs, leaps and later boss phases remain |
+| Terrain/FOV | Native LOS and simplified grass; chasms block walking | ShadowCaster and Ballistica ported with Java fixtures; mind vision corrected. High grass, fire/water/status interactions, falling, special sight modifiers and complete terrain flags remain |
 | Shops/quests | UI and simplified quest actions | Exact stock/value/identification rules, quest variants, Old Mine and Imp Vault remain |
 | Alchemy | Three fixed seed-to-potion recipes | Energy, seed mixtures, catalysts, bombs, spells, elixirs and exotic recipes remain |
-| Run completion | Ends after floor-25 boss | Floor 26, Amulet, ascent, persistent visited floors and ascent modifiers remain |
+| Run completion | Ends after floor-25 boss | Persistent visited floors, stairs up, LastLevel walkable geometry, Amulet choice/surface victory and base ascent stacks/modifiers implemented. Exact transition timing, reset exceptions, original panoramas and full ascent interactions remain |
 | Meta/UI/audio | Native 3DS UI and ranking, no gameplay audio | Badges, challenges, daily/seeded runs, journal, localization and audio remain |
-| Saves | V9/V10; bounded entity tables | V11 adds survival, action remainder and room weights; per-floor state, future buff/item metadata and table overflow handling remain |
+| Saves | V9/V10; bounded entity tables | V12 archives floors and full entity vectors, actor/AI/ability clocks, item flags/augmentation/ID/recharge and gas. V9–11 import supported; atomic replacement preserves old file on failure. Future systems need their own metadata; negative levels still absent |
 
 V9/V10 migration retains existing HP and enemies. Missing strength defaults to
 10, hunger to 0, and the XP threshold becomes `5+5×level`. The old files cannot
 reveal how many strength potions were consumed. A fresh run is recommended for
-mechanics comparisons; keep a backup before upgrading. V11 cannot be loaded by
+mechanics comparisons; keep a backup before upgrading. V12 cannot be loaded by
 older releases.
 
 旧档保留已有生命和怪物，缺失力量以 10 初始化、饥饿以 0 初始化，升级门槛
 采用新公式。无法从旧档准确还原已消耗的力量药水，因此建议新局验证对齐。
-V11 不支持降级读取。
+V12 不支持降级读取。
 
-The native `IT_HALBERD` entry currently uses the upstream Glaive's base
-statistics. `IT_GIANT_HAMMER` and `IT_RUNE_ARMOR` are legacy substitutes;
-neither is used to fill a hole in the corrected tier drop tables. Tier tables
-still cover only the supported subset, with repeated entries where fewer than
-three weapons exist. They are not the original category probabilities.
+The native `IT_HALBERD` entry uses upstream Glaive base statistics.
+`IT_GIANT_HAMMER` and `IT_RUNE_ARMOR` are legacy substitutes excluded from
+the corrected tier tables. All 31 normally generated melee weapons are now
+represented, but category depletion decks and exact RNG consumption still differ.
 
-## Verified in v0.1.11alpha / 本次验证
+## Current verification / 本轮验证
+
+- `bash tools/check-game-rules.sh`: actual runtime built on host with only
+  platform stubs, AddressSanitizer and UndefinedBehaviorSanitizer. Covers actor
+  ties/fractions, save continuation, item locks/scroll targets/augmentation/ID,
+  ranged/debuff/ability behavior, gas, floor returns, >48 items, Amulet/ascent,
+  wand recharge, V11 migration and failed-save retention. Saves live only in a
+  temporary test directory.
+- `check-equipment.sh`: 961 cases across 31 weapons, upgrades +0..30,
+  tier/damage/STR/accuracy/delay/reach match extracted pinned Java methods;
+  465 armor cases match DR min/max and evasion across all augmentation choices.
+- `check-ballistica.sh`: 40,000 full paths/collision points/distances match.
+- `check-shadowcaster.sh`: 10,000 masks at radii 1..20 match.
+- `check-blob.sh`: 17,500 diffusion steps/volumes match the extracted original
+  evolve method, including changing area bounds during scanning.
+- Azahar scenes 109/106/108/104/105/99/91/92/102/103 passed floor returns,
+  LastLevel/save, actor ties, curse selection, Eye charge, survival/migration,
+  traps, combat and respawn. Scene 87 passed 800 floors with zero generation,
+  supply/route or room-weight failures; 429 contained chasms, 341 regular floors
+  used Loop and 299 FigureEight, with zero ordinary-floor fallbacks.
+- Existing builder/room/painter/pathfinder comparisons were rerun successfully.
+- Both release formats built; CIA installed and booted to the title in Azahar
+  with `v0.1.12alpha` visible. All 16 SMDH language entries have version-free
+  titles/descriptions. The real slot hash is unchanged; disposable slots removed.
+
+V12 keeps the original header and V10/V11 trailers for migration, then appends
+versioned actor, item, status, gas and visited-floor data. Old saves import as
+known, uncursed equipment; missing prior floors cannot be reconstructed. V12
+cannot be loaded by older releases. The extended floor archive preserves native
+value-struct layouts for the ARM build; portable cross-platform save interchange
+is not claimed. No hardware testing or whole-game parity is claimed.
+
+V12 保存已访问楼层、完整实体、行动时间、装备状态、鉴定进度和毒气浓度。
+旧档导入时原装备视为已知且无诅咒，缺失的历史楼层不能还原；不支持降级。
+
+## Verified in v0.1.11alpha / 前版验证
 
 - Host rule boundaries: XP curve, food values, 155 armor/strength cases,
   weapon ranges, tiers, reach and action delays.

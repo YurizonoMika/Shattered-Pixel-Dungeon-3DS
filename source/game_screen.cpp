@@ -30,7 +30,7 @@ static int chasm_atlas_tile(uint8_t above) {
 static bool water_shore(int x, int y) {
   if (!G.in_map(x, y)) return false;
   const uint8_t t = G.tiles[y][x];
-  return t == T_FLOOR || t == T_GRASS || t == T_STAIRS || door_tile(t);
+  return t == T_FLOOR || t == T_GRASS || t == T_STAIRS || t==T_STAIRS_UP || door_tile(t);
 }
 
 static void draw_water_world(const Img& im, int x, int y, float cell, int camx, int camy) {
@@ -164,6 +164,10 @@ static void draw_mob(const Mob& m, int camx, int camy) {
   float x = m.vx * 16 * z - camx + ox * z;
   float y = m.vy * 16 * z - camy + (oy + bob) * z;
   u32 tint = d.tint;
+  if ((m.type == M_EYE && m.beam_charged) || (m.type==M_GOO && m.pumped_up)) {
+    tint = C2D_Color32(235,125,255,255);
+    text("!!",x,y-10*z,CLR_ORANGE,1.f);
+  }
   if (!m.alive && m.combat.death_age >= 0) {
     draw_falling_sprite(sheet, d.fw, d.fh, 0, x, y, z, tint, m.combat.death_age);
     return;
@@ -280,28 +284,27 @@ static void draw_trap_plate(const Feature& f, int camx, int camy) {
 
 static void draw_trap_effects(int camx, int camy, int x0, int y0, int x1, int y1) {
   const float z = G.zoom;
-  for (const auto& trap : G.features) {
-    if (trap.type != F_TRAP_DISARMED || trap_kind(trap) != TR_TOXIC || !trap.state) continue;
-    for (int y = std::max(y0, trap.y - TOXIC_RADIUS); y <= std::min(y1, trap.y + TOXIC_RADIUS); ++y) {
-      for (int x = std::max(x0, trap.x - TOXIC_RADIUS); x <= std::min(x1, trap.x + TOXIC_RADIUS); ++x) {
-        if (!G.vis[y][x] || !G.in_toxic_cloud(trap, x, y)) continue;
+    for (int y = std::max(y0,0); y <= std::min(y1,G.map_height-1); ++y) {
+      for (int x = std::max(x0,0); x <= std::min(x1,G.map_width-1); ++x) {
+        const int density=G.toxic_gas.cur[y*MW+x];
+        if (!G.vis[y][x] || !density) continue;
+        const int intensity=std::min(6,1+density/10);
         const float phase = G.water_anim_ms * (6.2831853f * 3.f / 6400.f) + x * 1.8f + y * 2.6f;
         const float wx = 16 * x * z - camx;
         const float wy = 16 * y * z - camy;
         draw_box(roundf(wx), roundf(wy), roundf(wx + 16 * z) - roundf(wx),
-                 roundf(wy + 16 * z) - roundf(wy), trap_color(TR_TOXIC, 18 + 5 * trap.state), .49f);
+                 roundf(wy + 16 * z) - roundf(wy), trap_color(TR_TOXIC, 18 + 5 * intensity), .49f);
         for (int i = 0; i < 2; ++i) {
           const float a = phase + 3.1415927f * i;
           const float px = wx + (8.f + 4.f * cosf(a)) * z;
           const float py = wy + (8.f + 4.f * sinf(a)) * z;
-          const auto color = trap_color(TR_TOXIC, 37 + 12 * trap.state);
+          const auto color = trap_color(TR_TOXIC, 37 + 12 * intensity);
           draw_box(roundf(px - 3 * z), roundf(py - z), 6 * z, 2 * z, color, .49f);
           draw_box(roundf(px - 2 * z), roundf(py - 2 * z), 4 * z, z, color, .49f);
           draw_box(roundf(px - 2 * z), roundf(py + z), 4 * z, z, color, .49f);
         }
       }
     }
-  }
   for (const auto& fx : G.trap_fx) {
     const float progress = fx.age / float(TRAP_FX_MS);
     const float x = (fx.x * 16 + 8) * z - camx;
@@ -584,7 +587,9 @@ static void draw_map() {
         }
       } else {
         int idx = 0;
-        if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
+        if(tt==T_STAIRS) idx=17;
+        else if(tt==T_STAIRS_UP) idx=16;
+        else if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
                         (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
@@ -851,9 +856,9 @@ static const float BAG_GX = 36, BAG_GY = 22;
 
 static const char* BAG_TABS[6] = {"全部", "药水", "卷轴", "法杖", "装备", "其他"};
 
-static int bag_visible(int out[BAG_CAP]) {
+static int bag_visible(int out[BAG_MAX]) {
   int n = 0;
-  for (int i = 0; i < G.inv_n && i < BAG_CAP; i++) {
+  for (int i = 0; i < G.inv_n && i < BAG_MAX; i++) {
     if (g_bag_tab == 0 || item_def(G.inv[i].id).cat == g_bag_tab)
       out[n++] = i;
   }
@@ -861,13 +866,13 @@ static int bag_visible(int out[BAG_CAP]) {
 }
 
 static int bag_sel_inv() {
-  int out[BAG_CAP];
+  int out[BAG_MAX];
   int n = bag_visible(out);
   return (g_bag_sel >= 0 && g_bag_sel < n) ? out[g_bag_sel] : -1;
 }
 
 static void bag_clamp_sel() {
-  int out[BAG_CAP];
+  int out[BAG_MAX];
   int n = bag_visible(out);
   if (g_bag_sel >= n) g_bag_sel = n > 0 ? n - 1 : 0;
 }
@@ -897,7 +902,9 @@ static void draw_bag_action() {
   draw_item_icon(G.inv[idx].id, 30, 54, 2.0f);
   text(d.name, 72, 54, CLR_YELLOW, 2.0f);
   char extra[40] = "";
-  if (d.kind == K_WEAPON || d.kind == K_ARMOR)
+  if (item_is_equipment(G.inv[idx].id) && !(G.inv[idx].flags & IF_IDENTIFIED))
+    snprintf(extra, sizeof(extra), "尚未鉴定");
+  else if (d.kind == K_WEAPON || d.kind == K_ARMOR)
     snprintf(extra, sizeof(extra), "+%d  力量 %d/%d", G.inv[idx].level, G.effective_strength(),
              hero_rules::strength_requirement(G.inv[idx].id, G.inv[idx].level));
   else if (d.kind == K_WAND)
@@ -905,6 +912,8 @@ static void draw_bag_action() {
   else if (G.inv[idx].count > 1)
     snprintf(extra, sizeof(extra), "数量 %d", G.inv[idx].count);
   if (extra[0]) text(extra, 72, 82, CLR_GREY, 1.0f);
+  if ((G.inv[idx].flags & (IF_CURSED|IF_CURSE_KNOWN)) == (IF_CURSED|IF_CURSE_KNOWN))
+    text("诅咒", 246, 82, CLR_RED, 1.f);
   text_wrap(d.desc, 30, 104, 260, CLR_WHITE, 1.0f, 2.0f);
 
   const char* primary = "使用 (A)";
@@ -927,18 +936,18 @@ static void draw_backpack() {
   textf(252, 18, CLR_GREY, 1.0f, "%d/%d", G.inv_n, G.bag_capacity());
 
   textf(14, 44, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
-  if (G.weapon_level) textf(112, 44, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
+  if (G.weapon_level && (G.weapon_flags & IF_IDENTIFIED)) textf(112, 44, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
   textf(150, 44, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
-  if (G.armor_level) textf(244, 44, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
+  if (G.armor_level && (G.armor_flags & IF_IDENTIFIED)) textf(244, 44, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
   textf(14, 58, CLR_GREY, 1.0f, "戒指一 %s", item_name(G.ring1));
-  if (G.ring1_level) textf(100, 58, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
+  if (G.ring1_level && (G.ring1_flags & IF_IDENTIFIED)) textf(100, 58, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
   textf(156, 58, CLR_GREY, 1.0f, "戒指二 %s", item_name(G.ring2));
-  if (G.ring2_level) textf(244, 58, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
+  if (G.ring2_level && (G.ring2_flags & IF_IDENTIFIED)) textf(244, 58, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
 
   for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 70);
 
-  int vis[BAG_CAP];
+  int vis[BAG_MAX];
   int n = bag_visible(vis);
   for (int i = 0; i < BAG_MAX; i++) {
     float x = BAG_X + (i % 8) * BAG_GX;
@@ -1057,16 +1066,16 @@ static void draw_alchemy() {
 
 static int transmute_list(int out[]) {
   int n = 0;
-  for (int i = 0; i < G.inv_n; i++)
-    if (G.can_transmute(i)) out[n++] = i;
+  for (int i = -4; i < G.inv_n; i++)
+    if (G.can_select_item(i)) out[n++] = i;
   return n;
 }
 
 static void draw_transmute() {
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 190), 0.66f);
   draw_panel(8, 38, BOT_W - 16, 178, 2.0f);
-  text("嬗变：选择物品", 20, 50, CLR_YELLOW, 2.0f);
-  int list[BAG_MAX];
+  text(item_name(G.selection_scroll), 20, 50, CLR_YELLOW, 2.0f);
+  int list[BAG_MAX+4];
   int n = transmute_list(list);
   int pages = (n + 4) / 5;
   if (pages < 1) pages = 1;
@@ -1075,13 +1084,14 @@ static void draw_transmute() {
     int pos = G.transmute_page * 5 + row;
     if (pos >= n) break;
     int idx = list[pos];
+    const Item item = G.selection_item(idx);
     float y = 82 + row * 20;
     draw_button(16, y, BOT_W - 32, 19, "", pos == G.transmute_sel, 1.0f);
-    draw_item_icon(G.inv[idx].id, 22, y + 1, 1.0f);
-    text(item_name(G.inv[idx].id), 42, y + 3, CLR_WHITE, 1.0f);
+    draw_item_icon(item.id, 22, y + 1, 1.0f);
+    textf(42, y + 3, CLR_WHITE, 1.0f, "%s%s", item_name(item.id), idx<0 ? "（已装备）" : "");
   }
   textf(BOT_W - 50, 54, CLR_GREY, 1.0f, "%d/%d", G.transmute_page + 1, pages);
-  text_c("L/R 翻页  A 嬗变  B 取消", 0, BOT_W, 190, CLR_GREY, 1.0f);
+  text_c("L/R 翻页  A 确认  B 取消", 0, BOT_W, 190, CLR_GREY, 1.0f);
 }
 
 static void draw_pause() {
@@ -1240,7 +1250,7 @@ void game_update() {
   }
 
   if (G.transmute_open) {
-    int list[BAG_MAX];
+    int list[BAG_MAX+4];
     int n = transmute_list(list);
     if (IN.pressed(KEY_B)) { G.transmute_open = false; return; }
     int pages = (n + 4) / 5;
@@ -1252,9 +1262,9 @@ void game_update() {
       G.transmute_page = G.transmute_sel / 5;
     }
     if (IN.pressed(KEY_A) && n > 0)
-      G.transmute_choose(list[G.transmute_sel]);
+      G.select_item(list[G.transmute_sel]);
     if (IN.tap) {
-      int list2[BAG_MAX];
+      int list2[BAG_MAX+4];
       int n2 = transmute_list(list2);
       for (int row = 0; row < 5; row++) {
         int pos = G.transmute_page * 5 + row;
@@ -1262,7 +1272,7 @@ void game_update() {
         float y = 82 + row * 20;
         if (in_rect(IN.tap_x, IN.tap_y, 16, y, BOT_W - 32, 19)) {
           G.transmute_sel = pos;
-          G.transmute_choose(list2[pos]);
+          G.select_item(list2[pos]);
           return;
         }
       }
@@ -1323,7 +1333,6 @@ void game_update() {
 
   if (G.backpack) {
     if (g_bag_action) {
-      int i = g_bag_sel;
       if (IN.pressed(KEY_B)) { g_bag_action = false; return; }
       if (IN.pressed(KEY_A)) { bag_primary_action(); return; }
       if (IN.pressed(KEY_X)) { bag_drop_action(); return; }
@@ -1341,7 +1350,7 @@ void game_update() {
       g_bag_action = false;
       return;
     }
-    if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_CAP - 1, g_bag_sel + IN.dx));
+    if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_MAX - 1, g_bag_sel + IN.dx));
     if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_MAX - 1, g_bag_sel + IN.dy * 8));
     if (IN.pressed(KEY_A) && bag_sel_inv() >= 0) g_bag_action = true;
     if (IN.tap) {
@@ -1354,7 +1363,7 @@ void game_update() {
         }
         return;
       }
-      int vis[BAG_CAP];
+      int vis[BAG_MAX];
       int n = bag_visible(vis);
       for (int i = 0; i < BAG_MAX; i++) {
         float x = BAG_X + (i % 8) * BAG_GX;
