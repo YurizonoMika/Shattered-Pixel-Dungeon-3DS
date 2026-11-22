@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.4alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.5alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,15 +15,15 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.4alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.4alpha):**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.5alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.5alpha):**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.5alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.5alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-**Latest update:** v0.1.4alpha ports six connector layouts and three standard-room
-interiors from v4.0.2. Chasms have their original edges and block movement,
-but falling to the next floor is not yet implemented. Existing saves still load.
+**Latest update:** v0.1.5alpha fixes striped chasms caused by drawing water shoreline
+tiles in place of the chasm sprites. Water still animates, and existing saves are
+unchanged. Chasms block movement; falling to the next floor is not yet implemented.
 
 > **Status: complete 25-floor run, five regions, full save/load.** All five SPD
 > regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
@@ -499,7 +499,7 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
 | 91 | Check one-turn respawn retry and consumption of the remaining monster deck |
 | 92 | Check typed locks, trap reveal and activation, and a save round-trip on a 48×14 map |
-| 93–97 | Inspect animated water, shoreline masks and fog in all five regions (1× / 1.33×) |
+| 93–97 | Inspect animated water, shorelines, chasm edges and fog in all five regions (1× / 1.33×) |
 | 98 | Preview a generated chasm connector in the dungeon |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |

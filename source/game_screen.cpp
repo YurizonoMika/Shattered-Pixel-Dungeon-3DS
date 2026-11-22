@@ -14,6 +14,18 @@ static bool door_tile(uint8_t t) {
   return t == T_DOOR || t == T_DOOR_OPEN || t == T_DOOR_LOCKED;
 }
 
+// DungeonTileSheet uses one-based atlas coordinates: chasms start at
+// xy(9, 2), and the water shoreline masks start at xy(1, 3).
+static constexpr int CHASM_ATLAS = 16 + 8;
+static constexpr int WATER_ATLAS = 2 * 16;
+
+static int chasm_atlas_tile(uint8_t above) {
+  if (above == T_WATER) return CHASM_ATLAS + 4;
+  if (wall_like(above) || door_tile(above)) return CHASM_ATLAS + 3;
+  if (above == T_FLOOR || above == T_GRASS) return CHASM_ATLAS + 1;
+  return CHASM_ATLAS;
+}
+
 static bool water_shore(int x, int y) {
   if (!G.in_map(x, y)) return false;
   const uint8_t t = G.tiles[y][x];
@@ -408,8 +420,7 @@ static void draw_map() {
         }
       } else if (tt == T_CHASM) {
         const uint8_t above = y > 0 ? G.tiles[y-1][x] : T_CHASM;
-        const int idx = above == T_CHASM ? 40 : above == T_WATER ? 44 :
-                        wall_like(above) || door_tile(above) ? 43 : 41;
+        const int idx = chasm_atlas_tile(above);
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
                         x * 16.0f, y * 16.0f, z, camx, camy);
       } else if (tt == T_WATER) {
@@ -417,8 +428,11 @@ static void draw_map() {
         // The atlas contains transparent shoreline overlays, not the water.
         const int shore = water_shore(x, y - 1) | (water_shore(x + 1, y) << 1) |
                           (water_shore(x, y + 1) << 2) | (water_shore(x - 1, y) << 3);
-        if (shore) draw_tile_world(A_tiles[G.region()], shore * 16, 32,
-                                   x * 16.0f, y * 16.0f, z, camx, camy);
+        if (shore) {
+          const int idx = WATER_ATLAS + shore;
+          draw_tile_world(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                          x * 16.0f, y * 16.0f, z, camx, camy);
+        }
       } else {
         int idx = 0;
         if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;

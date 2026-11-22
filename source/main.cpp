@@ -905,6 +905,9 @@ int main() {
           }
           G.tiles[3][4] = T_GRASS;
           G.tiles[8][4] = T_FLOOR;
+          // Inspect the water-to-chasm lip alongside a normal floor lip.
+          for (int x = 4; x <= 7; ++x)
+            G.tiles[9][x] = G.tiles[10][x] = T_CHASM;
           G.pvx = G.cursor_x = G.px = 8;
           G.pvy = G.cursor_y = G.py = 9;
           G.zoom = G.zoom_target = want == 93 ? 1.f : 1.33f;

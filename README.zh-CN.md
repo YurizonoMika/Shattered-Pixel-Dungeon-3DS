@@ -8,12 +8,12 @@
 
 ## 下载和安装
 
-当前版本：[v0.1.4alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.4alpha)。新增六种连接房和三种普通房的原版地形。深渊沿用原版边缘材质、不可步行，暂不能跳下。现有存档仍可读取。
+当前版本：[v0.1.5alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.5alpha)。修复深渊误用水岸图块而出现的条纹，水面动画和存档不受影响。深渊仍不可步行，暂不能跳下。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.5alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.5alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
