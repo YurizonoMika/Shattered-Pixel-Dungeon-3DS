@@ -2,6 +2,7 @@
 #include "floor_layout.h"
 #include "floor_maze.h"
 #include "floor_patch.h"
+#include "floor_painter.h"
 #include "floor_rooms.h"
 #include "pathfinder.h"
 
@@ -755,9 +756,10 @@ void Game::gen_level() {
   auto layout_rng = floor_random(seed, floor);
   const Shape shape = select_shape(layout_rng);
   Layout layout;
+  std::vector<RoomInput> standard;
   layout_builder = 0;
   if (!boss_floor) {
-    const auto standard = standard_room_inputs(layout_rng, floor, large);
+    standard = standard_room_inputs(layout_rng, floor, large);
     std::vector<Spec> specs;
     specs.reserve(standard.size() + nspec + nsecret + int(shop) + int(quest_extra));
     for (const auto& r : standard) specs.push_back(r.spec);
@@ -810,60 +812,67 @@ void Game::gen_level() {
     }
     auto paint_order = layout.order;
     layout_rng.shuffle(paint_order);
-    std::vector<std::vector<Point>> doors(rooms.size());
-    std::vector<std::vector<bool>> placed(rooms.size(), std::vector<bool>(rooms.size()));
+    const Point unplaced{-1,-1};
+    std::vector<std::vector<Point>> doors(rooms.size(), std::vector<Point>(rooms.size(),unplaced));
+    struct DoorTile { Point cell; uint8_t tile; };
+    std::vector<DoorTile> door_tiles;
     for (int a : paint_order) for (int b : layout.rooms[a].links) {
-      if (placed[a][b]) continue;
-      placed[a][b] = placed[b][a] = true;
+      if (doors[a][b].x >= 0) continue;
       const Point d = choose_door(layout.rooms[a], layout.rooms[b], layout_rng);
-      doors[a].push_back(d); doors[b].push_back(d);
+      doors[a][b] = doors[b][a] = d;
       const uint8_t tile = rooms[a].locked || rooms[b].locked ? T_DOOR_LOCKED :
           rooms[a].kind == RK_SECRET || rooms[b].kind == RK_SECRET ||
           layout.rooms[a].type == Maze || layout.rooms[b].type == Maze ? T_SECRET :
           rooms[a].kind == RK_CONNECTOR && rooms[b].kind == RK_CONNECTOR ? T_FLOOR : T_DOOR;
-      tiles[d.y][d.x] = tile;
+      door_tiles.push_back({d,tile});
       for (int id : {a,b}) if (rooms[id].kind >= RK_SPECIAL && rooms[id].kind < RK_CONNECTOR) {
         rooms[id].door_x = d.x; rooms[id].door_y = d.y;
       }
     }
-    auto line = [&](Point a, Point b) {
-      for (int y = std::min(a.y,b.y); y <= std::max(a.y,b.y); ++y)
-        for (int x = std::min(a.x,b.x); x <= std::max(a.x,b.x); ++x) tiles[y][x] = T_FLOOR;
+    auto copy_interior = [&](RoomPaint&& paint) {
+      const auto p = paint.box;
+      for (int y = p.t+1; y < p.b; ++y) for (int x = p.l+1; x < p.r; ++x) {
+        const auto t = paint.at({x,y});
+        tiles[y][x] = t == Paint::Wall ? T_WALL : t == Paint::Chasm ? T_CHASM : T_FLOOR;
+      }
     };
-    for (int i : paint_order) if (rooms[i].kind == RK_CONNECTOR && !doors[i].empty()) {
+    for (int i : paint_order) {
       const auto& r = layout.rooms[i];
       const auto p = r.box;
+      if (rooms[i].kind != RK_CONNECTOR &&
+          (rooms[i].kind != RK_STANDARD || !has_standard_painter(standard[i].type))) continue;
+      std::vector<Point> points;
+      for (int n : r.links) points.push_back(doors[i][n]);
+      if (rooms[i].kind == RK_STANDARD) {
+        copy_interior(paint_standard(p,standard[i].type,r.spec.factor,points,layout_rng));
+        continue;
+      }
       if (r.type == Maze) {
-        auto mask = maze(p,doors[i],layout_rng);
+        auto mask = maze(p,points,layout_rng);
         if (p.w() >= 5 && p.h() >= 5 && (p.w() <= 7 || p.h() <= 7)) {
           // Upstream retries small mazes until the central cell is a wall.
           const int center = (p.h()/2)*p.w()+p.w()/2;
           for (int retry = 0; retry < 16 && !mask[center]; ++retry)
-            mask = maze(p,doors[i],layout_rng);
+            mask = maze(p,points,layout_rng);
         }
         for (int y = p.t+1; y < p.b; ++y)
           for (int x = p.l+1; x < p.r; ++x)
             if (!mask[(y-p.t)*p.w()+x-p.l]) tiles[y][x] = T_FLOOR;
         continue;
       }
-      Point center{};
-      for (auto d : doors[i]) { center.x += d.x; center.y += d.y; }
-      const int radius = r.type == RingTunnel || r.type == RingBridge ? 1 : 0;
-      center.x = std::clamp(center.x / int(doors[i].size()),p.l+1+radius,p.r-1-radius);
-      center.y = std::clamp(center.y / int(doors[i].size()),p.t+1+radius,p.b-1-radius);
-      for (auto d : doors[i]) {
-        const bool side = d.x == p.l || d.x == p.r;
-        Point start{std::clamp(d.x,p.l+1,p.r-1), std::clamp(d.y,p.t+1,p.b-1)};
-        const Point end{std::clamp(start.x,center.x-radius,center.x+radius),
-                        std::clamp(start.y,center.y-radius,center.y+radius)};
-        const Point bend = side ? Point{end.x,start.y} : Point{start.x,end.y};
-        line(start,bend); line(bend,end);
-      }
-      if (radius) {
-        line({center.x-1,center.y-1},{center.x+1,center.y+1});
-        tiles[center.y][center.x] = T_WALL;
+      copy_interior(paint_connector(p,r.type,points,layout_rng));
+      if (chasm_connector(r.type)) for (int n : r.neighbors) {
+        const auto& other = layout.rooms[n];
+        if (!chasm_connector(other.type)) continue;
+        const auto q = other.box;
+        Rect edge{std::max(p.l,q.l),std::max(p.t,q.t),std::min(p.r,q.r),std::min(p.b,q.b)};
+        if (edge.l == edge.r) { ++edge.t; --edge.b; }
+        else { ++edge.l; --edge.r; }
+        for (int y = edge.t; y <= edge.b; ++y) for (int x = edge.l; x <= edge.r; ++x)
+          tiles[y][x] = T_CHASM;
       }
     }
+    for (const auto& d : door_tiles) tiles[d.cell.y][d.cell.x] = d.tile;
   } else {
   int required = 2 + nstd + nspec + nsecret + (shop_here ? 1 : 0) +
                  (imp_shop ? 1 : 0) + (quest_extra ? 1 : 0);
@@ -1493,7 +1502,7 @@ void Game::debug_dump() {
   bool seen2[MH][MW] = {};
   for (int y = 0; y < MH; y++)
     for (int x = 0; x < MW; x++) {
-      if (seen2[y][x] || tiles[y][x] == T_WALL || tiles[y][x] == T_SECRET)
+      if (seen2[y][x] || tiles[y][x] == T_WALL || tiles[y][x] == T_SECRET || tiles[y][x] == T_CHASM)
         continue;
       int n = 0, sx = x, sy = y;
       std::vector<std::pair<int, int>> st{{x, y}};
@@ -1506,7 +1515,7 @@ void Game::debug_dump() {
           if (nx < 0 || ny < 0 || nx >= MW || ny >= MH || seen2[ny][nx])
             continue;
           uint8_t tt = tiles[ny][nx];
-          if (tt == T_WALL || tt == T_SECRET) continue;
+          if (tt == T_WALL || tt == T_SECRET || tt == T_CHASM) continue;
           seen2[ny][nx] = true;
           st.push_back({nx, ny});
         }
@@ -1529,6 +1538,7 @@ void Game::debug_dump() {
         if (tt == T_FLOOR) c = '.';
         else if (tt == T_GRASS) c = ',';
         else if (tt == T_WATER) c = '~';
+        else if (tt == T_CHASM) c = 'O';
         else if (tt == T_DOOR) c = '+';
         else if (tt == T_DOOR_OPEN) c = '\'';
         else if (tt == T_DOOR_LOCKED) c = 'L';

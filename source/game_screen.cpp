@@ -406,6 +406,12 @@ static void draw_map() {
                           (idx / 16) * 16, x * 16.0f, y * 16.0f, z, camx, camy,
                           tint);
         }
+      } else if (tt == T_CHASM) {
+        const uint8_t above = y > 0 ? G.tiles[y-1][x] : T_CHASM;
+        const int idx = above == T_CHASM ? 40 : above == T_WATER ? 44 :
+                        wall_like(above) || door_tile(above) ? 43 : 41;
+        draw_tile_world(A_tiles[G.region()], (idx % 16) * 16, (idx / 16) * 16,
+                        x * 16.0f, y * 16.0f, z, camx, camy);
       } else if (tt == T_WATER) {
         draw_water_world(A_water[G.region()], x, y, cell, camx, camy);
         // The atlas contains transparent shoreline overlays, not the water.

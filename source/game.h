@@ -19,6 +19,7 @@ enum TileType : uint8_t {
   T_GRASS,
   T_DOOR_OPEN,  // walkable, still drawn as a door frame
   T_DOOR_LOCKED,// needs a key
+  T_CHASM,      // visible across, not traversable until floor returns exist
 };
 
 

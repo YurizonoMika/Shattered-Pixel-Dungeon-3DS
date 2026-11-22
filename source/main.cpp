@@ -802,6 +802,7 @@ int main() {
           int bad = 0;
           int rule_failures = 0;
           int variable_maps = 0, largest_width = 0, largest_height = 0;
+          int chasm_maps = 0;
           int builders[3]{};
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
@@ -829,8 +830,16 @@ int main() {
                   }
               }
               int doors = 0, chests = 0, crystal_chests = 0, iron = 0, golden = 0, crystal = 0;
+              bool chasm = false, crossed_chasm = false;
               for (int y = 0; y < MH; ++y)
-                for (int x = 0; x < MW; ++x) doors += G.tiles[y][x] == T_DOOR_LOCKED;
+                for (int x = 0; x < MW; ++x) {
+                  doors += G.tiles[y][x] == T_DOOR_LOCKED;
+                  if (G.tiles[y][x] == T_CHASM) {
+                    chasm = true;
+                    crossed_chasm |= reached[y][x] || G.walkable(x, y);
+                  }
+                }
+              chasm_maps += chasm;
               for (const Feature& f : G.features) {
                 chests += f.type == F_CHEST_LOCKED;
                 crystal_chests += f.type == F_CHEST_CRYSTAL;
@@ -854,7 +863,7 @@ int main() {
                 if (it.id == IT_SCROLL_UP && reached[it.y][it.x]) ++upgrades;
                 if (G.mob_at(it.x, it.y) >= 0) overlapping = true;
               }
-              if (overlapping || (floor == 1 && sleeping != 8) ||
+              if (overlapping || crossed_chasm || (floor == 1 && sleeping != 8) ||
                   (floor % 5 == 0 && (regular || strength < 2 || upgrades < 3 || !G.boss_alive())) ||
                   (floor % 5 != 0 && food < (G.plan_feeling[floor - 1] == 3 ? 2 : 1))) {
                 ++rule_failures;
@@ -874,6 +883,7 @@ int main() {
           dlog("[floor rules] 800 maps, %d failures", rule_failures);
           dlog("[layout] non-legacy dimensions=%d/640 max width=%d max height=%d", variable_maps, largest_width, largest_height);
           dlog("[layout] loop=%d figure-eight=%d fallback=%d", builders[1], builders[2], builders[0]);
+          dlog("[terrain] %d maps with non-walkable chasms", chasm_maps);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
@@ -903,6 +913,32 @@ int main() {
           dlog("[water] region=%d loaded=%d texture=%dx%d", G.region(), water.ok(),
                water.ok() ? water.tex->width : 0, water.ok() ? water.tex->height : 0);
         }
+        else if (want == 98) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          int best = 0, bx = G.px, by = G.py;
+          for (int floor : {7, 8, 9, 12, 13, 14, 17, 18, 19, 22, 23, 24}) {
+            G.floor = floor;
+            G.gen_level();
+            best = 0; bx = G.px; by = G.py;
+            for (int y = 1; y < G.map_height - 1; ++y) for (int x = 1; x < G.map_width - 1; ++x) {
+              if (!G.walkable(x, y) || G.tiles[y][x] != T_FLOOR || G.mob_at(x, y) >= 0) continue;
+              int chasms = 0;
+              for (int dy = -5; dy <= 5; ++dy) for (int dx = -5; dx <= 5; ++dx)
+                chasms += G.in_map(x+dx,y+dy) && G.tiles[y+dy][x+dx] == T_CHASM;
+              if (chasms > best) { best = chasms; bx = x; by = y; }
+            }
+            if (best >= 8) break;
+          }
+          G.pvx = G.cursor_x = G.px = bx;
+          G.pvy = G.cursor_y = G.py = by;
+          for (int y = 0; y < G.map_height; ++y) for (int x = 0; x < G.map_width; ++x)
+            G.seen[y][x] = G.vis[y][x] = std::abs(x-bx) <= 8 && std::abs(y-by) <= 6;
+          G.camx = bx * 16 - TOP_W / 2;
+          G.camy = by * 16 - TOP_H / 2;
+          G.demo_lock = true;
+          dlog("[chasm preview] floor=%d near=%d player=(%d,%d)", G.floor, best, bx, by);
+        }
         else if (want == 92) {
           G.new_run(0, 0x12345678);
           SCENE = Scene::GAME;
@@ -913,6 +949,7 @@ int main() {
           for (int y = 5; y < 12; ++y)
             for (int x = 39; x < 47; ++x) G.tiles[y][x] = T_FLOOR;
           G.tiles[8][43] = T_DOOR_LOCKED;
+          G.tiles[8][44] = T_CHASM;
           G.features.push_back({42, 7, F_CHEST_LOCKED, 0, 0, IT_GOLD, 0, 10});
           G.features.push_back({41, 7, F_CHEST_CRYSTAL, 0, 0, IT_POTION_HEAL});
           G.features.push_back({41, 8, F_CHEST_CRYSTAL, 0, 0, IT_SCROLL_MAP});
@@ -939,7 +976,8 @@ int main() {
           G.map_width = G.map_height = LEGACY_MAP_SIZE;
           bool loaded = saved && G.load(92) && G.map_width == 48 && G.map_height == 14 &&
               G.px == 42 && G.golden_keys == 2 && G.crystal_keys == 0 &&
-              G.loot_remaining[3] == 1 && G.features[3].type == F_TRAP_DISARMED;
+              G.loot_remaining[3] == 1 && G.features[3].type == F_TRAP_DISARMED &&
+              G.tiles[8][44] == T_CHASM && !G.walkable(44, 8) && !G.blocks_sight(44, 8);
           if (saved) remove(DATA_DIR "/slot92.bin");
           dlog("[interactions] gold=%d iron=%d crystal=%d trap=%d save=%d", gold_lock, door, crystal, trap, loaded);
           G.cursor_x = G.px; G.cursor_y = G.py;

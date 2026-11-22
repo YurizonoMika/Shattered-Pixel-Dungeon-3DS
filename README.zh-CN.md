@@ -8,12 +8,12 @@
 
 ## 下载和安装
 
-当前版本：[v0.1.3alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.3alpha)。普通层的入口、出口和普通房已采用 v4.0.2 的房型权重、尺寸和门位约束；存档格式未变。
+当前版本：[v0.1.4alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.4alpha)。新增六种连接房和三种普通房的原版地形。深渊沿用原版边缘材质、不可步行，暂不能跳下。现有存档仍可读取。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.4alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
@@ -33,7 +33,8 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 - 回合制移动与战斗、装备和消耗品、快捷栏、商店买卖与回购、任务、炼金及简化天赋。铁钥匙、金钥匙和水晶钥匙各有对应的锁；搜索能揭示暗门和陷阱，但不会解除陷阱。
 - 普通层使用移植自 v4.0.2 的单环和双环构建器，支持可变尺寸布局、支路、连接房与迷宫。水草区域使用原版斑块算法和五个区域的参数。普通层会投放食物，大型楼层额外投放一份。
 - 地图有可见、已探索、卷轴揭示和未探索四种雾状态。门离开后在无人或物品占用时自动关闭。墙体和侧门使用独立前景素材；水纹以每秒 5 像素滚动，岸边和雾叠加在水面之上。
-- 目前**不能用相同种子复现原版整层地图**。普通房内部绘制、特殊房和暗房抽选、任务房生成、首领阶段和任务子地图仍未完整移植。已验证的范围见 [v4.0.2 楼层机制对照（英文）](docs/floor-mechanics-parity.md)。
+- 隧道、周边走廊、环形通道和深渊桥分别按原版绘制；柱阵房、隔间房和圆墙房已有各自的内部地形。
+- 目前**不能用相同种子复现原版整层地图**。其余房间内部绘制、特殊房和暗房抽选、任务房生成、首领阶段和任务子地图仍未完整移植。已验证的范围见 [v4.0.2 楼层机制对照（英文）](docs/floor-mechanics-parity.md)。
 
 | 层数 | 区域 | 首领 |
 | --- | --- | --- |
@@ -88,7 +89,7 @@ make cia  # 可选，需要 makerom
 ## 实现与调试
 
 - `source/game.cpp` 负责楼层生成、回合、寻路调用和存档，`source/game_screen.cpp` 负责双屏渲染。`gfx/` 存放素材，构建时由 `tex3ds` 打包。角色、地图和字库采用最近邻采样，保留像素边缘。
-- 可在 `sdmc:/3ds/spd/scene.txt` 写入场景编号后重启：`85/86` 检查门与缩放，`87` 检查 800 层生成，`88` 检查寻路，`91` 检查补怪，`92` 检查钥匙、陷阱与存读档，`93–97` 检查五个区域的水纹和雾。Azahar 的日志位于 `~/Library/Application Support/Azahar/sdmc/3ds/spd/log.txt`；完整场景表见[英文 README](README.md#debug)。
+- 可在 `sdmc:/3ds/spd/scene.txt` 写入场景编号后重启：`85/86` 检查门与缩放，`87` 检查 800 层生成，`88` 检查寻路，`91` 检查补怪，`92` 检查钥匙、陷阱与存读档，`93–97` 检查五个区域的水纹和雾，`98` 预览生成的深渊通道。Azahar 的日志位于 `~/Library/Application Support/Azahar/sdmc/3ds/spd/log.txt`；完整场景表见[英文 README](README.md#debug)。
 - `bash tools/check-floor-layout.sh ../spd-upstream` 用相同输入对照 v4.0.2 的房间构建、斑块和迷宫；`bash tools/check-pathfinder.sh ../spd-upstream` 对照寻路。Java 只用于在电脑上跑对照测试，不参与游戏构建或运行。
 
 ## 开发计划

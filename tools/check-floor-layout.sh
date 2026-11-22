@@ -130,3 +130,29 @@ java -cp "$scratch/classes" RoomOracle > "$scratch/java-rooms.txt"
 "$scratch/room-native" > "$scratch/native-rooms.txt"
 diff -u "$scratch/java-rooms.txt" "$scratch/native-rooms.txt"
 printf '2,000 regular-floor prefixes match v4.0.2 (ordered room types, sizes, door candidates and RNG state)\n'
+
+# Use the original painter methods with a small in-memory level. This pass
+# replaces the layout fixtures; it does not run the full RegularPainter.
+for file in painters/Painter rooms/connection/{Connection,Tunnel,Bridge,Perimeter,Walkway,RingTunnel,RingBridge,MazeConnection}Room rooms/standard/{Pillars,Segmented,CircleWall}Room; do
+  git -C "$upstream" show "$ref:$level_src/$file.java" > "$scratch/java/$dir/levels/$file.java"
+done
+git -C "$upstream" show "$ref:SPD-classes/src/main/java/$utils/PathFinder.java" > "$scratch/java/$utils/PathFinder.java"
+stub com.watabou.utils BArray 'public class BArray {
+    public static void setFalse(boolean[] a) { java.util.Arrays.fill(a, false); }
+}'
+stub "$game.levels" Level 'public class Level {
+    public int[] map = new int[32*32];
+    public int width() { return 32; }
+    public int tunnelTile() { return Terrain.EMPTY; }
+    public int pointToCell(com.watabou.utils.Point p) { return p.x+p.y*width(); }
+}'
+stub "$game.levels" Terrain 'public class Terrain {
+    public static final int WALL = 0, EMPTY = 1, CHASM = 2;
+}'
+find "$scratch/java" -name '*.java' -print > "$scratch/sources.txt"
+javac -d "$scratch/classes" @"$scratch/sources.txt" tools/floor-layout/PainterOracle.java
+java -cp "$scratch/classes" PainterOracle > "$scratch/java-painter.txt"
+"${CXX:-c++}" -std=c++17 -O2 -ffp-contract=off -Isource tools/floor-layout/painter-native.cpp -o "$scratch/painter-native"
+"$scratch/painter-native" > "$scratch/native-painter.txt"
+diff -u "$scratch/java-painter.txt" "$scratch/native-painter.txt"
+printf '1,800 room painters match v4.0.2 (six connectors, three standard rooms, terrain and RNG state)\n'
