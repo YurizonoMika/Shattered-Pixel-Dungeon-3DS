@@ -32,6 +32,8 @@ static C3D_RenderTarget* g_bot = nullptr;
 static int g_menu_sel = 0;
 static int g_set_tab = 0, g_set_row = 0;
 static int g_save_sel = 0;
+static int g_delete_slot = -1, g_new_slot = -1;
+static bool g_delete_failed = false;
 static int g_hero_sel = 0, g_hero_arm = -1;
 static bool g_hero_info = false;
 static int g_rank_scroll = 0;
@@ -85,15 +87,6 @@ void slots_load(SlotMeta slots[3]) {
     if (Game::slot_meta(i, m)) slots[i] = m;
     else slots[i] = SlotMeta{};
   }
-}
-void slot_save(int i, const SlotMeta& m) {
-  ensure_dir();
-  char path[64];
-  snprintf(path, sizeof(path), DATA_DIR "/slot%d.bin", i);
-  FILE* f = fopen(path, "wb");
-  if (!f) return;
-  fwrite(&m, sizeof(SlotMeta), 1, f);
-  fclose(f);
 }
 void scores_load(std::vector<ScoreEntry>& out) {
   ensure_dir();
@@ -271,11 +264,20 @@ static void draw_logo(float scale, float y) {
   draw_rect_src(A_banners, 0, 100, 240, 57, (TOP_W - w) / 2, y, w, h);
 }
 
+static int first_empty_slot() {
+  for (int i = 0; i < 3; ++i) if (!SLOTS[i].used) return i;
+  return -1;
+}
+
+static constexpr int DELETE_X = 86, DELETE_Y = 72, DELETE_W = 54, DELETE_H = 22;
+
 static void draw_slot(int i, float x, float y, float w, float h, bool focused) {
   draw_panel(x, y, w, h, 1.0f);
   if (i == 3) {
     draw_icon(96, 32, 11, 11, x + w / 2 - 16, y + 16, 3.0f, CLR_YELLOW);
-    text_c("新游戏", x, w, y + 60, focused ? CLR_YELLOW : CLR_WHITE, 1.0f);
+    const bool full = first_empty_slot() < 0;
+    text_c(full ? "存档已满" : "新游戏", x, w, y + 60,
+           full ? CLR_GREY : focused ? CLR_YELLOW : CLR_WHITE, 1.0f);
   } else if (!SLOTS[i].used) {
     text_c("空存档位", x, w, y + 34, CLR_GREY, 1.0f);
     text_c("按 A 开始新游戏", x, w, y + 56, C2D_Color32(196, 196, 204, 255), 1.0f);
@@ -283,6 +285,7 @@ static void draw_slot(int i, float x, float y, float w, float h, bool focused) {
     const SlotMeta& m = SLOTS[i];
     draw_hero_portrait(m.hero, x + 8, y + 8, 1.0f);
     text(HERO_NAMES[m.hero % 6], x + 44, y + 8, CLR_WHITE, 1.0f);
+    textf(x + w - 26, y + 8, CLR_GREY, 1.0f, "#%d", i + 1);
     textf(x + 44, y + 24, CLR_GREY, 1.0f, "第 %d 层 · Lv%d", m.depth, m.level);
     // HP bar
     float bw = w - 20;
@@ -291,7 +294,8 @@ static void draw_slot(int i, float x, float y, float w, float h, bool focused) {
     if (frac < 0) frac = 0;
     draw_box(x + 10, y + 46, bw * frac, 8, C2D_Color32(200, 40, 40, 255));
     textf(x + 10, y + 60, CLR_GREY, 1.0f, "HP %d/%d", m.hp, m.maxhp);
-    textf(x + w - 76, y + h - 20, CLR_YELLOW, 1.0f, "分数 %d", m.score);
+    textf(x + 10, y + 77, CLR_YELLOW, 1.0f, "分数 %d", m.score);
+    draw_button(x + DELETE_X, y + DELETE_Y, DELETE_W, DELETE_H, "删除", false, 1.0f);
   }
   if (focused) draw_cursor(x + 1, y + 1, w - 2, h - 2, CLR_YELLOW);
 }
@@ -362,6 +366,8 @@ void go_scene(Scene s) {
     g_set_row = 0;
   } else if (s == Scene::SAVES) {
     g_save_sel = 0;
+    g_delete_slot = g_new_slot = -1;
+    g_delete_failed = false;
   } else if (s == Scene::HEROES) {
     g_hero_sel = 0;
     g_hero_arm = -1;
@@ -370,13 +376,15 @@ void go_scene(Scene s) {
 }
 
 void start_new_game(int hero) {
+  const int slot = g_new_slot >= 0 && !SLOTS[g_new_slot].used ? g_new_slot : first_empty_slot();
+  if (slot < 0) {
+    go_scene(Scene::SAVES);
+    return;
+  }
   dlog("start_new_game %d", hero);
   G.new_run(hero, (uint32_t)(osGetTime() & 0xFFFFFFFF));
-  ACTIVE_SLOT = -1;
-  for (int i = 0; i < 3; i++) {
-    if (!SLOTS[i].used) { ACTIVE_SLOT = i; break; }
-  }
-  if (ACTIVE_SLOT < 0) ACTIVE_SLOT = 0;
+  g_new_slot = -1;
+  ACTIVE_SLOT = slot;
   G.save(ACTIVE_SLOT);
   SLOTS[ACTIVE_SLOT] = G.meta();
   dlog("start_new_game done floor=%d", G.floor);
@@ -397,8 +405,7 @@ void leave_game_to_saves(bool save) {
     G.save(ACTIVE_SLOT);
     SLOTS[ACTIVE_SLOT] = G.meta();
   }
-  SCENE = Scene::SAVES;
-  g_save_sel = 0;
+  go_scene(Scene::SAVES);
 }
 
 void record_run_end(bool victory) {
@@ -409,9 +416,8 @@ void record_run_end(bool victory) {
   e.stamp = (uint32_t)(osGetTime() / 1000);
   scores_add(e);
   if (ACTIVE_SLOT >= 0) {
-    SlotMeta empty{};
-    SLOTS[ACTIVE_SLOT] = empty;
-    slot_save(ACTIVE_SLOT, empty);
+    if (Game::delete_slot(ACTIVE_SLOT)) SLOTS[ACTIVE_SLOT] = {};
+    else dlog("Could not remove completed save slot %d", ACTIVE_SLOT + 1);
   }
   ACTIVE_SLOT = -1;
 }
@@ -543,22 +549,57 @@ static void settings_draw_bottom() {
 // ---------------------------------------------------------------------------
 // Saves
 // ---------------------------------------------------------------------------
+static void open_save_slot(int slot) {
+  if (slot < 3 && SLOTS[slot].used) {
+    load_slot(slot);
+    return;
+  }
+  const int empty = slot < 3 ? slot : first_empty_slot();
+  if (empty < 0) return;
+  g_new_slot = empty;
+  go_scene(Scene::HEROES);
+}
+
+static constexpr int CONFIRM_Y = 136, CONFIRM_W = 108, CONFIRM_H = 36;
+static constexpr int CANCEL_X = 42, CONFIRM_X = 170;
+
 static void saves_update() {
+  if (g_delete_slot >= 0) {
+    if (IN.pressed(KEY_B) || (IN.tap && in_rect(IN.tap_x, IN.tap_y, CANCEL_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H))) {
+      g_delete_slot = -1;
+    } else if (IN.pressed(KEY_A) || (IN.tap && in_rect(IN.tap_x, IN.tap_y, CONFIRM_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H))) {
+      if (Game::delete_slot(g_delete_slot)) {
+        SLOTS[g_delete_slot] = {};
+        if (ACTIVE_SLOT == g_delete_slot) ACTIVE_SLOT = -1;
+        g_delete_slot = -1;
+      } else {
+        g_delete_failed = true;
+      }
+    }
+    return;
+  }
   if (IN.pressed(KEY_B)) { go_scene(Scene::TITLE); return; }
   if (IN.dx) g_save_sel = (g_save_sel % 2 == 0) ? g_save_sel + 1 : g_save_sel - 1;
   if (IN.dy) g_save_sel = (g_save_sel + 2) % 4;
-  if (IN.pressed(KEY_A)) {
-    if (g_save_sel == 3) { go_scene(Scene::HEROES); }
-    else if (SLOTS[g_save_sel].used) load_slot(g_save_sel);
-    else go_scene(Scene::HEROES);
+  if (IN.pressed(KEY_X)) {
+    if (g_save_sel < 3 && SLOTS[g_save_sel].used) {
+      g_delete_slot = g_save_sel;
+      g_delete_failed = false;
+    }
+    return;
   }
+  if (IN.pressed(KEY_A)) { open_save_slot(g_save_sel); return; }
   if (IN.tap) {
     for (int i = 0; i < 4; i++) {
       float x = 5 + (i % 2) * 160, y = 4 + (i / 2) * 104;
       if (in_rect(IN.tap_x, IN.tap_y, x, y, 150, 98)) {
         g_save_sel = i;
-        if (i == 3 || !SLOTS[i].used) go_scene(Scene::HEROES);
-        else load_slot(i);
+        if (i < 3 && SLOTS[i].used && in_rect(IN.tap_x, IN.tap_y, x + DELETE_X, y + DELETE_Y, DELETE_W, DELETE_H)) {
+          g_delete_slot = i;
+          g_delete_failed = false;
+        } else {
+          open_save_slot(i);
+        }
         return;
       }
     }
@@ -569,17 +610,32 @@ static void saves_draw_top() {
   draw_bg(false);
   draw_icon(0, 48, 16, 16, TOP_W / 2 - 40, 24, 5.0f);
   text_c("进行中的游戏", 0, TOP_W, 112, CLR_YELLOW, 2.0f);
-  text_c("选择一个存档继续，或开始新的冒险", 0, TOP_W, 142, CLR_GREY, 1.0f);
-  draw_top_hint("B 返回主菜单");
+  const bool full = first_empty_slot() < 0;
+  text_c(full ? "存档已满，删除后可开始新游戏" : "选择一个存档继续，或开始新的冒险",
+         0, TOP_W, 142, CLR_GREY, 1.0f);
+  draw_top_hint(g_delete_slot >= 0 ? "B 取消" : "B 返回主菜单");
 }
 
 static void saves_draw_bottom() {
   draw_bg(true);
+  if (g_delete_slot >= 0) {
+    const SlotMeta& slot = SLOTS[g_delete_slot];
+    draw_panel(22, 52, 276, 134, 1.0f);
+    char label[96];
+    snprintf(label, sizeof(label), "删除存档 %d？", g_delete_slot + 1);
+    text_c(label, 22, 276, 66, CLR_YELLOW, 1.0f);
+    snprintf(label, sizeof(label), "%s · 第 %d 层 · Lv%d", HERO_NAMES[slot.hero % 6], slot.depth, slot.level);
+    text_c(label, 22, 276, 88, CLR_WHITE, 1.0f);
+    text_c(g_delete_failed ? "删除失败，可再次确认" : "删除后无法恢复", 22, 276, 110, CLR_RED, 1.0f);
+    draw_button(CANCEL_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H, "B 取消", false, 1.0f);
+    draw_button(CONFIRM_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H, "A 删除", false, 1.0f);
+    return;
+  }
   for (int i = 0; i < 4; i++) {
     float x = 5 + (i % 2) * 160, y = 4 + (i / 2) * 104;
     draw_slot(i, x, y, 150, 98, g_save_sel == i);
   }
-  text_c("A 载入 / 新建", 0, BOT_W, 214, CLR_GREY, 1.0f);
+  text_c("A 载入 / 新建    X 删除", 0, BOT_W, 214, CLR_GREY, 1.0f);
 }
 
 // ---------------------------------------------------------------------------

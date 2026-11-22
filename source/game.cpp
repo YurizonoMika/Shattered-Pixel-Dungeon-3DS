@@ -9,8 +9,10 @@
 void dlog(const char* fmt, ...);
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <unistd.h>
 
 static inline uint32_t rnd(Game& g) {
   g.rng ^= g.rng << 13;
@@ -3338,6 +3340,13 @@ struct MapDisk {
 
 static void slot_path(int slot, char* out, size_t n) {
   snprintf(out, n, SPD_DATA_DIR "/slot%d.bin", slot);
+}
+
+bool Game::delete_slot(int slot) {
+  if (slot < 0 || slot >= 3) return false;
+  char path[64];
+  slot_path(slot, path, sizeof(path));
+  return unlink(path) == 0 || errno == ENOENT;
 }
 
 SlotMeta Game::meta() const {

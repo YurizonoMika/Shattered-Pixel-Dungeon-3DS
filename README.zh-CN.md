@@ -12,8 +12,8 @@ v0.1.7alpha 为武器攻击加入命中和闪避判定，护甲可以完全抵�
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.8alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.8alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.9alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.9alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
@@ -53,6 +53,7 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 | 场景 | 按键 |
 | --- | --- |
 | 菜单 | 十字键或摇杆移动，**A** 确认，**B** 返回；下屏支持触控。 |
+| 存档选择 | 选中已有存档后按 **X**，或点下屏的「删除」。按 **A** 确认永久删除，按 **B** 取消，也可触屏选择。新游戏需要空槽位。 |
 | 英雄选择 | **A** 选中，再按 **A** 开始；**X** 查看英雄说明。 |
 | 地图 | 十字键或摇杆移动光标，**A** 走向光标，**Y** 交互。 |
 | 游戏快捷操作 | **B / START** 暂停，**X** 背包；按住 **L / R** 缩小或放大（0.75×–2×）；**ZL / ZR** 等待或搜索，也可点下屏按钮。 |

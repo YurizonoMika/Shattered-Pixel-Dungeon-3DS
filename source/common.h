@@ -1,6 +1,6 @@
 #pragma once
 
-#define SPD3DS_VERSION "0.1.8alpha"
+#define SPD3DS_VERSION "0.1.9alpha"
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -159,7 +159,6 @@ struct ScoreEntry {
 void settings_load(Settings& s);
 void settings_save(const Settings& s);
 void slots_load(SlotMeta slots[3]);
-void slot_save(int i, const SlotMeta& m);
 void scores_load(std::vector<ScoreEntry>& out);
 void scores_add(const ScoreEntry& e);
 

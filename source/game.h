@@ -354,4 +354,5 @@ struct Game {
   bool save(int slot) const;
   bool load(int slot);
   static bool slot_meta(int slot, SlotMeta& out);
+  static bool delete_slot(int slot);
 };
