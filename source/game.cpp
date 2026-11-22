@@ -22,6 +22,23 @@ static inline int ri(Game& g, int a, int b) {
   if (b < a) return a;
   return a + (int)(rnd(g) % (uint32_t)(b - a + 1));
 }
+static float combat_roll(Game& g) {
+  return (rnd(g) >> 8) * (1.0f / 16777216.0f);
+}
+static bool attack_hits(Game& g, float accuracy, float evasion) {
+  const float attack = combat_roll(g) * accuracy;
+  const float defense = combat_roll(g) * evasion;
+  return attack >= defense;
+}
+static int damage_reduction(Game& g, int maximum) {
+  if (maximum <= 0) return 0;
+  const float first = combat_roll(g), second = combat_roll(g);
+  return int((first + second) * (maximum + 1) * 0.5f);
+}
+static int ring_bonus(const Game& g, uint8_t ring) {
+  return (g.ring1 == ring ? 1 + g.ring1_level : 0) +
+         (g.ring2 == ring ? 1 + g.ring2_level : 0);
+}
 static int absi(int v) { return v < 0 ? -v : v; }
 static int grid_distance(int x, int y, int tx, int ty) {
   return std::max(absi(x - tx), absi(y - ty));
@@ -102,14 +119,6 @@ int Game::ring_atk() const {
   int b = 0;
   if (ring1 == IT_RING_MIGHT) b += 2 + ring1_level;
   if (ring2 == IT_RING_MIGHT) b += 2 + ring2_level;
-  if (ring1 == IT_RING_ACCURACY) b += 1 + ring1_level;
-  if (ring2 == IT_RING_ACCURACY) b += 1 + ring2_level;
-  return b;
-}
-int Game::ring_def() const {
-  int b = 0;
-  if (ring1 == IT_RING_EVASION) b += 1 + ring1_level;
-  if (ring2 == IT_RING_EVASION) b += 1 + ring2_level;
   return b;
 }
 void Game::equip_ring(int idx) {
@@ -625,13 +634,32 @@ uint8_t Game::next_spawn_type() {
   return type;
 }
 
-static Mob make_floor_mob(uint8_t type, int x, int y, Mob::Ai ai) {
+static Mob make_floor_mob(const Game& g, uint8_t type, int x, int y, Mob::Ai ai) {
   Mob m;
   const MobDef& d = mob_def(type);
   m.x = x; m.y = y; m.vx = x; m.vy = y;
   m.type = type; m.hp = m.maxhp = d.hp; m.atk = d.atk; m.def = d.def;
+  if (type == M_MIMIC) {
+    m.hp = m.maxhp = 12 + 4 * g.floor;
+    m.def = 1 + g.floor / 3;
+  }
   m.ai = ai;
   return m;
+}
+
+static int mob_accuracy(const Game& g, const Mob& m) {
+  if (m.type == M_WRAITH) return 10 + g.floor;
+  if (m.type == M_MIMIC) return 6 + g.floor;
+  if (m.type == M_GOO) return 2 * m.hp <= m.maxhp ? 15 : 10;
+  return mob_def(m.type).accuracy;
+}
+
+static int mob_evasion(const Game& g, const Mob& m) {
+  if (m.sleep_t || m.ai == Mob::Sleeping) return 0;
+  if (m.type == M_WRAITH) return 5 * mob_accuracy(g, m);
+  if (m.type == M_MIMIC) return 2 + g.floor / 2;
+  const int base = mob_def(m.type).evasion;
+  return m.type == M_GOO && 2 * m.hp <= m.maxhp ? base * 3 / 2 : base;
 }
 
 static int walk_distances(const Game& g, int16_t (&dist)[MH][MW],
@@ -680,7 +708,7 @@ bool Game::try_respawn() {
       int x = r.x + ri(*this, 1, r.w - 2), y = r.y + ri(*this, 1, r.h - 2);
       if (vis[y][x] || !floor_spawn_cell(*this, x, y, type)) continue;
       if (dist[y][x] >= 12) {
-        mobs.push_back(make_floor_mob(type, x, y, Mob::Wandering));
+        mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Wandering));
         return true;
       }
       break;
@@ -1438,7 +1466,7 @@ void Game::gen_level() {
       for (int i = 0; i < 8; i++) {
         int bx = xr.cx + OFF[i][0], by = xr.cy + OFF[i][1];
         if (floor_spawn_cell(*this, bx, by, REGIONS[reg].boss)) {
-          mobs.push_back(make_floor_mob(REGIONS[reg].boss, bx, by, Mob::Wandering));
+          mobs.push_back(make_floor_mob(*this, REGIONS[reg].boss, bx, by, Mob::Wandering));
           break;
         }
       }
@@ -1462,7 +1490,7 @@ void Game::gen_level() {
         int f = feature_at(x, y);
         if (f >= 0 && (features[f].type == F_TRAP || features[f].type == F_TRAP_FOUND ||
                        features[f].type == F_PLANT)) continue;
-        mobs.push_back(make_floor_mob(type, x, y, Mob::Sleeping));
+        mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Sleeping));
         if (--remaining) type = next_spawn_type();
         return true;
       }
@@ -1792,14 +1820,10 @@ void Game::use_item(int idx) {
         for (int t = 0; t < 20 && made < 3; t++) {
           int x = px + ri(*this, -2, 2), y = py + ri(*this, -2, 2);
           if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
-          if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
-          Mob m;
-          m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
-          m.type = REGIONS[region()].mobs[ri(*this, 0, 3)];
-          const MobDef& md = mob_def(m.type);
-          m.maxhp = md.hp + floor * 2; m.atk = md.atk + floor / 8;
-          m.def = md.def + floor / 10; m.hp = m.maxhp;
-          mobs.push_back(m); made++;
+          const auto type = REGIONS[region()].mobs[ri(*this, 0, 3)];
+          if (!floor_spawn_cell(*this, x, y, type)) continue;
+          mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Wandering));
+          made++;
         }
         message("更多敌人被召唤了出来！");
       } else if (it.id == IT_SCROLL_TRANSMUTE) {
@@ -2016,13 +2040,7 @@ void Game::use_feature(int idx) {
   int tier = region() + 1;
   switch (f.type) {
     case F_CHEST_MIMIC: {
-      Mob m;
-      m.x = f.x; m.y = f.y; m.vx = (float)f.x; m.vy = (float)f.y;
-      m.type = M_MIMIC;
-      m.maxhp = m.hp = mob_def(M_MIMIC).hp;
-      m.atk = mob_def(M_MIMIC).atk;
-      m.def = mob_def(M_MIMIC).def;
-      m.ai = Mob::Hunting;
+      Mob m = make_floor_mob(*this, M_MIMIC, f.x, f.y, Mob::Hunting);
       m.target = py * MW + px;
       f.type = F_MIMIC_LOOT;
       f.aux = (int16_t)mobs.size();
@@ -2083,9 +2101,9 @@ void Game::use_feature(int idx) {
       break;
     case F_TOMB:
       give_loot(tier, true);
-      hp -= 3;
       f.type = F_TOMB_USED;
       message("你撬开了古墓，灰尘让你受了点伤。");
+      take_damage(3);
       advance_turn();
       break;
     case F_PLANT:
@@ -2139,15 +2157,13 @@ void Game::trigger_trap(int idx, Mob* who) {
   }
   f.type = F_TRAP_DISARMED;
   if (who) {
-    damage_mob(int(who - mobs.data()), raw);
+    damage_mob(int(who - mobs.data()), raw, dart ? DamageKind::Physical : DamageKind::Direct);
     return;
   }
-  int dmg = dart ? std::max(0, raw - ri(*this, 0, armor_bonus())) : raw;
+  int dmg = dart ? std::max(0, raw - damage_reduction(*this, armor_bonus())) : raw;
   if (!dart && ring_has(IT_RING_ELEMENTS)) dmg /= 2;
-  const int absorbed = std::min(shield, dmg);
-  shield -= absorbed;
-  hp -= dmg - absorbed;
   message(dart ? "陷阱射出了一支飞镖！" : "你踩中了陷阱！");
+  take_damage(dmg);
 }
 
 void Game::trigger_tile_features() {
@@ -2315,15 +2331,8 @@ void Game::spawn_quest_miniboss() {
   for (int a = 0; a < 50; a++) {
     int x = px + ri(*this, -4, 4), y = py + ri(*this, -4, 4);
     if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
-    if (!walkable(x, y) || mob_at(x, y) >= 0) continue;
-    Mob m;
-    m.x = x; m.y = y; m.vx = (float)x; m.vy = (float)y;
-    m.type = type;
-    const MobDef& d = mob_def(type);
-    m.hp = m.maxhp = d.hp + floor * 2;
-    m.atk = d.atk + floor / 8;
-    m.def = d.def;
-    mobs.push_back(m);
+    if (!floor_spawn_cell(*this, x, y, type)) continue;
+    mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Wandering));
     message("幽灵的仇敌出现了！");
     return;
   }
@@ -2440,7 +2449,7 @@ void Game::close_door_if_clear(int x, int y) {
 }
 
 void Game::move_player(int dx, int dy) {
-  if ((!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
+  if (dead || (!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
   int nx = px + dx, ny = py + dy;
   if (!in_map(nx, ny)) return;
   if (feature_blocking(nx, ny)) return;
@@ -2477,6 +2486,7 @@ void Game::move_player(int dx, int dy) {
   int it = item_at(px, py);
   if (it >= 0) pick_item(it);
   trigger_tile_features();
+  if (dead) return;
   if (tiles[py][px] == T_STAIRS) {
     if (boss_alive()) {
       message("首领还活着，楼梯被封锁了。");
@@ -2501,12 +2511,35 @@ void Game::combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
 }
 
 void Game::combat_hit(CombatPose& pose, int x, int y, int damage) {
-  pose.hit_age = -combat_delay;
+  if (damage > 0) pose.hit_age = -combat_delay;
   if (combat_fx.size() < 48)
     combat_fx.push_back({x, y, x, y, 0, combat_delay, damage, CombatStyle::Melee});
 }
 
-void Game::damage_mob(int idx, int raw) {
+void Game::take_damage(int damage) {
+  if (dead) return;
+  const int absorbed = std::min(shield, std::max(0, damage));
+  shield -= absorbed;
+  const int loss = std::clamp(damage - absorbed, 0, hp);
+  hp -= loss;
+  combat_hit(hero_combat, px, py, loss);
+  if (hp > 0) return;
+  for (int slot = 0; slot < inv_n; ++slot) {
+    if (inv[slot].id != IT_ANKH) continue;
+    remove_item(slot, 1);
+    hp = std::max(1, maxhp / 2);
+    shield = 0;
+    message("安卡碎裂，你从死亡边缘被拉了回来！");
+    return;
+  }
+  dead = true;
+  hero_combat.death_age = -combat_delay;
+  dialog = paused = backpack = shop_open = alchemy_open = transmute_open = targeting = false;
+  message("你死了。");
+  clear_path();
+}
+
+void Game::damage_mob(int idx, int raw, DamageKind kind) {
   if (idx < 0 || idx >= (int)mobs.size()) return;
   Mob& m = mobs[idx];
   if (!m.alive) return;
@@ -2514,8 +2547,9 @@ void Game::damage_mob(int idx, int raw) {
     m.ai = Mob::Hunting;
     m.target = py * MW + px;
   }
-  int dmg = raw - m.def;
-  if (dmg < 1) dmg = 1;
+  const int reduction = kind == DamageKind::Physical ? damage_reduction(*this, m.def) : 0;
+  int dmg = std::max(0, raw - reduction);
+  dmg = std::min(dmg, m.hp);
   m.hp -= dmg;
   combat_hit(m.combat, m.x, m.y, dmg);
   char b[96];
@@ -2523,6 +2557,7 @@ void Game::damage_mob(int idx, int raw) {
   message(b);
   if (m.hp > 0) return;
   m.alive = false;
+  m.combat.death_age = -combat_delay;
   if (is_quest_miniboss(m.type)) ghost_boss_dead = 1;
   if (imp_state == 1 && (m.type == M_MONK || m.type == M_GOLEM)) {
     if (imp_kills < 99) imp_kills++;
@@ -2566,24 +2601,42 @@ void Game::damage_mob(int idx, int raw) {
     level++;
     xpnext = level * 10;
     maxhp += 5;
-    hp = std::min(maxhp, hp + 5);
+    if (!dead) hp = std::min(maxhp, hp + 5);
     message("升级了！");
   }
 }
 
+bool Game::hero_hits(Mob& mob, bool ranged) {
+  const bool noticed = mob.ai == Mob::Hunting && mob.target == py * MW + px &&
+                       invis_t == 0 && grid_distance(mob.x, mob.y, px, py) <= fov_radius &&
+                       los(mob.x, mob.y, px, py);
+  if (mob.type != M_GREAT_CRAB || !noticed || mob.sleep_t > 0) {
+    const float accuracy = (9 + level) * std::pow(1.3f, ring_bonus(*this, IT_RING_ACCURACY));
+    float evasion = noticed ? mob_evasion(*this, mob) : 0;
+    if (ranged && grid_distance(mob.x, mob.y, px, py) == 1) evasion *= 1.5f;
+    if (attack_hits(*this, accuracy, evasion)) return true;
+  }
+  combat_hit(mob.combat, mob.x, mob.y, COMBAT_MISS);
+  char text[96];
+  snprintf(text, sizeof(text), "%s闪避了攻击。", mob_def(mob.type).name);
+  message(text);
+  return false;
+}
+
 void Game::attack(int idx, bool ranged, int bonus) {
+  if (dead || idx < 0 || idx >= int(mobs.size())) return;
   Mob& m = mobs[idx];
   if (!m.alive) return;
   if (is_shopkeeper(m.type, floor)) { harm_shopkeeper(); return; }
   if (is_npc(m.type)) { talk_npc(idx); return; }
-  int raw = hero_atk() + weapon_bonus() + ring_atk() + talents[1] +
-            ri(*this, 0, 2) + bonus;
-  if (might_t > 0) raw += 3;
-  if (ranged) raw += 1;
   combat_strike(hero_combat, px, py, m.x, m.y,
                 ranged ? CombatStyle::Arcane : CombatStyle::Melee);
   combat_delay = ranged ? 170 : 70;
-  damage_mob(idx, raw);
+  if (hero_hits(m, ranged)) {
+    const int raw = hero_atk() + weapon_bonus() + ring_atk() + talents[1] +
+                    ri(*this, 0, 2) + bonus + (might_t > 0 ? 3 : 0) + (ranged ? 1 : 0);
+    damage_mob(idx, raw, DamageKind::Physical);
+  }
   combat_delay = 0;
 }
 
@@ -2674,9 +2727,12 @@ void Game::tick(int dt_ms) {
     auto advance_pose = [&](CombatPose& p) {
       if (p.age >= 0 && (p.age += dt_ms) >= 420) p.age = -1;
       if (p.hit_age < 200) p.hit_age += dt_ms;
+      if (p.death_age < DEATH_ANIM_MS) p.death_age = std::min(DEATH_ANIM_MS, p.death_age + dt_ms);
     };
     advance_pose(hero_combat);
     for (Mob& m : mobs) advance_pose(m.combat);
+    if (dead && !dialog && hero_combat.death_age >= DEATH_ANIM_MS)
+      open_dialog(2, "你死了", "你的冒险到此为止。\n要回到主菜单吗？", "结束 (A)");
     for (CombatFx& f : combat_fx) f.age += dt_ms;
     combat_fx.erase(std::remove_if(combat_fx.begin(), combat_fx.end(),
         [](const CombatFx& f) { return f.age >= f.delay + 640; }), combat_fx.end());
@@ -2766,7 +2822,9 @@ void Game::mob_turn(Mob& m) {
       if (absi(o.x - m.x) <= 1 && absi(o.y - m.y) <= 1) {
         combat_strike(m.combat, m.x, m.y, o.x, o.y, CombatStyle::Melee);
         combat_delay = 70;
-        damage_mob((int)i, m.atk + ri(*this, 0, 2));
+        if (attack_hits(*this, mob_accuracy(*this, m), mob_evasion(*this, o)))
+          damage_mob((int)i, m.atk + ri(*this, 0, 2), DamageKind::Physical);
+        else combat_hit(o.combat, o.x, o.y, COMBAT_MISS);
         combat_delay = 0;
         return;
       }
@@ -2782,20 +2840,22 @@ void Game::mob_turn(Mob& m) {
   if (m.ai == Mob::Sleeping) return;
   if (m.ai == Mob::Hunting && sees) m.target = hero;
   if (m.ai == Mob::Hunting && sees && dist == 1) {
-    int dmg = std::max(1, m.atk + ri(*this, 0, 1) - hero_def() - armor_bonus() -
-                            ring_def() - talents[2]);
-    if (shield > 0) {
-      int a = std::min(shield, dmg);
-      shield -= a; dmg -= a;
-    }
-    if (dmg > 0) hp -= dmg;
     combat_strike(m.combat, m.x, m.y, px, py, CombatStyle::Melee);
     combat_delay = 70;
-    combat_hit(hero_combat, px, py, dmg);
+    const float evasion = (4 + level) * std::pow(1.125f, ring_bonus(*this, IT_RING_EVASION));
+    char text[96];
+    if (attack_hits(*this, mob_accuracy(*this, m), evasion)) {
+      const int damage = std::max(0, m.atk + ri(*this, 0, 1) -
+          damage_reduction(*this, hero_def() + armor_bonus() + talents[2]));
+      snprintf(text, sizeof(text), "%s攻击了你，造成 %d 点伤害", mob_def(m.type).name,
+               std::min(hp, std::max(0, damage - shield)));
+      message(text);
+      take_damage(damage);
+    } else {
+      combat_hit(hero_combat, px, py, COMBAT_MISS);
+      message("你闪避了攻击。");
+    }
     combat_delay = 0;
-    char b[96];
-    snprintf(b, sizeof(b), "%s攻击了你，造成 %d 点伤害", mob_def(m.type).name, dmg);
-    message(b);
     return;
   }
   if (m.target >= 0) {
@@ -3011,7 +3071,9 @@ void Game::advance_turn() {
             cells.push_back(y * MW + x);
       if (!cells.empty()) {
         const int p = cells[ri(*this, 0, int(cells.size()) - 1)];
-        mobs.push_back(make_floor_mob(M_WRAITH, p % MW, p / MW, Mob::Hunting));
+        auto wraith = make_floor_mob(*this, M_WRAITH, p % MW, p / MW, Mob::Hunting);
+        wraith.target = py * MW + px;
+        mobs.push_back(wraith);
         dust_timer -= power;
         message("尸尘中冒出了一只怨灵！");
       } else {
@@ -3041,21 +3103,6 @@ void Game::advance_turn() {
     }
   }
   recompute_fov();
-  if (hp <= 0) {
-    int ankh = -1;
-    for (int i = 0; i < inv_n; i++)
-      if (inv[i].id == IT_ANKH) { ankh = i; break; }
-    if (ankh >= 0) {
-      remove_item(ankh, 1);
-      hp = std::max(1, maxhp / 2);
-      shield = 0;
-      message("安卡碎裂，你从死亡边缘被拉了回来！");
-      return;
-    }
-    hp = 0;
-    dead = true;
-    open_dialog(2, "你死了", "你的冒险到此为止。\n要回到主菜单吗？", "结束 (A)");
-  }
 }
 
 void Game::wait_turns(int n) {
@@ -3239,13 +3286,11 @@ void Game::cast_or_throw(int x, int y) {
       break;
     }
     if (mi < 0) { message("投掷物没有命中。"); }
-    else {
+    else if (hero_hits(mobs[mi], true)) {
       int dmg = item_def(it.id).power + it.level * 2 + ri(*this, 0, 2);
-      if (it.id == IT_DART_TIPPED) {
-        dmg += 3;
-        if (mobs[mi].alive) mobs[mi].sleep_t = 8;
-      }
-      damage_mob(mi, dmg);
+      if (it.id == IT_DART_TIPPED) dmg += 3;
+      damage_mob(mi, dmg, DamageKind::Physical);
+      if (it.id == IT_DART_TIPPED && mobs[mi].alive) mobs[mi].sleep_t = 8;
       message("投掷物命中了目标。");
     }
   } else {
@@ -3433,7 +3478,9 @@ bool Game::load(int slot) {
   seed = d.seed; rng = d.rng;
   floor = d.floor; hero = d.hero;
   px = d.px; py = d.py;
-  hp = d.hp; maxhp = d.maxhp; level = d.level; xp = d.xp; xpnext = d.xpnext;
+  maxhp = std::max(1, int(d.maxhp));
+  hp = std::clamp(int(d.hp), 0, maxhp);
+  level = d.level; xp = d.xp; xpnext = d.xpnext;
   keys = d.keys; gold = d.gold; turns = d.turns; shield = d.shield;
   weapon = d.weapon; weapon_level = d.weapon_level;
   armor = d.armor; armor_level = d.armor_level;
@@ -3465,9 +3512,10 @@ bool Game::load(int slot) {
   for (int i = 0; i < d.mob_n && i < 48; i++) {
     Mob m;
     m.x = d.mobs[i].x; m.y = d.mobs[i].y;
-    m.hp = d.mobs[i].hp; m.maxhp = d.mobs[i].maxhp;
+    m.maxhp = std::max(1, int(d.mobs[i].maxhp));
+    m.hp = std::clamp(int(d.mobs[i].hp), 0, m.maxhp);
     m.atk = d.mobs[i].atk; m.def = d.mobs[i].def;
-    m.type = d.mobs[i].type; m.alive = d.mobs[i].alive != 0;
+    m.type = d.mobs[i].type; m.alive = d.mobs[i].alive != 0 && m.hp > 0;
     m.sleep_t = d.mobs[i].sleep_t; m.terror_t = d.mobs[i].terror_t;
     m.vx = (float)m.x; m.vy = (float)m.y;
     mobs.push_back(m);
@@ -3534,7 +3582,7 @@ bool Game::load(int slot) {
   targeting = false;
   paused = backpack = shop_open = false;
   dialog = false;
-  dead = false;
+  dead = hp == 0;
   won = false;
   msg[0] = 0;
   build_run_plan();

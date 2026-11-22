@@ -105,6 +105,23 @@ static void combat_sprite(const CombatPose& pose, const AttackFrames& frames,
   if (pose.hit_age >= 0 && pose.hit_age < 100) tint = 0xFFE1D8FF;
 }
 
+static void draw_falling_sprite(const Img& sheet, int fw, int fh, int frame,
+                                float x, float y, float zoom, u32 tint, int age) {
+  if (!sheet.ok() || fw > sheet.w || fh > sheet.h) return;
+  const int cols = sheet.w / fw;
+  if (frame < 0 || frame >= cols * (sheet.h / fh)) frame = 0;
+  const float fall = std::clamp(age / 180.f, 0.f, 1.f);
+  const float angle = fall * fall * 1.45f;
+  const float fade = std::clamp((DEATH_ANIM_MS - age) / 260.f, 0.f, 1.f);
+  const u32 color = ((tint ? tint : CLR_WHITE) & 0x00ffffffu) |
+                    (u32(fade * 255.f) << 24);
+  // Rotate around the feet as the sprite falls, then fade in place.
+  x += sinf(angle) * fh * zoom * 0.5f;
+  y += (1.f - cosf(angle)) * fh * zoom * 0.5f;
+  draw_cell_rot(sheet, frame % cols * fw, frame / cols * fh, fw, fh,
+                roundf(x), roundf(y), zoom, angle, color);
+}
+
 static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
                       int search_ms, int camx, int camy) {
   static const uint8_t idle[8] = {0, 0, 0, 1, 0, 0, 1, 1};
@@ -119,6 +136,11 @@ static void draw_hero(int hero, float vx, float vy, int anim_ms, bool moving,
   float x = vx * 16 * z - camx + 2 * z, y = vy * 16 * z - camy + z;
   u32 tint = 0;
   static constexpr AttackFrames attack{15,4,{13,14,15,0}};
+  if (G.dead && G.hero_combat.death_age >= 0) {
+    if (G.hero_combat.death_age < DEATH_ANIM_MS)
+      draw_falling_sprite(A_hero[hero % 6], 12, 15, 0, x, y, z, tint, G.hero_combat.death_age);
+    return;
+  }
   combat_sprite(G.hero_combat, attack, frame, x, y, tint);
   draw_sprite(A_hero[hero % 6], 12, 15, frame, x, y, tint, z);
 }
@@ -141,6 +163,10 @@ static void draw_mob(const Mob& m, int camx, int camy) {
   float x = m.vx * 16 * z - camx + ox * z;
   float y = m.vy * 16 * z - camy + (oy + bob) * z;
   u32 tint = d.tint;
+  if (!m.alive && m.combat.death_age >= 0) {
+    draw_falling_sprite(sheet, d.fw, d.fh, 0, x, y, z, tint, m.combat.death_age);
+    return;
+  }
   static constexpr AttackFrames no_frames{};
   combat_sprite(m.combat, d.asset < sizeof(mob_attacks) / sizeof(*mob_attacks)
                              ? mob_attacks[d.asset] : no_frames,
@@ -152,19 +178,20 @@ static void draw_combat_fx(int camx, int camy, bool numbers) {
   const float z = G.zoom;
   for (const CombatFx& f : G.combat_fx) {
     const int age = f.age - f.delay;
-    if (age < 0 || numbers != (f.damage >= 0)) continue;
+    if (age < 0 || numbers != (f.damage != -1)) continue;
     if (!G.vis[f.ty][f.tx] && !G.vis[f.y][f.x]) continue;
     const float x = (f.tx * 16 + 8) * z - camx;
     const float y = (f.ty * 16 + 8) * z - camy;
     if (numbers) {
       if (age >= 550) continue;
       char label[16];
-      snprintf(label, sizeof(label), "-%d", f.damage);
+      if (f.damage == COMBAT_MISS) snprintf(label, sizeof(label), "闪避");
+      else snprintf(label, sizeof(label), "-%d", f.damage);
       const float sy = roundf(y - (10.f + age * 0.023f) * z);
       const float sx = roundf(x - text_w(label) * 0.5f);
       const int alpha = std::min(255, (550 - age) * 2);
-      text(label, sx, sy, f.damage ? C2D_Color32(255, 133, 107, alpha)
-                                 : C2D_Color32(189, 220, 246, alpha));
+      text(label, sx, sy, f.damage > 0 ? C2D_Color32(255, 133, 107, alpha)
+                                     : C2D_Color32(189, 220, 246, alpha));
       continue;
     }
 
@@ -478,7 +505,7 @@ static void draw_map() {
 
   // mobs
   for (const Mob& m : G.mobs) {
-    if ((!m.alive && m.combat.hit_age >= 45) ||
+    if ((!m.alive && m.combat.death_age >= DEATH_ANIM_MS) ||
         (!G.vis[m.y][m.x] && G.mind_t == 0)) continue;
     draw_mob(m, camx, camy);
   }
@@ -1020,7 +1047,7 @@ void game_update() {
   if (dt < 1) dt = 1;
   if (dt > 100) dt = 100;
   // Shoulder zoom only while the map is the active UI.
-  if (!G.backpack && !G.paused && !G.shop_open && !G.alchemy_open &&
+  if (!G.dead && !G.backpack && !G.paused && !G.shop_open && !G.alchemy_open &&
       !G.transmute_open && !G.dialog) {
     float sdt = dt / 1000.0f;
     if (IN.holding(KEY_L)) G.zoom_target -= sdt * 1.25f;
@@ -1031,7 +1058,7 @@ void game_update() {
   last_tick = now_tick;
   G.tick(dt);
   if (G.msg_timer > 0) G.msg_timer--;
-  if (G.demo_lock) return;
+  if (G.demo_lock || (G.dead && !G.dialog)) return;
 
   if (G.shop_open) {
     int size = shop_list_size();

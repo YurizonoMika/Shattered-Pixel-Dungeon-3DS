@@ -795,6 +795,68 @@ int main() {
           G.zoom = G.zoom_target = 2.f;
           G.freeze_anim = G.demo_lock = true;
         }
+        else if (want == 99 || want == 100 || want == 101) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.map_width = 15; G.map_height = 11;
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          memset(G.seen, 0, sizeof(G.seen));
+          for (int y = 3; y <= 8; ++y)
+            for (int x = 3; x <= 11; ++x) G.tiles[y][x] = T_FLOOR;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          G.pvx = G.cursor_x = G.px = 7;
+          G.pvy = G.cursor_y = G.py = 5;
+          G.recompute_fov();
+          Mob m;
+          m.type = M_SNAKE;
+          m.vx = m.x = G.px + 1; m.vy = m.y = G.py;
+          m.hp = m.maxhp = 4;
+          m.def = 1000;
+          m.ai = Mob::Hunting;
+          m.target = G.py * MW + G.px;
+          G.mobs.push_back(m);
+          G.rng = 1;
+          const bool dodge = !G.hero_hits(G.mobs[0], false);
+          G.mobs[0].sleep_t = 1;
+          const bool surprise = G.hero_hits(G.mobs[0], false);
+          G.rng = 1;
+          G.damage_mob(0, 1, DamageKind::Physical);
+          const bool blocked = G.mobs[0].hp == 4;
+          G.combat_delay = 70;
+          G.damage_mob(0, 20);
+          const bool defeated = !G.mobs[0].alive && G.mobs[0].hp == 0 &&
+              G.mobs[0].combat.death_age == -70 && G.mob_at(m.x, m.y) == -1;
+          G.combat_delay = 0;
+          G.hp = 1; G.shield = 2;
+          G.take_damage(2);
+          const bool shielded = G.hp == 1 && !G.dead && G.shield == 0;
+          G.add_item(IT_ANKH);
+          G.take_damage(10);
+          const bool revived = !G.dead && G.hp == G.maxhp / 2 &&
+              G.hero_combat.death_age == DEATH_ANIM_MS;
+          G.take_damage(G.hp);
+          const bool delayed = G.dead && G.hp == 0 && !G.dialog;
+          G.combat_fx.clear();
+          if (want == 99) {
+            for (int i = 0; i < 5; ++i) G.tick(100);
+            const bool dialog = G.dialog && G.dlg_type == 2 &&
+                G.hero_combat.death_age == DEATH_ANIM_MS;
+            dlog("[combat rules] dodge=%d surprise=%d armor=%d enemy_death=%d shield=%d ankh=%d death_delay=%d death_dialog=%d",
+                 dodge, surprise, blocked, defeated, shielded, revived, delayed, dialog);
+          } else {
+            if (want == 100) {
+              G.dead = false;
+              G.hp = G.maxhp;
+              G.hero_combat = {};
+              G.msg_timer = 0;
+            }
+            G.tick(100);
+            G.tick(want == 100 ? 100 : 50);
+            G.freeze_anim = true;
+          }
+          G.zoom = G.zoom_target = 2.f;
+          G.demo_lock = true;
+        }
         else if (want == 87) {
           // Do not create or overwrite a regular save slot for the audit.
           G.new_run(0, 1);

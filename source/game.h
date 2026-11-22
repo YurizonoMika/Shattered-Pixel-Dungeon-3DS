@@ -61,9 +61,13 @@ struct Feature {
 };
 
 enum class CombatStyle : uint8_t { Melee, Arcane, Fire, Frost, Lightning, Throw, Blast };
+enum class DamageKind : uint8_t { Direct, Physical };
+constexpr int DEATH_ANIM_MS = 460;
+constexpr int COMBAT_MISS = -2;
 
 struct CombatPose {
   int age = -1, hit_age = 1000;
+  int death_age = DEATH_ANIM_MS;
   int dx = 0, dy = 0;
   CombatStyle style = CombatStyle::Melee;
 };
@@ -262,6 +266,8 @@ struct Game {
   void combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
                      CombatStyle style, uint8_t item = IT_NONE);
   void combat_hit(CombatPose& pose, int x, int y, int damage);
+  void take_damage(int damage);
+  bool hero_hits(Mob& mob, bool ranged);
 
   bool paused = false, backpack = false;
   bool dialog = false;
@@ -293,7 +299,7 @@ struct Game {
   void act_at(int x, int y, bool interact);
   void interact_at(int x, int y);
   void attack(int mob, bool ranged, int bonus = 0);
-  void damage_mob(int idx, int raw);
+  void damage_mob(int idx, int raw, DamageKind kind = DamageKind::Direct);
   void advance_turn();
   void tick(int dt_ms);
   void clear_path();
@@ -336,7 +342,6 @@ struct Game {
   int weapon_bonus() const;
   int armor_bonus() const;
   int ring_atk() const;
-  int ring_def() const;
   bool ring_has(uint8_t id) const;
   void equip_ring(int idx);
   int hero_atk() const;

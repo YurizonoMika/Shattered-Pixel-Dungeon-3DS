@@ -52,6 +52,8 @@ struct MobDef {
   int16_t hp, atk, def, xp;
   uint32_t tint;   // 0 = no tint
   bool boss;
+  uint8_t accuracy = 10;
+  uint8_t evasion = 0;
 };
 
 struct RegionDef {

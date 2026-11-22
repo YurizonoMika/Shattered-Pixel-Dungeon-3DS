@@ -76,8 +76,8 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"嬗变卷轴", "随机转化一件物品。", K_USE, CAT_SCROLL, 0, 0, 314},
     // --- rings ---
     {"力量指环", "提升攻击力。", K_RING, CAT_GEAR, 0, 0, 224},
-    {"精准指环", "提升命中与伤害。", K_RING, CAT_GEAR, 0, 0, 225},
-    {"闪避指环", "提升防御。", K_RING, CAT_GEAR, 0, 0, 226},
+    {"精准指环", "提升命中。", K_RING, CAT_GEAR, 0, 0, 225},
+    {"闪避指环", "提升闪避。", K_RING, CAT_GEAR, 0, 0, 226},
     {"迅捷指环", "偶尔获得额外行动。", K_RING, CAT_GEAR, 0, 0, 227},
     {"财富指环", "拾取金币时获得额外金币。", K_RING, CAT_GEAR, 0, 0, 228},
     {"能量指环", "法杖更快恢复充能。", K_RING, CAT_GEAR, 0, 0, 229},
