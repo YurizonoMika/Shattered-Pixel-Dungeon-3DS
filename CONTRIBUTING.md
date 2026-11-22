@@ -41,6 +41,12 @@ when downloads or compatibility change.
 GitHub 发布日志须有简体中文和英文两个版本，正文保存在
 `docs/releases/<tag>.md`。下载地址或兼容性有变动时，同步更新两份 README。
 
+Set `SPD3DS_VERSION` in `source/common.h` to the release version before building.
+Keep the HOME Menu title and description in `Makefile` free of version numbers.
+
+打包前将 `source/common.h` 中的 `SPD3DS_VERSION` 更新为发布版本号。
+`Makefile` 中的 HOME 菜单标题和简介只写游戏名。
+
 ## License
 
 By contributing you agree that your changes are licensed under GPL-3.0.
