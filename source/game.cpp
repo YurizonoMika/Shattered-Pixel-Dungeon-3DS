@@ -634,8 +634,8 @@ static Mob make_floor_mob(uint8_t type, int x, int y, Mob::Ai ai) {
   return m;
 }
 
-static void spawn_distances(const Game& g, int16_t (&dist)[MH][MW],
-                            bool open_doors, int limit = MW * MH) {
+static int walk_distances(const Game& g, int16_t (&dist)[MH][MW],
+                          bool open_doors, int limit = MW * MH, int excluded = -1) {
   uint16_t queue[MW * MH];
   for (auto& row : dist) std::fill_n(row, MW, int16_t(-1));
   int head = 0, tail = 1;
@@ -646,12 +646,14 @@ static void spawn_distances(const Game& g, int16_t (&dist)[MH][MW],
     if (dist[y][x] >= limit) continue;
     for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
       int nx = x + dx, ny = y + dy;
-      if (!g.walkable(nx, ny) || dist[ny][nx] >= 0 ||
+      if (!g.in_map(nx, ny) || ny * MW + nx == excluded || dist[ny][nx] >= 0 ||
+          !g.walkable(nx, ny) ||
           (!open_doors && g.tiles[ny][nx] == T_DOOR)) continue;
       dist[ny][nx] = dist[y][x] + 1;
       queue[tail++] = ny * MW + nx;
     }
   }
+  return tail;
 }
 
 static bool floor_spawn_cell(const Game& g, int x, int y, uint8_t type) {
@@ -670,7 +672,7 @@ static bool floor_spawn_cell(const Game& g, int x, int y, uint8_t type) {
 bool Game::try_respawn() {
   if (spawn_rooms.empty()) return false;
   int16_t dist[MH][MW];
-  spawn_distances(*this, dist, true);
+  walk_distances(*this, dist, true);
   uint8_t type = next_spawn_type();
   for (int attempt = 0; attempt < 30; ++attempt) {
     for (int sample = 0; sample < 30; ++sample) {
@@ -1084,17 +1086,16 @@ void Game::gen_level() {
   tiles[xr.cy][xr.cx] = T_STAIRS;
 
   // Helpers for room contents.
-  auto room_cell = [&](const GRoom& r, int margin = 1) {
+  auto free_item_cell = [&](int x, int y) {
+    const uint8_t tile = tiles[y][x];
+    return (tile == T_FLOOR || tile == T_GRASS || tile == T_WATER) &&
+           (x != px || y != py) && mob_at(x, y) < 0 && item_at(x, y) < 0 && feature_at(x, y) < 0;
+  };
+  auto room_cell = [&](const GRoom& r, int margin = 1, const int16_t (*dist)[MW] = nullptr) {
     for (int t = 0; t < 80; t++) {
       int x = r.x + ri(*this, margin, r.w - 1 - margin);
       int y = r.y + ri(*this, margin, r.h - 1 - margin);
-      if (tiles[y][x] != T_FLOOR && tiles[y][x] != T_GRASS &&
-          tiles[y][x] != T_WATER)
-        continue;
-      if (x == px && y == py) continue;
-      if (mob_at(x, y) >= 0 || item_at(x, y) >= 0 || feature_at(x, y) >= 0)
-        continue;
-      return std::pair<int, int>(x, y);
+      if ((!dist || dist[y][x] >= 0) && free_item_cell(x, y)) return std::pair<int, int>(x, y);
     }
     return std::pair<int, int>(-1, -1);
   };
@@ -1352,39 +1353,62 @@ void Game::gen_level() {
     const auto& r = rooms[i];
     spawn_rooms.push_back({uint8_t(r.x), uint8_t(r.y), uint8_t(r.w), uint8_t(r.h)});
   }
-  auto drop_cell = [&]() {
+  // Floor generation runs on the game thread. Reuse these grids to stay
+  // within the Homebrew Launcher stack budget on 64x64 floors.
+  static int16_t reachable[MH][MW], after_chest[MH][MW];
+  int reachable_count = 0;
+  auto drop_cell = [&](bool required) {
     if (!std_rooms.empty()) {
-      int start_room = ri(*this, 0, (int)std_rooms.size() - 1);
+      const int start_room = ri(*this, 0, (int)std_rooms.size() - 1);
       for (int i = 0; i < (int)std_rooms.size(); ++i) {
-        auto p = room_cell(rooms[std_rooms[(start_room + i) % std_rooms.size()]]);
+        const auto& r = rooms[std_rooms[(start_room + i) % std_rooms.size()]];
+        auto p = room_cell(r, 1, reachable);
         if (p.first >= 0) return p;
+        for (int y = r.y + 1; y < r.y + r.h - 1; ++y)
+          for (int x = r.x + 1; x < r.x + r.w - 1; ++x)
+            if (reachable[y][x] >= 0 && free_item_cell(x, y)) return std::pair<int, int>{x, y};
       }
+    }
+    if (required) {
+      for (int y = 1; y < map_height - 1; ++y)
+        for (int x = 1; x < map_width - 1; ++x)
+          if (reachable[y][x] >= 0 && free_item_cell(x, y)) return std::pair<int, int>{x, y};
     }
     return std::pair<int, int>{-1, -1};
   };
-  auto drop_key = [&](uint8_t id) {
-    auto p = drop_cell();
+  auto supply = [&](uint8_t id) {
+    auto p = drop_cell(true);
     if (p.first >= 0) add_item_at(p.first, p.second, id, 0);
     return p.first >= 0;
   };
   // Standard loot (SPD RegularLevel.createItems).
   auto add_floor_item = [&](const LootRoll& lr) {
-    auto p = drop_cell();
-    if (p.first < 0) return;
+    const auto [x, y] = drop_cell(false);
+    if (x < 0) return;
     int roll = ri(*this, 0, 19);
     bool upgradable = item_def(lr.id).kind == K_WEAPON ||
                       item_def(lr.id).kind == K_ARMOR ||
                       item_def(lr.id).kind == K_WAND || item_def(lr.id).kind == K_RING;
+    int container;
     if (roll == 5 && floor > 1) {
-      place_loot(p.first, p.second, lr, F_CHEST_MIMIC);
+      container = F_CHEST_MIMIC;
     } else if (upgradable && ri(*this, 0, 3 - std::min<int>(lr.level, 3)) == 0) {
-      int type = floor > 1 && ri(*this, 0, 9) == 0 ? F_CHEST_MIMIC : F_CHEST_LOCKED;
-      place_loot(p.first, p.second, lr, type);
-      if (type == F_CHEST_LOCKED && !drop_key(IT_GOLDEN_KEY)) features.back().type = F_CHEST;
+      container = floor > 1 && ri(*this, 0, 9) == 0 ? F_CHEST_MIMIC : F_CHEST_LOCKED;
     } else {
-      place_loot(p.first, p.second, lr, roll == 0 ? int(F_REMAINS) :
-                 roll <= 5 ? int(F_CHEST) : -1);
+      container = roll == 0 ? int(F_REMAINS) : roll <= 5 ? int(F_CHEST) : -1;
     }
+    if (container >= 0 && container != F_REMAINS) {
+      // A blocking chest can only take its own cell out of the walkable area.
+      const int count = walk_distances(*this, after_chest, true, MW * MH, y * MW + x);
+      if (count == reachable_count - 1) {
+        reachable_count = count;
+        memcpy(reachable, after_chest, sizeof(reachable));
+      } else {
+        container = -1;
+      }
+    }
+    place_loot(x, y, lr, container);
+    if (container == F_CHEST_LOCKED && !supply(IT_GOLDEN_KEY)) features.back().type = F_CHEST;
   };
   // Traps: Random.NormalIntRange(2, 3 + depth/5), doubled on trap floors.
   const auto trap_roll_a = rnd(*this) >> 16;
@@ -1425,7 +1449,7 @@ void Game::gen_level() {
     mob_cap = (floor == 1) ? 0 : limit;
     respawn_t = plan_feeling[floor - 1] == 6 ? 100 : 150;
     int16_t dist[MH][MW];
-    spawn_distances(*this, dist, false, 8);
+    walk_distances(*this, dist, false, 8);
     for (int i = int(std_rooms.size()) - 1; i > 0; --i)
       std::swap(std_rooms[i], std_rooms[ri(*this, 0, i)]);
     int remaining = limit;
@@ -1452,13 +1476,10 @@ void Game::gen_level() {
       }
     }
 
-    // Guaranteed supplies are loose heaps, after population and traps are placed.
-    auto supply = [&](uint8_t id) {
-      auto p = drop_cell();
-      if (p.first >= 0) add_item_at(p.first, p.second, id, 0);
-    };
-    for (int i = 0; i < locked_count; i++) drop_key(IT_KEY);
-    for (int i = 0; i < locked_chests; i++) drop_key(IT_GOLDEN_KEY);
+    // Reachability includes ordinary closed doors and excludes keyed or secret doors.
+    reachable_count = walk_distances(*this, reachable, true);
+    for (int i = 0; i < locked_count; i++) supply(IT_KEY);
+    for (int i = 0; i < locked_chests; i++) supply(IT_GOLDEN_KEY);
     for (const GRoom& r : rooms) {
       switch (r.spec) {
         case SP_POOL: supply(IT_POTION_INVIS); break;

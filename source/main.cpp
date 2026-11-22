@@ -850,7 +850,7 @@ int main() {
                 golden += it.id == IT_GOLDEN_KEY;
                 crystal += it.id == IT_CRYSTAL_KEY;
               }
-              int regular = 0, sleeping = 0, food = 0;
+              int regular = 0, sleeping = 0, food = 0, floor_strength = 0, floor_upgrades = 0;
               bool overlapping = false;
               for (const Mob& m : G.mobs) {
                 if (!(m.type >= M_GOO && m.type <= M_YOG) &&
@@ -859,16 +859,22 @@ int main() {
               }
               for (const FloorItem& it : G.items) {
                 if ((it.id == IT_FOOD_RATION || it.id == IT_FOOD_PASTY) && reached[it.y][it.x]) ++food;
-                if (it.id == IT_POTION_STR && reached[it.y][it.x]) ++strength;
-                if (it.id == IT_SCROLL_UP && reached[it.y][it.x]) ++upgrades;
+                if (it.id == IT_POTION_STR && reached[it.y][it.x]) ++floor_strength;
+                if (it.id == IT_SCROLL_UP && reached[it.y][it.x]) ++floor_upgrades;
                 if (G.mob_at(it.x, it.y) >= 0) overlapping = true;
               }
-              if (overlapping || crossed_chasm || (floor == 1 && sleeping != 8) ||
+              strength += floor_strength;
+              upgrades += floor_upgrades;
+              const uint8_t guaranteed = G.plan_guaranteed[floor - 1];
+              const bool missing_supply = ((guaranteed & 1) && !floor_strength) ||
+                                          ((guaranteed & 2) && !floor_upgrades);
+              if (overlapping || crossed_chasm || missing_supply || (floor == 1 && sleeping != 8) ||
                   (floor % 5 == 0 && (regular || strength < 2 || upgrades < 3 || !G.boss_alive())) ||
                   (floor % 5 != 0 && food < (G.plan_feeling[floor - 1] == 3 ? 2 : 1))) {
                 ++rule_failures;
-                dlog("[floor rules] seed=%lu floor=%d ordinary=%d sleeping=%d food=%d strength=%d upgrades=%d overlap=%d",
-                     (unsigned long)G.seed, floor, regular, sleeping, food, strength, upgrades, overlapping);
+                dlog("[floor rules] seed=%lu floor=%d ordinary=%d sleeping=%d food=%d strength=%d upgrades=%d supply_mask=%d overlap=%d",
+                     (unsigned long)G.seed, floor, regular, sleeping, food, floor_strength,
+                     floor_upgrades, guaranteed, overlapping);
               }
               if (floor % 5 == 0) strength = upgrades = 0;
               if (!exit || iron < doors || golden < chests || crystal * 2 != crystal_chests) {
