@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.9alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.10alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,9 +15,9 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.9alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.9alpha)**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.9alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.9alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.10alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.10alpha)**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
@@ -165,12 +165,17 @@ The game-over dialog appears after the hero's animation.
   room and crystal vault. Each has one entrance; most are **locked** and place an
   iron key in a standard room.
 - **Level feelings** on depths 2+: 50% chance of water, grass, large, traps,
-  secrets or dark; large adds rooms/items/mobs, traps doubles traps, secrets adds a
+  secrets or dark. Large adds rooms/items/mobs, a trap floor adds visible traps, secrets adds a
   secret room, dark reduces FOV.
 - **Mob rotation** follows upstream depth-based rotations for the supported roster.
   Floor 1 starts with eight ordinary enemies. Later regular floors use a population
-  limit and check for respawns about every 50 turns (33 on dark floors).
-- **Traps**: `NormalIntRange(2, 3 + depth/5)`.
+  limit and check for respawns about every 50 turns (33 on dark floors). Initial
+  spawns are distributed across eligible rooms, with a cap of one to four based
+  on floor area. Respawns respect the same room cap.
+- **Traps** use a regional mix of darts, toxic gas, alarms, frost, fire and shock.
+  Traps have distinct markers and display their name on activation. The base
+  count uses `NormalIntRange(2, 3 + depth/5)`. Trap floors can place up to five
+  times the base count, with the extra traps visible.
 - **Quest placement**: ghost in the exit room (2–4), Wandmaker in the entrance
   room (7–9), Blacksmith (12–14) and Imp (17–19) in their own quest rooms.
 
@@ -501,12 +506,13 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 87 | Check stairs, keys, initial monsters, food, and planned supply drops on each of 800 floors |
 | 88 | Check long hero route, door closure, and pursuit of a last-seen target |
 | 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
-| 91 | Check one-turn respawn retry and consumption of the remaining monster deck |
-| 92 | Check typed locks, trap reveal and activation, and a save round-trip on a 48×14 map |
+| 91 | Check one-turn respawn retry, rotation order and room occupancy |
+| 92 | Check typed locks, trap activation and an active gas cloud save round-trip |
 | 93–97 | Inspect animated water, shorelines, chasm edges and fog in all five regions (1× / 1.33×) |
 | 98 | Preview a generated chasm connector in the dungeon |
 | 99 | Check evasion, surprise attacks, armor, shields, Ankh revival, and death timing |
 | 100/101 | Freeze an enemy or the hero mid-fall for visual inspection |
+| 102/103 | Inspect toxic gas, alarm waves and trap names |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |

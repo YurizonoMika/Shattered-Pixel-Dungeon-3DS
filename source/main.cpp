@@ -921,6 +921,7 @@ int main() {
           int rule_failures = 0;
           int variable_maps = 0, largest_width = 0, largest_height = 0;
           int chasm_maps = 0;
+          int crowded_rooms = 0;
           int builders[3]{};
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
@@ -928,6 +929,8 @@ int main() {
             for (int floor = 1; floor <= 25; ++floor) {
               G.floor = floor;
               G.gen_level();
+              for (const auto& room : G.spawn_rooms)
+                crowded_rooms += G.room_spawn_count(room) > G.room_spawn_limit(room);
               if (floor % 5 != 0) ++builders[G.layout_builder];
               if (floor % 5 != 0 && (G.map_width != LEGACY_MAP_SIZE || G.map_height != LEGACY_MAP_SIZE)) ++variable_maps;
               largest_width = std::max(largest_width, G.map_width);
@@ -1008,8 +1011,40 @@ int main() {
           dlog("[layout] non-legacy dimensions=%d/640 max width=%d max height=%d", variable_maps, largest_width, largest_height);
           dlog("[layout] loop=%d figure-eight=%d fallback=%d", builders[1], builders[2], builders[0]);
           dlog("[terrain] %d maps with non-walkable chasms", chasm_maps);
+          dlog("[population] rooms exceeding spawn limit=%d", crowded_rooms);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
+        }
+        else if (want == 102 || want == 103) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.map_width = 19; G.map_height = 13;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          memset(G.seen, 0, sizeof(G.seen));
+          for (int y = 2; y <= 10; ++y)
+            for (int x = 2; x <= 16; ++x) G.tiles[y][x] = T_FLOOR;
+          G.pvx = G.cursor_x = G.px = 9; G.pvy = G.cursor_y = G.py = 6;
+          G.features = {{7,6,F_TRAP_FOUND,0,TR_TOXIC}, {9,6,F_TRAP_FOUND,0,TR_ALARM},
+                        {5,4,F_TRAP_FOUND,0,TR_DART}, {7,4,F_TRAP_FOUND,0,TR_CHILL},
+                        {9,4,F_TRAP_FOUND,0,TR_FIRE}, {11,4,F_TRAP_FOUND,0,TR_SHOCK}};
+          Mob sleeper;
+          sleeper.vx = sleeper.x = 11; sleeper.vy = sleeper.y = 7;
+          sleeper.ai = Mob::Sleeping; sleeper.sleep_t = 10;
+          G.mobs.push_back(sleeper);
+          G.recompute_fov();
+          G.trigger_trap(0);
+          G.tick_trap_clouds();
+          const int before = G.hp;
+          G.tick_trap_clouds();
+          const bool cloud = G.features[0].state == TOXIC_TURNS - 2 && G.hp < before &&
+              G.in_toxic_cloud(G.features[0], 9, 6) && !G.in_toxic_cloud(G.features[0], 10, 6);
+          if (want == 103) G.trigger_trap(1);
+          const bool alarm = G.mobs[0].ai == Mob::Hunting && G.mobs[0].sleep_t == 0 &&
+              G.mobs[0].target == 6 * MW + 9 && G.trap_notice == TR_ALARM;
+          if (want == 103) for (int i = 0; i < 3; ++i) G.tick(90);
+          G.freeze_anim = G.demo_lock = true;
+          dlog("[traps] scene=%d cloud=%d alarm=%d notice=%d", want, cloud, alarm, G.trap_notice);
         }
         else if (want >= 93 && want <= 97) {
           G.new_run(0, 0x12345678);
@@ -1098,12 +1133,14 @@ int main() {
           bool trap = revealed && G.features[3].type == F_TRAP_DISARMED && G.hp < before;
           G.golden_keys = 2;
           G.loot_remaining[3] = 1;
+          G.features.push_back({40, 10, F_TRAP_DISARMED, 3, TR_TOXIC});
           // Isolated debug slot, outside the front-end's slot range.
           bool saved = G.save(92);
           G.map_width = G.map_height = LEGACY_MAP_SIZE;
           bool loaded = saved && G.load(92) && G.map_width == 48 && G.map_height == 14 &&
               G.px == 42 && G.golden_keys == 2 && G.crystal_keys == 0 &&
               G.loot_remaining[3] == 1 && G.features[3].type == F_TRAP_DISARMED &&
+              G.features.size() == 5 && trap_kind(G.features[4]) == TR_TOXIC && G.features[4].state == 3 &&
               G.tiles[8][44] == T_CHASM && !G.walkable(44, 8) && !G.blocks_sight(44, 8);
           if (saved) remove(DATA_DIR "/slot92.bin");
           dlog("[interactions] gold=%d iron=%d crystal=%d trap=%d save=%d", gold_lock, door, crystal, trap, loaded);
@@ -1126,14 +1163,15 @@ int main() {
           G.respawn_t = 3;
           G.recompute_fov();
           G.advance_turn();
-          const bool retry = G.mobs.empty() && G.respawn_t == 3 && G.spawn_deck.size() == 1;
+          const bool retry = G.mobs.empty() && G.respawn_t == 3 && G.spawn_deck.size() == 2;
           for (int x = 3; x < 15; ++x) G.tiles[10][x] = T_FLOOR;
           G.tiles[10][8] = T_DOOR;
           G.recompute_fov();
           G.advance_turn();
-          const bool spawned = G.mobs.size() == 1 && G.mobs[0].type == M_SNAKE &&
+          const bool spawned = G.mobs.size() == 1 && G.mobs[0].type == M_RAT &&
               G.mobs[0].ai == Mob::Wandering && G.respawn_t > 3;
-          dlog("[respawn] unreachable retry=%d, connected rotation=%d", retry, spawned);
+          const bool room_full = spawned && !G.try_respawn() && G.spawn_deck.size() == 1;
+          dlog("[respawn] unreachable retry=%d, connected rotation=%d, room full=%d", retry, spawned, room_full);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }

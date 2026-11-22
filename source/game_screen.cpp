@@ -239,8 +239,131 @@ static void draw_combat_fx(int camx, int camy, bool numbers) {
   }
 }
 
+static u32 trap_color(TrapKind kind, int alpha = 255) {
+  switch (kind) {
+    case TR_TOXIC: return C2D_Color32(123, 204, 74, alpha);
+    case TR_ALARM: return C2D_Color32(245, 70, 66, alpha);
+    case TR_CHILL: return C2D_Color32(113, 213, 245, alpha);
+    case TR_FIRE: return C2D_Color32(255, 137, 47, alpha);
+    case TR_SHOCK: return C2D_Color32(237, 211, 90, alpha);
+    default: return C2D_Color32(195, 164, 131, alpha);
+  }
+}
+
+static void draw_trap_plate(const Feature& f, int camx, int camy) {
+  constexpr uint8_t symbols[TR_COUNT][5] = {
+    {4,4,4,0,4}, {8,12,14,31,0}, {4,14,31,31,14}, {4,14,14,31,4},
+    {21,14,31,14,21}, {4,5,13,31,14}, {6,12,30,6,12}
+  };
+  const auto kind = trap_kind(f);
+  const bool spent = f.type == F_TRAP_DISARMED;
+  const auto col = spent ? C2D_Color32(103, 99, 98, 255) : trap_color(kind);
+  const float z = G.zoom;
+  auto pixels = [&](int x, int y, int w, int h, u32 color) {
+    const float lx = roundf((16 * f.x + x) * z - camx);
+    const float ty = roundf((16 * f.y + y) * z - camy);
+    const float rx = roundf((16 * f.x + x + w) * z - camx);
+    const float by = roundf((16 * f.y + y + h) * z - camy);
+    draw_box(lx, ty, rx - lx, by - ty, color);
+  };
+  pixels(3, 5, 10, 9, C2D_Color32(31, 29, 31, 255));
+  pixels(4, 5, 8, 7, C2D_Color32(69, 67, 69, 255));
+  for (int dx : {4, 11}) {
+    pixels(dx, 6, 1, 1, col);
+    pixels(dx, 11, 1, 1, col);
+  }
+  for (int row = 0; row < 5; ++row)
+    for (int bit = 0; bit < 5; ++bit)
+      if (symbols[kind][row] & (16 >> bit)) pixels(6 + bit, 6 + row, 1, 1, col);
+}
+
+static void draw_trap_effects(int camx, int camy, int x0, int y0, int x1, int y1) {
+  const float z = G.zoom;
+  for (const auto& trap : G.features) {
+    if (trap.type != F_TRAP_DISARMED || trap_kind(trap) != TR_TOXIC || !trap.state) continue;
+    for (int y = std::max(y0, trap.y - TOXIC_RADIUS); y <= std::min(y1, trap.y + TOXIC_RADIUS); ++y) {
+      for (int x = std::max(x0, trap.x - TOXIC_RADIUS); x <= std::min(x1, trap.x + TOXIC_RADIUS); ++x) {
+        if (!G.vis[y][x] || !G.in_toxic_cloud(trap, x, y)) continue;
+        const float phase = G.water_anim_ms * (6.2831853f * 3.f / 6400.f) + x * 1.8f + y * 2.6f;
+        const float wx = 16 * x * z - camx;
+        const float wy = 16 * y * z - camy;
+        draw_box(roundf(wx), roundf(wy), roundf(wx + 16 * z) - roundf(wx),
+                 roundf(wy + 16 * z) - roundf(wy), trap_color(TR_TOXIC, 18 + 5 * trap.state), .49f);
+        for (int i = 0; i < 2; ++i) {
+          const float a = phase + 3.1415927f * i;
+          const float px = wx + (8.f + 4.f * cosf(a)) * z;
+          const float py = wy + (8.f + 4.f * sinf(a)) * z;
+          const auto color = trap_color(TR_TOXIC, 37 + 12 * trap.state);
+          draw_box(roundf(px - 3 * z), roundf(py - z), 6 * z, 2 * z, color, .49f);
+          draw_box(roundf(px - 2 * z), roundf(py - 2 * z), 4 * z, z, color, .49f);
+          draw_box(roundf(px - 2 * z), roundf(py + z), 4 * z, z, color, .49f);
+        }
+      }
+    }
+  }
+  for (const auto& fx : G.trap_fx) {
+    const float progress = fx.age / float(TRAP_FX_MS);
+    const float x = (fx.x * 16 + 8) * z - camx;
+    const float y = (fx.y * 16 + 8) * z - camy;
+    if (fx.kind == TR_ALARM) {
+      for (int wave = 0; wave < 3; ++wave) {
+        const float t = progress - wave * .20f;
+        if (t < 0.f) continue;
+        const float radius = (3.f + t * 60.f) * z;
+        const auto color = trap_color(TR_ALARM, int(224 * (1.f - progress)));
+        for (int i = 0; i < 24; ++i) {
+          constexpr float step = 6.2831853f / 24;
+          const float a = step * i;
+          C2D_DrawLine(x + cosf(a) * radius, y + sinf(a) * radius, color,
+                       x + cosf(a + step) * radius, y + sinf(a + step) * radius,
+                       color, std::max(1.f, z), .53f);
+        }
+      }
+    } else if (fx.kind != TR_TOXIC && G.vis[fx.y][fx.x]) {
+      const auto color = trap_color(fx.kind, int(240 * (1.f - progress)));
+      if (fx.kind == TR_FIRE) {
+        for (int i = 0; i < 7; ++i) {
+          const float px = x + (i - 3) * 2.3f * z;
+          const float py = y - progress * (8 + (i % 3) * 6) * z;
+          const float size = (2.f - progress) * z;
+          draw_box(roundf(px), roundf(py), size, size, color, .53f);
+        }
+        continue;
+      }
+      if (fx.kind == TR_SHOCK) {
+        for (int i = 0; i < 4; ++i) {
+          const float direction = (i % 2 == 0 ? 1.f : -1.f);
+          const float dx = (i < 2 ? 1.f : -1.f) * direction;
+          const float dy = direction;
+          const float size = (5.f + 7.f * progress) * z;
+          float px = x, py = y;
+          for (int j = 1; j <= 3; ++j) {
+            const float curl = j % 2 ? 2.f : -2.f;
+            const float nx = x + dx * (size * j / 3.f + curl * z);
+            const float ny = y + dy * (size * j / 3.f - curl * z);
+            C2D_DrawLine(px, py, color, nx, ny, color, std::max(1.f, z), .53f);
+            px = nx;
+            py = ny;
+          }
+        }
+        continue;
+      }
+      for (int i = 0; i < 8; ++i) {
+        const float a = i * .785398f;
+        const float r = (2.f + progress * 14.f) * z;
+        const float dx = cosf(a), dy = sinf(a);
+        C2D_DrawLine(x + dx * r, y + dy * r, color,
+                     x + dx * (r + 3 * z), y + dy * (r + 3 * z), color,
+                     std::max(1.f, z), .53f);
+      }
+    }
+  }
+}
+
 static void draw_feature(const Feature& f, int camx, int camy) {
-  if (!G.vis[f.y][f.x] && G.mind_t == 0) return;
+  const bool known_trap = (f.type == F_TRAP_FOUND || f.type == F_TRAP_DISARMED) &&
+                          (G.seen[f.y][f.x] & 1);
+  if (!G.vis[f.y][f.x] && G.mind_t == 0 && !known_trap) return;
   float z = G.zoom;
   float x = (float)(f.x * 16 * z - camx);
   float y = (float)(f.y * 16 * z - camy);
@@ -303,10 +426,8 @@ static void draw_feature(const Feature& f, int camx, int camy) {
                C2D_Color32(80, 50, 20, 255), 0.52f);
       break;
     case F_TRAP_FOUND:
-      draw_icon(32, 32, 14, 14, x + 1 * z, y + 1 * z, z, CLR_RED);
-      break;
     case F_TRAP_DISARMED:
-      draw_icon(32, 32, 14, 14, x + 1 * z, y + 1 * z, z, 0xFFA0A0A0);
+      draw_trap_plate(f, camx, camy);
       break;
     case F_TOKEN: {
       float bob = sinf(TIME_S * 3.0f + f.x) * 1.5f;
@@ -515,6 +636,7 @@ static void draw_map() {
             fabsf(G.pvx - G.px) > 0.01f || fabsf(G.pvy - G.py) > 0.01f,
             G.search_ms, camx, camy);
   draw_combat_fx(camx, camy, false);
+  draw_trap_effects(camx, camy, tx0, ty0, tx1, ty1);
   if (G.search_ms > 0) {
     const char* txt = "搜索中";
     text(txt, G.pvx * 16 * z - camx + 8 * z - text_w(txt, 1.0f) * 0.5f,
@@ -708,7 +830,11 @@ static void draw_messages() {
     draw_box(6, 76, BOT_W - 12, 22, C2D_Color32(0, 0, 0, 160), 0.38f);
     text_wrap(G.msg, 12, 80, BOT_W - 24, CLR_WHITE, 1.0f, 0.5f);
   }
-  text_wrap("摇杆/十字键移动光标，A 走向目标，Y 交互。", 10, 108, BOT_W - 20,
+  if (G.trap_notice_ms > 0) {
+    draw_box(6, 96, BOT_W - 12, 19, C2D_Color32(0, 0, 0, 195), 0.39f);
+    textf(12, 98, trap_color(G.trap_notice), 1.0f, "触发了%s！", trap_name(G.trap_notice));
+  }
+  text_wrap("摇杆/十字键移动光标，A 走向目标，Y 交互。", 10, 117, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
   text_wrap("快捷栏：点击道具使用；法杖/炸弹可进入瞄准模式。", 10, 138, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);

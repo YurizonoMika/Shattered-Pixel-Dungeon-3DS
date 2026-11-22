@@ -60,6 +60,29 @@ struct Feature {
   int16_t loot_gold = 0;
 };
 
+// Feature::aux stores the trap type. Keep the two older IDs readable.
+enum TrapKind : int16_t {
+  TR_LEGACY, TR_DART, TR_TOXIC, TR_ALARM, TR_CHILL, TR_FIRE, TR_SHOCK, TR_COUNT
+};
+
+inline bool trap_feature(uint8_t type) {
+  return type == F_TRAP || type == F_TRAP_FOUND || type == F_TRAP_DISARMED;
+}
+
+inline TrapKind trap_kind(const Feature& f) {
+  return f.aux >= 0 && f.aux < TR_COUNT ? TrapKind(f.aux) : TR_LEGACY;
+}
+
+const char* trap_name(TrapKind kind);
+constexpr int TRAP_FX_MS = 760;
+constexpr int TOXIC_TURNS = 6;
+constexpr int TOXIC_RADIUS = 2;
+
+struct TrapFx {
+  int x, y, age;
+  TrapKind kind;
+};
+
 enum class CombatStyle : uint8_t { Melee, Arcane, Fire, Frost, Lightning, Throw, Blast };
 enum class DamageKind : uint8_t { Direct, Physical };
 constexpr int DEATH_ANIM_MS = 460;
@@ -210,6 +233,8 @@ struct Game {
   std::vector<uint8_t> spawn_deck;
   uint8_t next_spawn_type();
   bool try_respawn();
+  int room_spawn_limit(const SpawnRoom& room) const;
+  int room_spawn_count(const SpawnRoom& room) const;
   int room_count = 0;
   uint8_t layout_builder = 0; // debug: 0 legacy, 1 loop, 2 figure eight
   uint8_t talents[4]{}, talent_tier = 0;
@@ -262,6 +287,9 @@ struct Game {
   int path_goal = -1;
   CombatPose hero_combat;
   std::vector<CombatFx> combat_fx;
+  std::vector<TrapFx> trap_fx;
+  int trap_notice_ms = 0;
+  TrapKind trap_notice = TR_LEGACY;
   int combat_delay = 0;
   void combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
                      CombatStyle style, uint8_t item = IT_NONE);
@@ -325,6 +353,8 @@ struct Game {
   void use_feature(int idx);
   void trigger_tile_features();
   void trigger_trap(int idx, Mob* who = nullptr);
+  bool in_toxic_cloud(const Feature& trap, int x, int y) const;
+  void tick_trap_clouds();
   void open_shop();
   void shop_buy(int i);
   void shop_sell(int i);

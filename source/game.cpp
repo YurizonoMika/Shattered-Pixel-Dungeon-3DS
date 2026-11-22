@@ -691,12 +691,38 @@ static bool floor_spawn_cell(const Game& g, int x, int y, uint8_t type) {
   const auto t = g.tiles[y][x];
   if (t != T_FLOOR && t != T_GRASS && t != T_WATER) return false;
   if (type == M_DM200 || type == M_GOLEM) {
+    const auto open = [&](int tx, int ty) { return g.walkable(tx, ty) && !g.blocks_sight(tx, ty); };
     for (int dy : {-1, 1}) for (int dx : {-1, 1})
-      if (!g.blocks_sight(x + dx, y) && !g.blocks_sight(x, y + dy) &&
-          !g.blocks_sight(x + dx, y + dy)) return true;
+      if (open(x + dx, y) && open(x, y + dy) && open(x + dx, y + dy)) return true;
     return false;
   }
   return true;
+}
+
+static bool avoids_spawn_cell(const Game& g, int x, int y) {
+  const int feature = g.feature_at(x, y);
+  if (feature < 0) return false;
+  const auto type = g.features[feature].type;
+  return type == F_TRAP || type == F_TRAP_FOUND || type == F_PLANT ||
+         (type == F_TRAP_DISARMED && g.features[feature].aux == TR_TOXIC &&
+          g.features[feature].state > 0);
+}
+
+int Game::room_spawn_limit(const SpawnRoom& room) const {
+  int area = 0;
+  for (int y = room.y + 1; y < room.y + room.h - 1; ++y)
+    for (int x = room.x + 1; x < room.x + room.w - 1; ++x)
+      if (tiles[y][x] == T_FLOOR || tiles[y][x] == T_GRASS || tiles[y][x] == T_WATER) ++area;
+  return std::clamp((area + 8) / 9, 1, 4);
+}
+
+int Game::room_spawn_count(const SpawnRoom& room) const {
+  int count = 0;
+  for (const Mob& mob : mobs) {
+    if (mob.alive && !is_npc(mob.type) && mob.x > room.x && mob.y > room.y &&
+        mob.x < room.x + room.w - 1 && mob.y < room.y + room.h - 1) ++count;
+  }
+  return count;
 }
 
 bool Game::try_respawn() {
@@ -704,19 +730,28 @@ bool Game::try_respawn() {
   int16_t dist[MH][MW];
   walk_distances(*this, dist, true);
   uint8_t type = next_spawn_type();
-  for (int attempt = 0; attempt < 30; ++attempt) {
-    for (int sample = 0; sample < 30; ++sample) {
-      const auto& r = spawn_rooms[ri(*this, 0, int(spawn_rooms.size()) - 1)];
-      int x = r.x + ri(*this, 1, r.w - 2), y = r.y + ri(*this, 1, r.h - 2);
-      if (vis[y][x] || !floor_spawn_cell(*this, x, y, type)) continue;
-      if (dist[y][x] >= 12) {
-        mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Wandering));
-        return true;
+  // Sample eligible cells across the floor. A room that is already crowded
+  // cannot receive a reinforcement, even when the floor-wide cap allows it.
+  int candidates = 0, cell = -1;
+  for (const auto& room : spawn_rooms) {
+    if (room_spawn_count(room) >= room_spawn_limit(room)) continue;
+    for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+      for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+        if (dist[y][x] < 12 || vis[y][x] || item_at(x, y) >= 0 ||
+            avoids_spawn_cell(*this, x, y) || !floor_spawn_cell(*this, x, y, type)) continue;
+        if (std::any_of(features.begin(), features.end(), [&](const Feature& trap) {
+              return in_toxic_cloud(trap, x, y);
+            })) continue;
+        if (ri(*this, 1, ++candidates) == 1) cell = y * MW + x;
       }
-      break;
     }
   }
-  return false;
+  if (cell < 0) {
+    spawn_deck.push_back(type);
+    return false;
+  }
+  mobs.push_back(make_floor_mob(*this, type, cell % MW, cell / MW, Mob::Wandering));
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -726,6 +761,8 @@ void Game::gen_level() {
   map_width = map_height = LEGACY_MAP_SIZE;
   hero_combat = {};
   combat_fx.clear();
+  trap_fx.clear();
+  trap_notice_ms = 0;
   combat_delay = 0;
   memset(tiles, T_WALL, sizeof(tiles));
   memset(seen, 0, sizeof(seen));
@@ -1320,7 +1357,8 @@ void Game::gen_level() {
       case SP_FIRE:
         for (int i = 0; i < 4; i++) {
           auto p = room_cell(r);
-          if (p.first >= 0) add_feature(F_TRAP, p.first, p.second);
+          const auto kind = r.spec == SP_TOXIC ? TR_TOXIC : r.spec == SP_FIRE ? TR_FIRE : TR_DART;
+          if (p.first >= 0) add_feature(F_TRAP_FOUND, p.first, p.second, 0, kind);
         }
         add_feature(F_CHEST, r.cx, r.cy);
         add_random_item(r, IT_POTION_HEAL, 0);
@@ -1383,6 +1421,7 @@ void Game::gen_level() {
     const auto& r = rooms[i];
     spawn_rooms.push_back({uint8_t(r.x), uint8_t(r.y), uint8_t(r.w), uint8_t(r.h)});
   }
+  if (!boss_floor) spawn_rooms.push_back({uint8_t(xr.x), uint8_t(xr.y), uint8_t(xr.w), uint8_t(xr.h)});
   // Floor generation runs on the game thread. Reuse these grids to stay
   // within the Homebrew Launcher stack budget on 64x64 floors.
   static int16_t reachable[MH][MW], after_chest[MH][MW];
@@ -1440,17 +1479,29 @@ void Game::gen_level() {
     place_loot(x, y, lr, container);
     if (container == F_CHEST_LOCKED && !supply(IT_GOLDEN_KEY)) features.back().type = F_CHEST;
   };
-  // Traps: Random.NormalIntRange(2, 3 + depth/5), doubled on trap floors.
-  const auto trap_roll_a = rnd(*this) >> 16;
-  const auto trap_roll_b = rnd(*this) >> 16;
-  int nTraps = boss_floor ? 0 : 2 + (trap_roll_a + trap_roll_b) * (2 + floor / 5) / 131072;
-  if (traps_feeling) nTraps *= 2;
-  for (int i = 0; i < nTraps; i++) {
-    if (std_rooms.empty()) break;
-    const GRoom& r = rooms[std_rooms[(int)(rnd(*this) % std_rooms.size())]];
-    auto p = room_cell(r);
-    if (p.first >= 0) add_feature(floor == 1 ? F_TRAP_FOUND : F_TRAP,
-                                  p.first, p.second, 0, floor == 1 ? 1 : 0);
+  if (!boss_floor) {
+    std::vector<int> cells;
+    for (const auto& room : rooms) {
+      if (room.kind != RK_STANDARD && room.kind != RK_CONNECTOR && room.kind != RK_EXIT &&
+          !(room.kind == RK_ENTRANCE && floor > 1)) continue;
+      for (int y = room.y + 1; y < room.y + room.h - 1; ++y)
+        for (int x = room.x + 1; x < room.x + room.w - 1; ++x)
+          if (tiles[y][x] == T_FLOOR && free_item_cell(x, y)) cells.push_back(y * MW + x);
+    }
+    const int base = std::min(layout_rng.normal(2, 3 + floor / 5), int(cells.size()) / 5);
+    // Leave room in V10's feature table for floor loot and quest objects.
+    const int count = std::min(base * (traps_feeling ? 5 : 1), std::max(0, 52 - int(features.size())));
+    constexpr TrapKind kinds[] = {TR_DART, TR_TOXIC, TR_ALARM, TR_CHILL, TR_FIRE, TR_SHOCK};
+    constexpr std::array<int,6> weights[] = {
+        {5,4,3,2,0,2}, {4,4,3,3,3,3}, {3,3,2,4,4,4}, {2,3,2,4,5,5}, {1,3,2,4,5,6}};
+    for (int i = 0; i < count; ++i) {
+      const int pick = layout_rng.index(int(cells.size()));
+      const int cell = cells[pick];
+      cells[pick] = cells.back();
+      cells.pop_back();
+      const auto kind = floor == 1 ? TR_DART : kinds[layout_rng.chances(weights[reg])];
+      add_feature(floor == 1 || i >= base ? F_TRAP_FOUND : F_TRAP, cell % MW, cell / MW, 0, kind);
+    }
   }
 
   // Quest token target.
@@ -1478,33 +1529,44 @@ void Game::gen_level() {
     if (large) limit = (int)ceilf(limit * 1.33f);
     mob_cap = (floor == 1) ? 0 : limit;
     respawn_t = plan_feeling[floor - 1] == 6 ? 100 : 150;
-    int16_t dist[MH][MW];
-    walk_distances(*this, dist, false, 8);
-    for (int i = int(std_rooms.size()) - 1; i > 0; --i)
-      std::swap(std_rooms[i], std_rooms[ri(*this, 0, i)]);
+    walk_distances(*this, reachable, false, 8);
+    std::vector<size_t> order;
+    std::vector<int> room_limits;
+    for (size_t i = 0; i < spawn_rooms.size(); ++i) {
+      room_limits.push_back(room_spawn_limit(spawn_rooms[i]));
+      order.push_back(i);
+    }
+    for (int i = int(order.size()) - 1; i > 0; --i)
+      std::swap(order[i], order[ri(*this, 0, i)]);
     int remaining = limit;
     uint8_t type = next_spawn_type();
-    auto place = [&](const GRoom& r) {
-      for (int attempt = 0; attempt < 30; ++attempt) {
-        int x = r.x + ri(*this, 1, r.w - 2), y = r.y + ri(*this, 1, r.h - 2);
-        if (dist[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) || item_at(x, y) >= 0) continue;
-        if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
-        int f = feature_at(x, y);
-        if (f >= 0 && (features[f].type == F_TRAP || features[f].type == F_TRAP_FOUND ||
-                       features[f].type == F_PLANT)) continue;
-        mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Sleeping));
-        if (--remaining) type = next_spawn_type();
-        return true;
+    auto place = [&](size_t index) {
+      const auto& room = spawn_rooms[index];
+      if (room_spawn_count(room) >= room_limits[index]) return false;
+      int candidates = 0, cell = -1;
+      for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+        for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+          if (reachable[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) ||
+              item_at(x, y) >= 0 || avoids_spawn_cell(*this, x, y)) continue;
+          if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
+          if (ri(*this, 1, ++candidates) == 1) cell = y * MW + x;
+        }
       }
-      return false;
+      if (cell < 0) return false;
+      mobs.push_back(make_floor_mob(*this, type, cell % MW, cell / MW, Mob::Sleeping));
+      if (--remaining) type = next_spawn_type();
+      return true;
     };
-    for (int pass = 0; pass < 30 && remaining; ++pass) {
-      for (int i : std_rooms) {
+    while (remaining > 0) {
+      const int before = remaining;
+      for (size_t i : order) {
         if (!remaining) break;
-        if (place(rooms[i]) && remaining && floor > 1 && ri(*this, 0, 3) == 0)
-          place(rooms[i]);
+        place(i);
       }
+      if (remaining == before) break;
     }
+    // A type selected only for a failed placement stays next in the rotation.
+    if (remaining) spawn_deck.push_back(type);
 
     // Reachability includes ordinary closed doors and excludes keyed or secret doors.
     reachable_count = walk_distances(*this, reachable, true);
@@ -2146,25 +2208,100 @@ void Game::use_feature(int idx) {
   }
 }
 
+const char* trap_name(TrapKind kind) {
+  switch (kind) {
+    case TR_DART: return "飞镖陷阱";
+    case TR_TOXIC: return "毒气陷阱";
+    case TR_ALARM: return "警报陷阱";
+    case TR_CHILL: return "寒霜陷阱";
+    case TR_FIRE: return "火焰陷阱";
+    case TR_SHOCK: return "电击陷阱";
+    default: return "旧式陷阱";
+  }
+}
+
+bool Game::in_toxic_cloud(const Feature& trap, int x, int y) const {
+  if (trap.type != F_TRAP_DISARMED || trap_kind(trap) != TR_TOXIC || !trap.state ||
+      !in_map(x, y) || blocks_sight(x, y)) return false;
+  const int radius = std::min(TOXIC_RADIUS, 1 + TOXIC_TURNS - int(trap.state));
+  return grid_distance(x, y, trap.x, trap.y) <= radius && los(trap.x, trap.y, x, y);
+}
+
+void Game::tick_trap_clouds() {
+  if (std::none_of(features.begin(), features.end(), [](const Feature& trap) {
+        return trap.type == F_TRAP_DISARMED && trap.aux == TR_TOXIC && trap.state;
+      })) return;
+  // Damage can remove a mimic payload from features, so collect exposures first.
+  bool hero_exposed = false;
+  std::vector<size_t> exposed;
+  for (const auto& trap : features) hero_exposed |= in_toxic_cloud(trap, px, py);
+  for (size_t i = 0; i < mobs.size(); ++i) {
+    const auto& mob = mobs[i];
+    if (!mob.alive || is_npc(mob.type) || mob.type == M_WRAITH) continue;
+    for (const auto& trap : features) {
+      if (!in_toxic_cloud(trap, mob.x, mob.y)) continue;
+      exposed.push_back(i);
+      break;
+    }
+  }
+  for (auto& trap : features)
+    if (trap.type == F_TRAP_DISARMED && trap_kind(trap) == TR_TOXIC && trap.state) --trap.state;
+  const int damage = 2 + floor / 8;
+  for (size_t i : exposed) damage_mob(int(i), damage);
+  if (hero_exposed) take_damage(ring_has(IT_RING_ELEMENTS) ? damage / 2 : damage);
+}
+
 void Game::trigger_trap(int idx, Mob* who) {
+  if (idx < 0 || idx >= int(features.size())) return;
   Feature& f = features[idx];
   if (f.type != F_TRAP_FOUND && (f.type != F_TRAP || who)) return;
   if ((who && (who->type == M_BAT || who->type == M_SWARM || who->type == M_WRAITH ||
                who->type == M_EYE)) || (!who && levit_t > 0)) return;
-  const bool dart = f.aux == 1;
+  const TrapKind kind = trap_kind(f);
+  const int x = f.x, y = f.y;
+  f.type = F_TRAP_DISARMED;
+  if (!who) clear_path();
+  if (!who || vis[y][x]) {
+    trap_notice = kind;
+    trap_notice_ms = 2200;
+    if (trap_fx.size() < 16) trap_fx.push_back({x, y, 0, kind});
+  }
+  if (kind == TR_TOXIC) {
+    f.state = TOXIC_TURNS;
+    return;
+  }
+  if (kind == TR_ALARM) {
+    for (auto& mob : mobs) {
+      if (!mob.alive || is_npc(mob.type) || grid_distance(x, y, mob.x, mob.y) > 10) continue;
+      mob.sleep_t = 0;
+      mob.terror_t = 0;
+      mob.ai = Mob::Hunting;
+      mob.target = y * MW + x;
+    }
+    return;
+  }
+  const bool dart = kind == TR_DART;
   int raw = 3 + floor / 4;
   if (dart) {
     const uint32_t a = rnd(*this) >> 16, b = rnd(*this) >> 16;
     raw = 4 + int((a + b) * 5 / 131072);
   }
-  f.type = F_TRAP_DISARMED;
+  if (kind == TR_CHILL) {
+    raw = 2 + floor / 5;
+    if (who) who->sleep_t = std::max<uint8_t>(who->sleep_t, 2);
+    else haste_t = 0;
+  } else if (kind == TR_FIRE) {
+    raw = 5 + floor / 3;
+  } else if (kind == TR_SHOCK) {
+    raw = 4 + floor / 3;
+    if (tiles[y][x] == T_WATER) raw += 2;
+  }
   if (who) {
     damage_mob(int(who - mobs.data()), raw, dart ? DamageKind::Physical : DamageKind::Direct);
     return;
   }
   int dmg = dart ? std::max(0, raw - damage_reduction(*this, armor_bonus())) : raw;
   if (!dart && ring_has(IT_RING_ELEMENTS)) dmg /= 2;
-  message(dart ? "陷阱射出了一支飞镖！" : "你踩中了陷阱！");
   take_damage(dmg);
 }
 
@@ -2726,6 +2863,10 @@ void Game::tick(int dt_ms) {
   const float sp = dt_ms * 0.014f;
   if (!freeze_anim) {
     water_anim_ms = (water_anim_ms + dt_ms) % 6400; // 32 pixels at 5 px/s
+    trap_notice_ms = std::max(0, trap_notice_ms - dt_ms);
+    for (auto& fx : trap_fx) fx.age += dt_ms;
+    trap_fx.erase(std::remove_if(trap_fx.begin(), trap_fx.end(),
+        [](const TrapFx& fx) { return fx.age >= TRAP_FX_MS; }), trap_fx.end());
     auto advance_pose = [&](CombatPose& p) {
       if (p.age >= 0 && (p.age += dt_ms) >= 420) p.age = -1;
       if (p.hit_age < 200) p.hit_age += dt_ms;
@@ -3049,6 +3190,8 @@ void Game::check_talents() {
 void Game::advance_turn() {
   if (dead) return;
   turns++;
+  tick_trap_clouds();
+  if (dead) return;
   if (turns % 12 == 0 && hp < maxhp) hp++;
   if (haste_t > 0) haste_t--;
   if (invis_t > 0) invis_t--;
@@ -3542,6 +3685,11 @@ bool Game::load(int slot) {
     f.type = d.features[i].type; f.state = d.features[i].state;
     if (!have_map && f.type == F_TRAP_FOUND) f.type = F_TRAP_DISARMED;
     f.aux = d.features[i].aux;
+    if (trap_feature(f.type)) {
+      f.aux = trap_kind(f);
+      f.state = f.type == F_TRAP_DISARMED && f.aux == TR_TOXIC ?
+          std::min(int(f.state), TOXIC_TURNS) : 0;
+    }
     f.loot_id = d.features[i].loot_id;
     f.loot_level = d.features[i].loot_level;
     f.loot_gold = d.features[i].loot_gold;
@@ -3585,6 +3733,8 @@ bool Game::load(int slot) {
   pvx = (float)px; pvy = (float)py; panim_ms = 0;
   hero_combat = {};
   combat_fx.clear();
+  trap_fx.clear();
+  trap_notice_ms = 0;
   combat_delay = 0;
   clear_path();
   cursor_x = px; cursor_y = py;
