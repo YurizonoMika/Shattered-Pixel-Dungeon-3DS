@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace floor_layout {
@@ -67,10 +68,13 @@ inline Random floor_random(uint64_t seed, int depth) {
 
 enum class Kind { Entrance, Exit, Standard, Shop, Leaf, Secret, Connector };
 enum Connector { Tunnel, Bridge, Perimeter, Walkway, RingTunnel, RingBridge, Maze };
+enum class DimParity { Any, Odd, Even };
 struct Spec {
   Kind kind;
   int min_w, max_w, min_h, max_h;
   int factor = 1, total = 16, side = 4;
+  DimParity parity = DimParity::Any;
+  int door_margin = 1;
 };
 struct Point { int x, y; };
 struct Center { float x, y; };
@@ -120,12 +124,25 @@ inline int side_of(Rect a, Rect b) {
   return -1;
 }
 
-inline Point choose_door(Rect a, Rect b, Random& rng) {
-  const int side = side_of(a, b);
-  if (side % 2 == 0) return {std::max(a.l,b.l), std::max(a.t,b.t) + 1 +
-      rng.index(std::min(a.b,b.b) - std::max(a.t,b.t) - 1)};
-  return {std::max(a.l,b.l) + 1 + rng.index(std::min(a.r,b.r) - std::max(a.l,b.l) - 1),
-          std::max(a.t,b.t)};
+inline std::pair<int,int> door_span(const Room& a, const Room& b, int side) {
+  const bool vertical = side % 2 == 0;
+  return {std::max((vertical ? a.box.t : a.box.l) + a.spec.door_margin,
+                   (vertical ? b.box.t : b.box.l) + b.spec.door_margin),
+          std::min((vertical ? a.box.b : a.box.r) - a.spec.door_margin,
+                   (vertical ? b.box.b : b.box.r) - b.spec.door_margin)};
+}
+
+inline Point choose_door(const Room& a, const Room& b, Random& rng) {
+  const int side = side_of(a.box, b.box);
+  const auto [lo, hi] = door_span(a, b, side);
+  const int p = lo + rng.index(hi - lo + 1);
+  return side % 2 == 0 ? Point{std::max(a.box.l,b.box.l),p} :
+                         Point{p,std::max(a.box.t,b.box.t)};
+}
+
+inline int room_dimension(int roll, int limit, DimParity parity) {
+  const int dim = std::min(roll, limit);
+  return dim - (parity != DimParity::Any && (dim % 2 != (parity == DimParity::Odd)));
 }
 
 class Builder {
@@ -166,7 +183,8 @@ class Builder {
       for (int n : r.links) used += side_of(r.box, out.rooms[n].box) == side;
       return used < r.spec.side;
     };
-    if (!available(ra, s) || !available(rb, (s+2)%4)) return false;
+    const auto [lo, hi] = door_span(ra, rb, s);
+    if (lo > hi || !available(ra, s) || !available(rb, (s+2)%4)) return false;
     ra.links.push_back(b); rb.links.push_back(a);
     return true;
   }
@@ -228,8 +246,8 @@ class Builder {
     const Spec s = room.spec;
     const Rect space = free_space(start, collision, std::max(s.max_w,s.max_h));
     if (space.w() < s.min_w || space.h() < s.min_h) return false;
-    const int w = std::min(space.w(), rng.normal(s.min_w,s.max_w))-1;
-    const int h = std::min(space.h(), rng.normal(s.min_h,s.max_h))-1;
+    const int w = room_dimension(rng.normal(s.min_w,s.max_w),space.w(),s.parity)-1;
+    const int h = room_dimension(rng.normal(s.min_h,s.max_h),space.h(),s.parity)-1;
     Rect n{0,0,w,h};
     if (vertical) {
       const int y = forward ? p.b : p.t-h;
@@ -346,8 +364,8 @@ public:
     std::vector<int> first, second;
     auto init_root = [&](int root) {
       auto& r = out.rooms[root];
-      r.box.r = rng.normal(r.spec.min_w,r.spec.max_w)-1;
-      r.box.b = rng.normal(r.spec.min_h,r.spec.max_h)-1;
+      r.box.r = room_dimension(rng.normal(r.spec.min_w,r.spec.max_w),r.spec.max_w,r.spec.parity)-1;
+      r.box.b = room_dimension(rng.normal(r.spec.min_h,r.spec.max_h),r.spec.max_h,r.spec.parity)-1;
     };
     if (!shape.eight) {
       init_root(entrance);

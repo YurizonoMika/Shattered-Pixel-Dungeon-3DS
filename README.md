@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.2alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.3alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,14 +15,14 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.2alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.2alpha):**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.3alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.3alpha):**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-**Latest update:** v0.1.2alpha fixes black water in all five regions by restoring the
-original scrolling water textures. The save format is unchanged from v0.1.1alpha.
+**Latest update:** v0.1.3alpha uses the v4.0.2 room selection, sizes and door
+constraints for regular-floor entrances, exits and ordinary rooms. The save format is unchanged.
 
 > **Status: complete 25-floor run, five regions, full save/load.** All five SPD
 > regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
@@ -150,8 +150,11 @@ original scrolling water textures. The save format is unchanged from v0.1.1alpha
   `FigureEightBuilder`, including weighted branches, connector rooms, and extra
   links. Water and grass use the regional `Patch` parameters, and secret
   connectors use the upstream maze algorithm.
-- **Room inputs** still come from the port's region budgets and room catalog.
-  Boss floors and room-specific painters are not yet equivalent to upstream.
+- **Room inputs** use upstream regional weights and size budgets for entrances,
+  exits and ordinary rooms, including the early Sewers restrictions and the
+  Large feeling. Special, secret, quest and shop rooms still use the port's
+  run plan and simplified geometry. Room interiors and boss floors are not yet
+  equivalent to upstream.
 - **Special rooms** are drawn from SPD's equip/consumable rotation and include
   treasury, armory, crypt, pool, magic well, garden, library, storage, laboratory
   (one per region on floor 3/4), statue, sentry, trap/toxic/fire rooms, runestone

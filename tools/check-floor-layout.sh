@@ -85,3 +85,48 @@ diff -u "$scratch/java.txt" "$scratch/native.txt"
 printf '1,000 Loop/FigureEight fixtures match v4.0.2 (room geometry, type, link order, RNG state)\n'
 printf '500 Patch fixtures match v4.0.2 (cell masks and RNG state)\n'
 printf '100 Maze fixtures match v4.0.2 (wall masks and RNG state)\n'
+
+# Test the regular-floor prefix separately: real upstream factories,
+# constructors, budgets and geometry, with painting and game services omitted.
+level_src="core/src/main/java/$dir/levels"
+standard_src="$level_src/rooms/standard"
+while IFS= read -r path; do
+  relative=${path#"$level_src/"}
+  mkdir -p "$scratch/java/$dir/levels/$(dirname "$relative")"
+  git -C "$upstream" show "$ref:$path" | awk -f tools/floor-layout/room-geometry.awk > "$scratch/java/$dir/levels/$relative"
+done < <(git -C "$upstream" ls-tree -r --name-only "$ref" "$standard_src" | grep '/[^/]*Room\.java$' | grep -vE '/ImpShopRoom\.java$|/quest/')
+stub "$game" Dungeon 'public class Dungeon { public static int depth; }'
+stub com.watabou.utils Reflection 'public class Reflection {
+    public static <T> T newInstance(Class<T> c) {
+        try { return c.getDeclaredConstructor().newInstance(); }
+        catch (ReflectiveOperationException e) { throw new RuntimeException(e); }
+    }
+}'
+{
+  printf 'package %s.levels;\n' "$game"
+  printf 'import %s.Dungeon;\n' "$game"
+  printf 'import %s.levels.rooms.standard.StandardRoom;\n' "$game"
+  printf 'import %s.levels.rooms.standard.entrance.EntranceRoom;\n' "$game"
+  printf 'import %s.levels.rooms.standard.exit.ExitRoom;\n' "$game"
+  printf 'import com.watabou.utils.Random;\nimport java.util.ArrayList;\npublic class RoomBudget {\n'
+  for region in Sewer Prison Caves City Halls; do
+    git -C "$upstream" show "$ref:$level_src/${region}Level.java" |
+      sed -n '/protected int standardRooms(boolean forceMax)/,/^[[:space:]]*}/p' |
+      sed "s/protected int standardRooms/static int standardRooms$region/"
+  done
+  printf '%s\n' 'static int standardRooms(boolean large) {' 'switch ((Dungeon.depth-1)/5) {'
+  printf '%s\n' 'case 0: return standardRoomsSewer(large);' 'case 1: return standardRoomsPrison(large);' \
+    'case 2: return standardRoomsCaves(large);' 'case 3: return standardRoomsCity(large);' 'default: return standardRoomsHalls(large);' '} }'
+  printf '%s\n' 'public static ArrayList<StandardRoom> initRooms(boolean large) {'
+  git -C "$upstream" show "$ref:$level_src/RegularLevel.java" |
+    awk '/protected ArrayList<Room> initRooms\(/ { prefix=1; next } /if \(Dungeon.shopOnLevel\(\)\)/ { exit } prefix' |
+    sed -e 's/ArrayList<Room>/ArrayList<StandardRoom>/' -e 's/roomEntrance = //; s/roomExit = //; s/feeling == Feeling.LARGE/large/g'
+  printf '%s\n' 'return initRooms; } }'
+} > "$scratch/java/$dir/levels/RoomBudget.java"
+find "$scratch/java" -name '*.java' -print > "$scratch/sources.txt"
+javac -d "$scratch/classes" @"$scratch/sources.txt" tools/floor-layout/RoomOracle.java
+java -cp "$scratch/classes" RoomOracle > "$scratch/java-rooms.txt"
+"${CXX:-c++}" -std=c++17 -O2 -ffp-contract=off -Isource tools/floor-layout/room-native.cpp -o "$scratch/room-native"
+"$scratch/room-native" > "$scratch/native-rooms.txt"
+diff -u "$scratch/java-rooms.txt" "$scratch/native-rooms.txt"
+printf '2,000 regular-floor prefixes match v4.0.2 (ordered room types, sizes, door candidates and RNG state)\n'

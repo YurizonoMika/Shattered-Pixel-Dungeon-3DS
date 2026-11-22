@@ -2,6 +2,7 @@
 #include "floor_layout.h"
 #include "floor_maze.h"
 #include "floor_patch.h"
+#include "floor_rooms.h"
 #include "pathfinder.h"
 
 void dlog(const char* fmt, ...);
@@ -756,23 +757,18 @@ void Game::gen_level() {
   Layout layout;
   layout_builder = 0;
   if (!boss_floor) {
-    // Room inputs currently come from the port's run plan. Keep the graph's
-    // random stream independent of the native loot and actor streams.
-    std::vector<Spec> specs{{Kind::Entrance,5,10,5,10}, {Kind::Exit,5,10,5,10}};
-    for (int remaining = nstd; remaining > 0;) {
-      int factor = 1;
-      if (remaining >= 2 && layout_rng.index(large ? 3 : 6) == 0) factor = 2;
-      const int min = factor == 1 ? 4 : 10, max = factor == 1 ? 10 : 14;
-      specs.push_back({Kind::Standard,min,max,min,max,factor});
-      remaining -= factor;
-    }
-    nstd = int(specs.size()) - 2;
+    const auto standard = standard_room_inputs(layout_rng, floor, large);
+    std::vector<Spec> specs;
+    specs.reserve(standard.size() + nspec + nsecret + int(shop) + int(quest_extra));
+    for (const auto& r : standard) specs.push_back(r.spec);
     if (shop) specs.push_back({Kind::Shop,7,10,7,10,1,1,1});
-    if (quest_extra) specs.push_back({Kind::Leaf,7,10,7,10,1,1,1});
     for (int i = 0; i < nspec; ++i)
       specs.push_back({Kind::Leaf,5,10,5,10,1,1,1});
     for (int i = 0; i < nsecret; ++i)
       specs.push_back({Kind::Secret,5,10,5,10,1,1,1});
+    // The original regional overrides append quest rooms after initRooms.
+    // These are still the port's quest-room placeholders and run-plan rolls.
+    if (quest_extra) specs.push_back({Kind::Leaf,7,10,7,10,1,1,1});
     std::vector<int> order;
     for (int i = 0; i < int(specs.size()); ++i) order.push_back(i);
     layout_rng.shuffle(order);
@@ -781,6 +777,7 @@ void Game::gen_level() {
       layout = builder.attempt(specs, order);
       if (!layout.rooms.empty() && normalize(layout, 1, MW, MH)) {
         layout_builder = shape.eight ? 2 : 1;
+        nstd = int(standard.size()) - 2;
         break;
       }
       layout = {};
@@ -799,12 +796,12 @@ void Game::gen_level() {
       else if (layout.rooms[i].spec.kind == Kind::Connector) r.kind = RK_CONNECTOR;
       else if (leaf >= 0) {
         if (shop && leaf == 0) r.kind = RK_SHOP;
-        else if (quest_extra && leaf == int(shop)) r.kind = RK_QUEST;
-        else if ((leaf -= int(shop) + int(quest_extra)) < nspec) {
+        else if ((leaf -= int(shop)) < nspec) {
           r.kind = RK_SPECIAL;
           r.spec = plan_special[floor - 1][leaf];
           r.locked = spec_locked(r.spec);
-        } else r.kind = RK_SECRET;
+        } else if (leaf < nspec + nsecret) r.kind = RK_SECRET;
+        else r.kind = RK_QUEST;
       }
       if (r.kind != RK_CONNECTOR)
         for (int y = r.y + 1; y < r.y + r.h - 1; ++y)
@@ -818,7 +815,7 @@ void Game::gen_level() {
     for (int a : paint_order) for (int b : layout.rooms[a].links) {
       if (placed[a][b]) continue;
       placed[a][b] = placed[b][a] = true;
-      const Point d = choose_door(layout.rooms[a].box, layout.rooms[b].box, layout_rng);
+      const Point d = choose_door(layout.rooms[a], layout.rooms[b], layout_rng);
       doors[a].push_back(d); doors[b].push_back(d);
       const uint8_t tile = rooms[a].locked || rooms[b].locked ? T_DOOR_LOCKED :
           rooms[a].kind == RK_SECRET || rooms[b].kind == RK_SECRET ||

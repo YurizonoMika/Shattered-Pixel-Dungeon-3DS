@@ -8,12 +8,12 @@
 
 ## 下载和安装
 
-当前版本：[v0.1.2alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.2alpha)。本版修复了五个区域的黑水问题，恢复原版滚动水纹；存档格式与 v0.1.1alpha 相同。
+当前版本：[v0.1.3alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.3alpha)。普通层的入口、出口和普通房已采用 v4.0.2 的房型权重、尺寸和门位约束；存档格式未变。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.2alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.3alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
@@ -33,7 +33,7 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 - 回合制移动与战斗、装备和消耗品、快捷栏、商店买卖与回购、任务、炼金及简化天赋。铁钥匙、金钥匙和水晶钥匙各有对应的锁；搜索能揭示暗门和陷阱，但不会解除陷阱。
 - 普通层使用移植自 v4.0.2 的单环和双环构建器，支持可变尺寸布局、支路、连接房与迷宫。水草区域使用原版斑块算法和五个区域的参数。普通层会投放食物，大型楼层额外投放一份。
 - 地图有可见、已探索、卷轴揭示和未探索四种雾状态。门离开后在无人或物品占用时自动关闭。墙体和侧门使用独立前景素材；水纹以每秒 5 像素滚动，岸边和雾叠加在水面之上。
-- 目前**不能用相同种子复现原版整层地图**。部分房型、首领阶段和任务子地图仍未完整移植。已验证的范围见 [v4.0.2 楼层机制对照（英文）](docs/floor-mechanics-parity.md)。
+- 目前**不能用相同种子复现原版整层地图**。普通房内部绘制、特殊房和暗房抽选、任务房生成、首领阶段和任务子地图仍未完整移植。已验证的范围见 [v4.0.2 楼层机制对照（英文）](docs/floor-mechanics-parity.md)。
 
 | 层数 | 区域 | 首领 |
 | --- | --- | --- |
