@@ -5,6 +5,8 @@
 #include "floor_painter.h"
 #include "floor_rooms.h"
 #include "pathfinder.h"
+#include "hero_rules.h"
+#include "mob_rules.h"
 
 void dlog(const char* fmt, ...);
 
@@ -36,6 +38,10 @@ static int damage_reduction(Game& g, int maximum) {
   if (maximum <= 0) return 0;
   const float first = combat_roll(g), second = combat_roll(g);
   return int((first + second) * (maximum + 1) * 0.5f);
+}
+static int normal_roll(Game& g, int minimum, int maximum) {
+  const float first = combat_roll(g), second = combat_roll(g);
+  return minimum + int((first + second) * (maximum - minimum + 1) * .5f);
 }
 static int ring_bonus(const Game& g, uint8_t ring) {
   return (g.ring1 == ring ? 1 + g.ring1_level : 0) +
@@ -93,35 +99,57 @@ static void gain_gold(Game& g, int amount) {
 }
 static bool is_boss(uint8_t t) { return mob_def(t).boss; }
 
-int Game::hero_atk() const {
-  static const int atk[6] = {3, 2, 4, 3, 3, 2};
-  return atk[hero % 6];
-}
-int Game::hero_def() const {
-  static const int def[6] = {1, 0, 0, 0, 0, 1};
-  return def[hero % 6];
-}
-int Game::weapon_bonus() const {
-  if (weapon == IT_NONE) return 0;
-  return item_def(weapon).power + weapon_level * 2;
-}
 int Game::bag_capacity() const {
   return BAG_CAP + 5 * ((bag_potion ? 1 : 0) + (bag_scroll ? 1 : 0) +
                         (bag_wand ? 1 : 0));
 }
 
-int Game::armor_bonus() const {
-  if (armor == IT_NONE) return 0;
-  return item_def(armor).power + armor_level;
-}
 bool Game::ring_has(uint8_t id) const {
   return ring1 == id || ring2 == id;
 }
 int Game::ring_atk() const {
-  int b = 0;
-  if (ring1 == IT_RING_MIGHT) b += 2 + ring1_level;
-  if (ring2 == IT_RING_MIGHT) b += 2 + ring2_level;
-  return b;
+  return ring_bonus(*this, IT_RING_FORCE);
+}
+
+int Game::effective_strength() const { return strength + ring_bonus(*this, IT_RING_MIGHT); }
+
+int Game::roll_armor() {
+  if (armor == IT_NONE) return 0;
+  const auto range = hero_rules::armor_range(armor, armor_level);
+  const int missing = std::max(0, hero_rules::strength_requirement(armor, armor_level) - effective_strength());
+  return std::max(0, normal_roll(*this, range.min, range.max) - 2 * missing);
+}
+
+int Game::roll_weapon(const Mob& target) {
+  const int force = ring_bonus(*this,IT_RING_FORCE);
+  if (weapon == IT_NONE && force > 0) {
+    const auto range = hero_rules::unarmed_force_range(effective_strength(),force);
+    return normal_roll(*this,range.min,range.max);
+  }
+  const int required = hero_rules::strength_requirement(weapon, weapon_level);
+  const bool surprise = effective_strength() >= required &&
+      (invis_t > 0 || target.ai != Mob::Hunting || target.target != py * MW + px || target.sleep_t);
+  const auto range = hero_rules::weapon_range(weapon, weapon_level, effective_strength(), surprise);
+  int damage = normal_roll(*this, range.min, range.max);
+  if (weapon != IT_NONE) damage += ri(*this, 0, std::max(0, effective_strength() - required));
+  return damage + ring_atk();
+}
+
+float Game::hero_evasion() const {
+  float value = (4 + level) * std::pow(1.125f, ring_bonus(*this, IT_RING_EVASION));
+  if (armor != IT_NONE) {
+    const int missing = std::max(0, hero_rules::strength_requirement(armor, armor_level) - effective_strength());
+    value /= std::pow(1.5f, missing);
+  }
+  return value;
+}
+
+int Game::roll_mob_damage(const Mob& mob) {
+  // Their original summon-only/finale scripts are not implemented yet.
+  // Preserve the native encounter damage until those scripts replace it.
+  if (mob.type == M_YOG || mob.type == M_NECROMANCER) return mob.atk;
+  const auto rule = mob_rules::base(mob.type, floor, 2*mob.hp <= mob.maxhp);
+  return normal_roll(*this, rule.min, rule.max);
 }
 void Game::equip_ring(int idx) {
   if (idx < 0 || idx >= inv_n) return;
@@ -193,6 +221,11 @@ bool Game::blocks_sight(int x, int y) const {
   uint8_t t = tiles[y][x];
   return t == T_WALL || t == T_SECRET || t == T_DOOR || t == T_DOOR_LOCKED;
 }
+
+bool Game::visible_trap_at(int x, int y) const {
+  const int index = feature_at(x, y);
+  return index >= 0 && features[index].type == F_TRAP_FOUND;
+}
 int Game::mob_at(int x, int y) const {
   for (size_t i = 0; i < mobs.size(); i++) {
     const Mob& m = mobs[i];
@@ -247,22 +280,10 @@ void Game::recompute_fov() {
 // Equipment / loot tables
 // ---------------------------------------------------------------------------
 static uint8_t weapon_for_tier(int t) {
-  switch (t) {
-    case 1: return IT_SHORTSWORD;
-    case 2: return IT_LONGSWORD;
-    case 3: return IT_WARHAMMER;
-    case 4: return IT_GREATAXE;
-    default: return IT_RUNEBLADE;
-  }
+  return hero_rules::weapon_for_tier(t, 0);
 }
 static uint8_t armor_for_tier(int t) {
-  switch (t) {
-    case 1: return IT_LEATHER_ARMOR;
-    case 2: return IT_MAIL;
-    case 3: return IT_SCALE;
-    case 4: return IT_PLATE;
-    default: return IT_RUNE_ARMOR;
-  }
+  return hero_rules::armor_for_tier(t);
 }
 static uint8_t random_wand(Game& g, int tier) {
   static const uint8_t WANDS[13] = {
@@ -277,14 +298,7 @@ static uint8_t random_wand(Game& g, int tier) {
 }
 
 static uint8_t weapon_for_tier_rand(Game& g, int t) {
-  static const uint8_t T[5][3] = {
-      {IT_DAGGER, IT_SHORTSWORD, IT_CUDGEL},
-      {IT_LONGSWORD, IT_HAND_AXE, IT_SPEAR},
-      {IT_WARHAMMER, IT_SCIMITAR, IT_WHIP},
-      {IT_GREATAXE, IT_GREATSWORD, IT_HALBERD},
-      {IT_RUNEBLADE, IT_BATTLEAXE, IT_GIANT_HAMMER}};
-  t = t < 1 ? 1 : (t > 5 ? 5 : t);
-  return T[t - 1][ri(g, 0, 2)];
+  return hero_rules::weapon_for_tier(t, ri(g, 0, 2));
 }
 
 struct LootRoll {
@@ -642,8 +656,8 @@ static Mob make_floor_mob(const Game& g, uint8_t type, int x, int y, Mob::Ai ai)
   m.x = x; m.y = y; m.vx = x; m.vy = y;
   m.type = type; m.hp = m.maxhp = d.hp; m.atk = d.atk; m.def = d.def;
   if (type == M_MIMIC) {
-    m.hp = m.maxhp = 12 + 4 * g.floor;
-    m.def = 1 + g.floor / 3;
+    m.hp = m.maxhp = 6 * (g.floor + 1);
+    m.def = 1 + g.floor / 2;
   }
   m.ai = ai;
   return m;
@@ -708,50 +722,24 @@ static bool avoids_spawn_cell(const Game& g, int x, int y) {
           g.features[feature].state > 0);
 }
 
-int Game::room_spawn_limit(const SpawnRoom& room) const {
-  int area = 0;
-  for (int y = room.y + 1; y < room.y + room.h - 1; ++y)
-    for (int x = room.x + 1; x < room.x + room.w - 1; ++x)
-      if (tiles[y][x] == T_FLOOR || tiles[y][x] == T_GRASS || tiles[y][x] == T_WATER) ++area;
-  return std::clamp((area + 8) / 9, 1, 4);
-}
-
-int Game::room_spawn_count(const SpawnRoom& room) const {
-  int count = 0;
-  for (const Mob& mob : mobs) {
-    if (mob.alive && !is_npc(mob.type) && mob.x > room.x && mob.y > room.y &&
-        mob.x < room.x + room.w - 1 && mob.y < room.y + room.h - 1) ++count;
-  }
-  return count;
-}
-
 bool Game::try_respawn() {
   if (spawn_rooms.empty()) return false;
   int16_t dist[MH][MW];
   walk_distances(*this, dist, true);
   uint8_t type = next_spawn_type();
-  // Sample eligible cells across the floor. A room that is already crowded
-  // cannot receive a reinforcement, even when the floor-wide cap allows it.
-  int candidates = 0, cell = -1;
-  for (const auto& room : spawn_rooms) {
-    if (room_spawn_count(room) >= room_spawn_limit(room)) continue;
-    for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
-      for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
-        if (dist[y][x] < 12 || vis[y][x] || item_at(x, y) >= 0 ||
-            avoids_spawn_cell(*this, x, y) || !floor_spawn_cell(*this, x, y, type)) continue;
-        if (std::any_of(features.begin(), features.end(), [&](const Feature& trap) {
-              return in_toxic_cloud(trap, x, y);
-            })) continue;
-        if (ri(*this, 1, ++candidates) == 1) cell = y * MW + x;
+  for (int attempt = 0; attempt < 30; ++attempt) {
+    for (int sample = 0; sample < 30; ++sample) {
+      const auto& room = spawn_rooms[ri(*this, 0, int(spawn_rooms.size())-1)];
+      const int x = room.x + ri(*this, 1, room.w-2), y = room.y + ri(*this, 1, room.h-2);
+      if (vis[y][x] || !floor_spawn_cell(*this, x,y,type)) continue;
+      if (dist[y][x] >= 12) {
+        mobs.push_back(make_floor_mob(*this,type,x,y,Mob::Wandering));
+        return true;
       }
+      break;
     }
   }
-  if (cell < 0) {
-    spawn_deck.push_back(type);
-    return false;
-  }
-  mobs.push_back(make_floor_mob(*this, type, cell % MW, cell / MW, Mob::Wandering));
-  return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +761,7 @@ void Game::gen_level() {
   search_fx.clear();
   search_ms = 0;
   spawn_rooms.clear();
+  spawn_weights.clear();
   spawn_deck.clear();
   respawn_t = 0;
   mob_cap = 0;
@@ -1420,8 +1409,12 @@ void Game::gen_level() {
   for (int i : std_rooms) {
     const auto& r = rooms[i];
     spawn_rooms.push_back({uint8_t(r.x), uint8_t(r.y), uint8_t(r.w), uint8_t(r.h)});
+    spawn_weights.push_back(layout.rooms.empty() ? 1 : layout.rooms[i].spec.factor);
   }
-  if (!boss_floor) spawn_rooms.push_back({uint8_t(xr.x), uint8_t(xr.y), uint8_t(xr.w), uint8_t(xr.h)});
+  if (!boss_floor) {
+    spawn_rooms.push_back({uint8_t(xr.x), uint8_t(xr.y), uint8_t(xr.w), uint8_t(xr.h)});
+    spawn_weights.push_back(layout.rooms.empty() ? 1 : layout.rooms[exit_room].spec.factor);
+  }
   // Floor generation runs on the game thread. Reuse these grids to stay
   // within the Homebrew Launcher stack budget on 64x64 floors.
   static int16_t reachable[MH][MW], after_chest[MH][MW];
@@ -1531,10 +1524,8 @@ void Game::gen_level() {
     respawn_t = plan_feeling[floor - 1] == 6 ? 100 : 150;
     walk_distances(*this, reachable, false, 8);
     std::vector<size_t> order;
-    std::vector<int> room_limits;
     for (size_t i = 0; i < spawn_rooms.size(); ++i) {
-      room_limits.push_back(room_spawn_limit(spawn_rooms[i]));
-      order.push_back(i);
+      for (int repeat = 0; repeat < spawn_weights[i]; ++repeat) order.push_back(i);
     }
     for (int i = int(order.size()) - 1; i > 0; --i)
       std::swap(order[i], order[ri(*this, 0, i)]);
@@ -1542,30 +1533,26 @@ void Game::gen_level() {
     uint8_t type = next_spawn_type();
     auto place = [&](size_t index) {
       const auto& room = spawn_rooms[index];
-      if (room_spawn_count(room) >= room_limits[index]) return false;
-      int candidates = 0, cell = -1;
-      for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
-        for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
-          if (reachable[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) ||
-              item_at(x, y) >= 0 || avoids_spawn_cell(*this, x, y)) continue;
-          if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
-          if (ri(*this, 1, ++candidates) == 1) cell = y * MW + x;
-        }
+      for (int tries = 0; tries < 31; ++tries) {
+        const int x = room.x + ri(*this,1,room.w-2), y = room.y + ri(*this,1,room.h-2);
+        if (reachable[y][x] >= 0 || !floor_spawn_cell(*this, x, y, type) ||
+            avoids_spawn_cell(*this, x, y)) continue;
+        if ((x - px) * (x - px) + (y - py) * (y - py) <= 65 && los(px, py, x, y)) continue;
+        mobs.push_back(make_floor_mob(*this, type, x, y, Mob::Sleeping));
+        if (--remaining) type = next_spawn_type();
+        return true;
       }
-      if (cell < 0) return false;
-      mobs.push_back(make_floor_mob(*this, type, cell % MW, cell / MW, Mob::Sleeping));
-      if (--remaining) type = next_spawn_type();
-      return true;
+      return false;
     };
     while (remaining > 0) {
       const int before = remaining;
       for (size_t i : order) {
         if (!remaining) break;
-        place(i);
+        if (place(i) && remaining && floor > 1 && ri(*this,0,3) == 0) place(i);
       }
       if (remaining == before) break;
     }
-    // A type selected only for a failed placement stays next in the rotation.
+    // Bounded exhaustion protects the native floor from an infinite retry.
     if (remaining) spawn_deck.push_back(type);
 
     // Reachability includes ordinary closed doors and excludes keyed or secret doors.
@@ -1691,9 +1678,23 @@ void Game::new_run(int hero_class, uint32_t s) {
   smith_state = ore_count = 0;
   imp_kills = imp_target = 0;
   buyback_n = 0;
+  ring1 = ring2 = IT_NONE;
+  ring1_level = ring2_level = 0;
+  haste_t = invis_t = might_t = levit_t = mind_t = rage_t = 0;
+  memset(talents,0,sizeof(talents));
+  talent_tier = 0;
+  bag_potion = bag_scroll = bag_wand = false;
+  memset(shop_warned,0,sizeof(shop_warned));
+  memset(shop_gone,0,sizeof(shop_gone));
+  shop_n = 0; shop_floor = -1;
+  dust_timer = 0;
+  alchemy_open = transmute_open = icon_test = false;
+  freeze_anim = demo_lock = false;
   memset(boss_dead, 0, sizeof(boss_dead));
-  static const int hp_base[6] = {25, 20, 18, 20, 22, 20};
-  maxhp = hp_base[hero % 6];
+  strength = hero_rules::starting_strength;
+  hunger = starvation_damage = regen_ticks = healing_left = blessed_t = 0;
+  action_remainder = 0.f;
+  maxhp = hero_rules::starting_hp;
   hp = maxhp;
   inv_n = 0;
   weapon = IT_DAGGER;
@@ -1792,12 +1793,11 @@ void Game::use_item(int idx) {
         return;
       }
       if (it.id == IT_POTION_HEAL) {
-        if (hp >= maxhp) { message("生命值已满。"); return; }
-        hp = std::min(maxhp, hp + d.power);
+        healing_left = std::max(healing_left, int(.8f * maxhp + 14));
         message("你喝下治疗药水。");
       } else if (it.id == IT_POTION_STR) {
-        maxhp += 2; hp = std::min(maxhp, hp + 2);
-        message("力量涌入身体，最大生命 +2。");
+        strength = std::min(255, strength + 1);
+        message("力量涌入身体，力量 +1。");
       } else if (it.id == IT_POTION_SHIELD) {
         shield += d.power;
         message("一层护盾包围了你。");
@@ -1816,11 +1816,8 @@ void Game::use_item(int idx) {
           for (int x = 0; x < MW; x++) seen[y][x] |= 2;
         message("你感知到了整层地牢。");
       } else if (it.id == IT_POTION_XP) {
-        xp += d.power + floor;
-        while (xp >= xpnext) {
-          xp -= xpnext; level++; xpnext = level * 10;
-          maxhp += 5; hp = std::min(maxhp, hp + 5);
-        }
+        if (level >= hero_rules::max_level) blessed_t = 30;
+        else earn_exp(xpnext);
         message("经验涌入你的身体。");
       } else if (it.id == IT_POTION_MIGHT) {
         might_t = d.power;
@@ -1842,6 +1839,7 @@ void Game::use_item(int idx) {
       } else if (it.id == IT_SCROLL_MAP) {
         for (int y = 0; y < MH; y++)
           for (int x = 0; x < MW; x++) seen[y][x] |= 2;
+        for (auto& feature : features) if (feature.type == F_TRAP) feature.type = F_TRAP_FOUND;
         message("卷轴揭示了本层地图。");
       } else if (it.id == IT_SCROLL_UP) {
         if (weapon != IT_NONE) { weapon_level++; message("你的武器变得更强了。"); }
@@ -1901,9 +1899,11 @@ void Game::use_item(int idx) {
       }
       break;
     case K_FOOD:
-      hp = std::min(maxhp, hp + d.power);
+      hunger = std::max(0, hunger - hero_rules::food_energy(it.id));
       message("你吃了一些食物。");
-      break;
+      remove_item(idx, 1);
+      for (int turn = 0; turn < 3 && !dead && !dialog; ++turn) advance_turn();
+      return;
     case K_SEED:
       if (it.id == IT_SEED_SUNGRASS) {
         hp = std::min(maxhp, hp + d.power);
@@ -2272,7 +2272,7 @@ void Game::trigger_trap(int idx, Mob* who) {
   }
   if (kind == TR_ALARM) {
     for (auto& mob : mobs) {
-      if (!mob.alive || is_npc(mob.type) || grid_distance(x, y, mob.x, mob.y) > 10) continue;
+      if (!mob.alive || is_npc(mob.type)) continue;
       mob.sleep_t = 0;
       mob.terror_t = 0;
       mob.ai = Mob::Hunting;
@@ -2300,7 +2300,7 @@ void Game::trigger_trap(int idx, Mob* who) {
     damage_mob(int(who - mobs.data()), raw, dart ? DamageKind::Physical : DamageKind::Direct);
     return;
   }
-  int dmg = dart ? std::max(0, raw - damage_reduction(*this, armor_bonus())) : raw;
+  int dmg = dart ? std::max(0, raw - roll_armor()) : raw;
   if (!dart && ring_has(IT_RING_ELEMENTS)) dmg /= 2;
   take_damage(dmg);
 }
@@ -2613,7 +2613,7 @@ void Game::move_player(int dx, int dy) {
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
     attack(m, false);
-    advance_turn();
+    spend_action(hero_rules::attack_delay(weapon,weapon_level,effective_strength()));
     return;
   }
   pvx = (float)px; pvy = (float)py;
@@ -2636,7 +2636,10 @@ void Game::move_player(int dx, int dy) {
       open_dialog(0, "向下的楼梯", "要进入更深的一层吗？", "下去 (A)", "留下 (B)");
     }
   }
-  advance_turn();
+  float delay = hero_rules::movement_delay(armor,armor_level,effective_strength());
+  delay /= std::pow(1.175f, ring_bonus(*this, IT_RING_HASTE));
+  if (haste_t > 0) delay /= 3.f;
+  spend_action(delay);
 }
 
 void Game::combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
@@ -2655,9 +2658,9 @@ void Game::combat_hit(CombatPose& pose, int x, int y, int damage) {
     combat_fx.push_back({x, y, x, y, 0, combat_delay, damage, CombatStyle::Melee});
 }
 
-void Game::take_damage(int damage) {
+void Game::take_damage(int damage, bool bypass_shield) {
   if (dead) return;
-  const int absorbed = std::min(shield, std::max(0, damage));
+  const int absorbed = bypass_shield ? 0 : std::min(shield, std::max(0, damage));
   shield -= absorbed;
   const int loss = std::clamp(damage - absorbed, 0, hp);
   hp -= loss;
@@ -2701,7 +2704,8 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
   if (imp_state == 1 && (m.type == M_MONK || m.type == M_GOLEM)) {
     if (imp_kills < 99) imp_kills++;
   }
-  xp += mob_def(m.type).xp;
+  const auto experience = mob_rules::base(m.type, floor);
+  if (level <= experience.max_level) earn_exp(experience.xp);
   snprintf(b, sizeof(b), "%s被击败了！", mob_def(m.type).name);
   message(b);
   if (is_boss(m.type)) {
@@ -2735,14 +2739,6 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
     if ((rnd(*this) % 100) < meatChance)
       items.push_back({m.x, m.y, IT_FOOD_MEAT, 0});
   }
-  while (xp >= xpnext) {
-    xp -= xpnext;
-    level++;
-    xpnext = level * 10;
-    maxhp += 5;
-    if (!dead) hp = std::min(maxhp, hp + 5);
-    message("升级了！");
-  }
 }
 
 bool Game::hero_hits(Mob& mob, bool ranged) {
@@ -2750,8 +2746,16 @@ bool Game::hero_hits(Mob& mob, bool ranged) {
                        invis_t == 0 && grid_distance(mob.x, mob.y, px, py) <= fov_radius &&
                        los(mob.x, mob.y, px, py);
   if (mob.type != M_GREAT_CRAB || !noticed || mob.sleep_t > 0) {
-    const float accuracy = (9 + level) * std::pow(1.3f, ring_bonus(*this, IT_RING_ACCURACY));
-    float evasion = noticed ? mob_evasion(*this, mob) : 0;
+    const int missing = ranged ? 0 : std::max(0,
+        hero_rules::strength_requirement(weapon, weapon_level) - effective_strength());
+    float accuracy = (9 + level) * std::pow(1.3f, ring_bonus(*this, IT_RING_ACCURACY));
+    if (!ranged) accuracy *= hero_rules::weapon_accuracy(weapon) / std::pow(1.5f, missing);
+    if (blessed_t > 0) accuracy *= 1.25f;
+    // Insufficient strength prevents a surprise attack, even on a sleeping
+    // target. Sleep is a behavior state, not the Paralysis buff.
+    float evasion = noticed || missing > 0 ?
+        (mob.type == M_WRAITH ? 5 * mob_accuracy(*this, mob) : mob_def(mob.type).evasion) : 0;
+    if (mob.sleep_t > 0 && missing == 0) evasion = 0;
     if (ranged && grid_distance(mob.x, mob.y, px, py) == 1) evasion *= 1.5f;
     if (attack_hits(*this, accuracy, evasion)) return true;
   }
@@ -2772,8 +2776,7 @@ void Game::attack(int idx, bool ranged, int bonus) {
                 ranged ? CombatStyle::Arcane : CombatStyle::Melee);
   combat_delay = ranged ? 170 : 70;
   if (hero_hits(m, ranged)) {
-    const int raw = hero_atk() + weapon_bonus() + ring_atk() + talents[1] +
-                    ri(*this, 0, 2) + bonus + (might_t > 0 ? 3 : 0) + (ranged ? 1 : 0);
+    const int raw = roll_weapon(m) + bonus + (might_t > 0 ? 3 : 0);
     damage_mob(idx, raw, DamageKind::Physical);
   }
   combat_delay = 0;
@@ -2788,9 +2791,12 @@ void Game::interact_at(int x, int y) {
   int m = mob_at(x, y);
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
-    if (grid_distance(x, y, px, py) > 1) { message("距离太远，先靠近一点。"); return; }
+    const int reach = hero_rules::weapon_reach(weapon);
+    if (grid_distance(x, y, px, py) > reach || !los(px,py,x,y)) {
+      message("距离太远，先靠近一点。"); return;
+    }
     attack(m, false);
-    advance_turn();
+    spend_action(hero_rules::attack_delay(weapon,weapon_level,effective_strength()));
     return;
   }
   int fi = feature_at(x, y);
@@ -2846,6 +2852,10 @@ void Game::act_at(int x, int y, bool interact) {
   if (x == px && y == py) {
     advance_turn();
     message("你等待了一回合。");
+    return;
+  }
+  if (mob_at(x,y) >= 0 && grid_distance(px,py,x,y) <= hero_rules::weapon_reach(weapon) && los(px,py,x,y)) {
+    interact_at(x,y);
     return;
   }
   if (grid_distance(px, py, x, y) == 1) {
@@ -2912,6 +2922,7 @@ void Game::tick(int dt_ms) {
       const int x = p % MW, y = p / MW;
       return (seen[y][x] || vis[y][x]) &&
              (!navigation.occupied[y][x] || (p == goal && vis[y][x])) &&
+             (p == goal || !visible_trap_at(x, y)) &&
              (walkable(x, y) || (p == goal && keys > 0 &&
                tiles[y][x] == T_DOOR_LOCKED && !feature_blocking(x, y)));
     });
@@ -2931,7 +2942,8 @@ void Game::mob_turn(Mob& m) {
   const int dist = grid_distance(m.x, m.y, px, py);
   navigation.load_actors(*this);
   auto passable = [&](int p) {
-    return !navigation.occupied[p / MW][p % MW] && walkable(p % MW, p / MW);
+    return !navigation.occupied[p / MW][p % MW] && walkable(p % MW, p / MW) &&
+           !visible_trap_at(p % MW, p / MW);
   };
   auto step_to = [&](int step) {
     if (step < 0 || !passable(step)) return false;
@@ -2951,7 +2963,8 @@ void Game::mob_turn(Mob& m) {
     bool excluded[MW * MH]{};
     for (;;) {
       int next = navigation.retreat(start, hero, 4, false, [&](int p) {
-        return p == start || (!excluded[p] && walkable(p % MW, p / MW));
+        return p == start || (!excluded[p] && walkable(p % MW, p / MW) &&
+                             !visible_trap_at(p % MW, p / MW));
       });
       if (next < 0 || next == start || step_to(next)) break;
       excluded[next] = true;
@@ -2966,7 +2979,7 @@ void Game::mob_turn(Mob& m) {
         combat_strike(m.combat, m.x, m.y, o.x, o.y, CombatStyle::Melee);
         combat_delay = 70;
         if (attack_hits(*this, mob_accuracy(*this, m), mob_evasion(*this, o)))
-          damage_mob((int)i, m.atk + ri(*this, 0, 2), DamageKind::Physical);
+          damage_mob((int)i, roll_mob_damage(m), DamageKind::Physical);
         else combat_hit(o.combat, o.x, o.y, COMBAT_MISS);
         combat_delay = 0;
         return;
@@ -2985,11 +2998,11 @@ void Game::mob_turn(Mob& m) {
   if (m.ai == Mob::Hunting && sees && dist == 1) {
     combat_strike(m.combat, m.x, m.y, px, py, CombatStyle::Melee);
     combat_delay = 70;
-    const float evasion = (4 + level) * std::pow(1.125f, ring_bonus(*this, IT_RING_EVASION));
+    const float evasion = hero_evasion() * (blessed_t > 0 ? 1.25f : 1.f);
     char text[96];
     if (attack_hits(*this, mob_accuracy(*this, m), evasion)) {
-      const int damage = std::max(0, m.atk + ri(*this, 0, 1) -
-          damage_reduction(*this, hero_def() + armor_bonus() + talents[2]));
+      const int rolled = roll_mob_damage(m);
+      const int damage = std::max(0, rolled - roll_armor());
       snprintf(text, sizeof(text), "%s攻击了你，造成 %d 点伤害", mob_def(m.type).name,
                std::min(hp, std::max(0, damage - shield)));
       message(text);
@@ -3078,12 +3091,6 @@ bool Game::drop_item(int idx) {
 }
 
 static uint8_t transmute_result(Game& g, uint8_t id) {
-  static const uint8_t WEP[5][3] = {
-      {IT_DAGGER, IT_SHORTSWORD, IT_CUDGEL},
-      {IT_LONGSWORD, IT_HAND_AXE, IT_SPEAR},
-      {IT_WARHAMMER, IT_SCIMITAR, IT_WHIP},
-      {IT_GREATAXE, IT_GREATSWORD, IT_HALBERD},
-      {IT_RUNEBLADE, IT_BATTLEAXE, IT_GIANT_HAMMER}};
   static const uint8_t ARM[6] = {IT_CLOTH_ARMOR, IT_LEATHER_ARMOR, IT_MAIL,
                                  IT_SCALE, IT_PLATE, IT_RUNE_ARMOR};
   static const uint8_t WANDS[13] = {
@@ -3108,15 +3115,7 @@ static uint8_t transmute_result(Game& g, uint8_t id) {
   static const uint8_t BOMBS[3] = {IT_BOMB, IT_BOMB_FIRE, IT_BOMB_FROST};
   uint8_t kind = item_def(id).kind;
   if (kind == K_WEAPON) {
-    int tier = (id == IT_RUNEBLADE || id == IT_BATTLEAXE ||
-                id == IT_GIANT_HAMMER) ? 5
-             : (id == IT_GREATAXE || id == IT_GREATSWORD ||
-                id == IT_HALBERD) ? 4
-             : (id == IT_WARHAMMER || id == IT_SCIMITAR || id == IT_WHIP) ? 3
-             : (id == IT_LONGSWORD || id == IT_HAND_AXE ||
-                id == IT_SPEAR) ? 2 : 1;
-    if (id == IT_PICKAXE) tier = 1;
-    return WEP[tier - 1][ri(g, 0, 2)];
+    return hero_rules::weapon_for_tier(hero_rules::equipment_tier(id), ri(g,0,2));
   }
   if (kind == K_ARMOR) {
     int idx = 0;
@@ -3176,14 +3175,53 @@ void Game::check_talents() {
   static const char* NAMES[4] = {"坚韧", "强击", "护甲", "精通"};
   while (talent_tier < 4 && level >= NEED[talent_tier]) {
     talents[talent_tier] = 1;
-    if (talent_tier == 0) { maxhp += 4; hp += 4; }
-    else if (talent_tier == 1) { /* +1 attack handled below */ }
-    else if (talent_tier == 2) { /* +1 defense handled below */ }
-    else { maxhp += 4; hp += 4; }
     char b[64];
     snprintf(b, sizeof(b), "获得天赋：%s", NAMES[talent_tier]);
     message(b);
     talent_tier++;
+  }
+}
+
+void Game::earn_exp(int amount) {
+  if (dead || amount <= 0 || level >= hero_rules::max_level) return;
+  xp += amount;
+  while (level < hero_rules::max_level && xp >= xpnext) {
+    xp -= xpnext;
+    ++level;
+    xpnext = hero_rules::max_exp(level);
+    maxhp += 5;
+    hp = std::min(maxhp, hp + 5);
+    message("升级了！");
+  }
+  if (level == hero_rules::max_level) xp = 0;
+}
+
+void Game::tick_survival() {
+  if (healing_left > 0) {
+    const int heal = std::min(healing_left, std::max(1, int(std::floor(healing_left * .25f + .5f))));
+    hp = std::min(maxhp, hp + heal);
+    healing_left -= heal;
+  }
+  // Hunger is suspended while the boss seals the current floor.
+  if (boss_alive()) return;
+  if (hunger >= hero_rules::starving) {
+    starvation_damage += maxhp;
+    if (starvation_damage > 1000) {
+      const int loss = starvation_damage / 1000;
+      starvation_damage %= 1000;
+      take_damage(loss,true);
+    }
+  } else {
+    ++hunger;
+    if (hunger == hero_rules::starving) {
+      message("你开始挨饿了！");
+      take_damage(1,true);
+      clear_path();
+    } else if (hunger == hero_rules::hungry) message("你开始感到饥饿。");
+  }
+  if (hunger < hero_rules::starving && hp < maxhp && ++regen_ticks >= hero_rules::regeneration_period) {
+    ++hp;
+    regen_ticks = 0;
   }
 }
 
@@ -3192,14 +3230,15 @@ void Game::advance_turn() {
   turns++;
   tick_trap_clouds();
   if (dead) return;
-  if (turns % 12 == 0 && hp < maxhp) hp++;
+  tick_survival();
+  if (dead) return;
+  if (blessed_t > 0) --blessed_t;
   if (haste_t > 0) haste_t--;
   if (invis_t > 0) invis_t--;
   if (might_t > 0) might_t--;
   if (levit_t > 0) levit_t--;
   if (mind_t > 0) mind_t--;
   if (rage_t > 0) rage_t--;
-  if (ring_has(IT_RING_FORCE) && turns % 10 == 0) shield += 3;
   if (have_dust && wand_state == 1) {
     dust_timer++;
     int wraiths = 1;
@@ -3240,14 +3279,24 @@ void Game::advance_turn() {
     else respawn_t += plan_feeling[floor - 1] == 6 ? 100 : 150;
   }
   recharge_wands();
-  bool skip = (haste_t > 0 || ring_has(IT_RING_HASTE)) && (turns % 2 == 0);
-  if (!skip) {
-    for (Mob& m : mobs) {
-      if (dead) break;
-      mob_turn(m);
-    }
+  for (Mob& m : mobs) {
+    if (dead) break;
+    mob_turn(m);
   }
   recompute_fov();
+}
+
+void Game::spend_action(float duration) {
+  // Whole-turn simulation with a saved fractional remainder. This restores
+  // cumulative fast/slow movement and attack costs; per-actor scheduling is
+  // still a separate parity task.
+  if (dead || !std::isfinite(duration) || duration <= 0.f) return;
+  action_remainder += duration;
+  while (!dead && action_remainder >= 1.f) {
+    action_remainder -= 1.f;
+    advance_turn();
+  }
+  if (dead && action_remainder >= 1.f) action_remainder = std::fmod(action_remainder,1.f);
 }
 
 void Game::wait_turns(int n) {
@@ -3275,7 +3324,6 @@ void Game::descend() {
   gen_level();
   pvx = (float)px; pvy = (float)py;
   clear_path();
-  hp = std::min(maxhp, hp + 3);
   char b[64];
   snprintf(b, sizeof(b), "你来到了第 %d 层。", floor);
   message(b);
@@ -3461,7 +3509,7 @@ void Game::cast_or_throw(int x, int y) {
 }
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 10, LEGACY_SAVE_VERSION = 9;
+static const uint16_t SAVE_VERSION = 11, MAP_SAVE_VERSION = 10, LEGACY_SAVE_VERSION = 9;
 // Optional trailer: the original V9 header and slot metadata stay readable.
 struct SpawnDisk {
   uint32_t magic = 0x31575053; // SPW1
@@ -3479,6 +3527,14 @@ struct MapDisk {
   uint8_t legacy_keys = 0, loot_second_deck = 0;
   uint8_t loot_remaining[10]{};
   uint16_t crystal_keys = 0;
+};
+
+struct HeroDisk {
+  uint32_t magic = 0x31524548; // HER1
+  uint16_t strength = 10, hunger = 0, starvation_damage = 0;
+  uint16_t regen_ticks = 0, healing_left = 0, blessed_t = 0;
+  float action_remainder = 0.f;
+  uint8_t spawn_weights[25]{};
 };
 
 static void slot_path(int slot, char* out, size_t n) {
@@ -3603,8 +3659,17 @@ bool Game::save(int slot) const {
   memcpy(map.loot_remaining, loot_remaining, sizeof(loot_remaining));
   memcpy(map.tiles, tiles, sizeof(tiles));
   memcpy(map.seen, seen, sizeof(seen));
+  HeroDisk stats;
+  stats.strength = strength;
+  stats.hunger = hunger;
+  stats.starvation_damage = starvation_damage;
+  stats.regen_ticks = regen_ticks;
+  stats.healing_left = healing_left;
+  stats.blessed_t = blessed_t;
+  stats.action_remainder = action_remainder;
+  std::copy_n(spawn_weights.begin(), std::min<size_t>(25,spawn_weights.size()), stats.spawn_weights);
   const bool ok = fwrite(&d, sizeof(d), 1, f) == 1 && fwrite(&sp, sizeof(sp), 1, f) == 1 &&
-                  fwrite(&map, sizeof(map), 1, f) == 1;
+                  fwrite(&map, sizeof(map), 1, f) == 1 && fwrite(&stats, sizeof(stats), 1, f) == 1;
   return fclose(f) == 0 && ok;
 }
 
@@ -3621,9 +3686,20 @@ bool Game::load(int slot) {
   MapDisk map;
   const bool have_map = fread(&map, sizeof(map), 1, f) == 1 && map.magic == 0x3150414D &&
                         map.width >= 3 && map.width <= MW && map.height >= 3 && map.height <= MH;
+  HeroDisk stats;
+  const bool have_stats = have_map && fread(&stats, sizeof(stats), 1, f) == 1 &&
+      stats.magic == 0x31524548 && stats.strength >= 1 && stats.strength <= 255 &&
+      stats.hunger <= hero_rules::starving && stats.starvation_damage <= 1000 &&
+      stats.regen_ticks < hero_rules::regeneration_period &&
+      stats.blessed_t <= 30 && std::isfinite(stats.action_remainder) &&
+      stats.action_remainder >= 0.f && stats.action_remainder < 1.f;
   fclose(f);
-  if (!ok || d.magic != SAVE_MAGIC ||
-      (d.version != LEGACY_SAVE_VERSION && (d.version != SAVE_VERSION || !have_map))) return false;
+  if (!ok || d.magic != SAVE_MAGIC) return false;
+  if (d.version == SAVE_VERSION) {
+    if (!have_map || !have_stats) return false;
+  } else if (d.version == MAP_SAVE_VERSION) {
+    if (!have_map) return false;
+  } else if (d.version != LEGACY_SAVE_VERSION) return false;
   if (d.floor < 1 || d.floor > 25 || d.px < 0 || d.py < 0 ||
       d.px >= (have_map ? map.width : LEGACY_MAP_SIZE) ||
       d.py >= (have_map ? map.height : LEGACY_MAP_SIZE)) return false;
@@ -3632,7 +3708,19 @@ bool Game::load(int slot) {
   px = d.px; py = d.py;
   maxhp = std::max(1, int(d.maxhp));
   hp = std::clamp(int(d.hp), 0, maxhp);
-  level = d.level; xp = d.xp; xpnext = d.xpnext;
+  level = std::clamp(int(d.level), 1, hero_rules::max_level);
+  xpnext = hero_rules::max_exp(level);
+  xp = std::clamp(int(d.xp), 0, xpnext - 1);
+  if (level == hero_rules::max_level) xp = 0;
+  // Legacy runs have no record of strength potions consumed or hunger. Do
+  // not guess from the depth: supply an explicit migration default.
+  strength = d.version == SAVE_VERSION ? stats.strength : hero_rules::starting_strength;
+  hunger = d.version == SAVE_VERSION ? stats.hunger : 0;
+  starvation_damage = d.version == SAVE_VERSION ? stats.starvation_damage : 0;
+  regen_ticks = d.version == SAVE_VERSION ? stats.regen_ticks : 0;
+  healing_left = d.version == SAVE_VERSION ? stats.healing_left : 0;
+  blessed_t = d.version == SAVE_VERSION ? stats.blessed_t : 0;
+  action_remainder = d.version == SAVE_VERSION ? stats.action_remainder : 0.f;
   keys = d.keys; gold = d.gold; turns = d.turns; shield = d.shield;
   weapon = d.weapon; weapon_level = d.weapon_level;
   armor = d.armor; armor_level = d.armor_level;
@@ -3747,12 +3835,17 @@ bool Game::load(int slot) {
   build_run_plan();
   fov_radius = (plan_feeling[floor - 1] == 6) ? 5 : 8;
   spawn_rooms.clear();
+  spawn_weights.clear();
   spawn_deck.clear();
   if (have_spawn) {
     for (int i = 0; i < sp.room_count; ++i) {
       auto r = sp.rooms[i];
       if (r.w >= 3 && r.h >= 3 && r.x > 0 && r.y > 0 &&
-          r.x + r.w < map_width && r.y + r.h < map_height) spawn_rooms.push_back(r);
+          r.x + r.w < map_width && r.y + r.h < map_height) {
+        spawn_rooms.push_back(r);
+        spawn_weights.push_back(d.version == SAVE_VERSION ?
+            std::clamp(int(stats.spawn_weights[i]),1,3) : 1);
+      }
     }
     if (std::all_of(sp.deck, sp.deck + sp.deck_count, [](uint8_t t) { return t < M_COUNT; }))
       spawn_deck.assign(sp.deck, sp.deck + sp.deck_count);
@@ -3777,7 +3870,8 @@ bool Game::slot_meta(int slot, SlotMeta& out) {
     GameDisk d{};
     bool ok = fread(&d, sizeof(d), 1, f) == 1;
     fclose(f);
-    if (!ok || (d.version != SAVE_VERSION && d.version != LEGACY_SAVE_VERSION)) return false;
+    if (!ok || (d.version != SAVE_VERSION && d.version != MAP_SAVE_VERSION &&
+                d.version != LEGACY_SAVE_VERSION)) return false;
     out = d.meta;
     out.used = true;
     return true;

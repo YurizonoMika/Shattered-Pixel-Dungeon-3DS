@@ -8,12 +8,14 @@
 
 ## 下载和安装
 
-v0.1.7alpha 为武器攻击加入命中和闪避判定，护甲可以完全抵消物理伤害。敌人和英雄死亡时会倒下并淡出，英雄动画播完后才显示结算框。
+v0.1.11alpha 开始按 Wiki 复盘并修正力量、饥饿、食物、治疗、升级和装备规则。
+怪物生成改为按房间尺寸档位加权，撤去移植版自定的房间数量上限。
+完整来源、冲突和未完成项见 [Wiki 机制复盘](docs/wiki-mechanics-audit.md)，目前尚未实现所有机制一致。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
@@ -31,7 +33,7 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 
 - 可从第 1 层玩到第 25 层，包含五个区域和五位首领。支持六位英雄、三个存档槽、本地排行榜和双屏菜单。
 - 回合制移动与战斗、装备和消耗品、快捷栏、商店买卖与回购、任务、炼金及简化天赋。铁钥匙、金钥匙和水晶钥匙各有对应的锁；搜索能揭示暗门和陷阱，但不会解除陷阱。
-- 怪物初始生成和补怪受房间面积上限约束。飞镖、毒气、警报、寒霜、火焰和电击陷阱有各自的图块与触发提示。毒气会扩散并在后续回合造成伤害，警报会发出红色波纹并吸引附近怪物。
+- 怪物初始生成按普通房尺寸档位加权，补怪会检查视野和路径距离。飞镖、毒气、警报、寒霜、火焰和电击陷阱有各自的图块与触发提示。毒气会扩散并在后续回合造成伤害，警报会发出红色波纹并吸引整层怪物。
 - 普通层使用移植自 v4.0.2 的单环和双环构建器，支持可变尺寸布局、支路、连接房与迷宫。水草区域使用原版斑块算法和五个区域的参数。普通层会投放食物，大型楼层额外投放一份。
 - 地图有可见、已探索、卷轴揭示和未探索四种雾状态。门离开后在无人或物品占用时自动关闭。墙体和侧门使用独立前景素材；水纹以每秒 5 像素滚动，岸边和雾叠加在水面之上。
 - 隧道、周边走廊、环形通道和深渊桥分别按原版绘制；柱阵房、隔间房和圆墙房已有各自的内部地形。
@@ -47,7 +49,9 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 
 ### 存档兼容
 
-当前存档格式为 **V10**，记录地图和雾、角色和物品、各类钥匙数量、掉落牌库进度，以及任务、首领和补怪状态。离开游戏时自动存档。**v0.1.0alpha 的 V9 存档仍可读取**：旧存档的当前层暂用共用钥匙计数，下楼后生成的地图使用新版规则。
+当前存档格式为 **V11**，另存力量、饥饿、持续治疗、行动小数耗时和生成房间权重。
+V9/V10 仍可读取，保留已有生命和怪物，但缺失力量初始化为10、饥饿为0，升级门槛采用新公式。
+建议备份并开新局验证机制。旧版本不能读取 V11 存档。
 
 ## 操作
 

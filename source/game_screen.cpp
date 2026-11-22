@@ -1,4 +1,5 @@
 #include "app.h"
+#include "hero_rules.h"
 
 #include <algorithm>
 
@@ -838,7 +839,11 @@ static void draw_messages() {
             CLR_GREY, 1.0f, 1.0f);
   text_wrap("快捷栏：点击道具使用；法杖/炸弹可进入瞄准模式。", 10, 138, BOT_W - 20,
             CLR_GREY, 1.0f, 1.0f);
-  textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d", G.turns);
+  textf(10, 168, C2D_Color32(198, 198, 206, 255), 1.0f, "回合 %d  力量 %d", G.turns, G.effective_strength());
+  const char* state = G.hunger >= hero_rules::starving ? "挨饿" :
+                      G.hunger >= hero_rules::hungry ? "饥饿" : "饱食";
+  textf(180, 168, G.hunger >= hero_rules::hungry ? CLR_RED : CLR_GREY, 1.0f,
+        "%s %d", state, hero_rules::starving - G.hunger);
 }
 
 static const float BAG_X = 17, BAG_Y = 92, BAG_W = 34, BAG_H = 21;
@@ -893,7 +898,8 @@ static void draw_bag_action() {
   text(d.name, 72, 54, CLR_YELLOW, 2.0f);
   char extra[40] = "";
   if (d.kind == K_WEAPON || d.kind == K_ARMOR)
-    snprintf(extra, sizeof(extra), "强化 +%d", G.inv[idx].level);
+    snprintf(extra, sizeof(extra), "+%d  力量 %d/%d", G.inv[idx].level, G.effective_strength(),
+             hero_rules::strength_requirement(G.inv[idx].id, G.inv[idx].level));
   else if (d.kind == K_WAND)
     snprintf(extra, sizeof(extra), "充能 %d", G.inv[idx].charges);
   else if (G.inv[idx].count > 1)

@@ -1,6 +1,6 @@
 #pragma once
 
-#define SPD3DS_VERSION "0.1.10alpha"
+#define SPD3DS_VERSION "0.1.11alpha"
 
 #include <3ds.h>
 #include <citro2d.h>

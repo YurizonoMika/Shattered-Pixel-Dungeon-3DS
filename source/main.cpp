@@ -1,6 +1,8 @@
 #include "app.h"
+#include "hero_rules.h"
 
 #include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
 #include <stdarg.h>
 
@@ -19,12 +21,12 @@ const char* HERO_NAMES[6] = {"战士", "法师", "盗贼", "女猎手", "决斗�
 const char* HERO_TITLES[6] = {"钢铁意志", "奥术研究者", "暗影行者",
                               "荒野之眼", "剑舞者", "光明信徒"};
 const char* HERO_DESC[6] = {
-    "近战专家，生命值最高。\n擅长正面战斗，适合第一次进入地牢的玩家。",
-    "使用法杖与法术，生命值较低。\n可以用炸弹和卷轴控制战场。",
-    "身手敏捷，攻击力最高。\n依靠速度与走位避开危险。",
-    "远程射手，命中后可以拉开距离。\n需要耐心与地形意识。",
-    "连击型战士，攻击节奏快。\n适合喜欢贴身缠斗的玩家。",
-    "光明的信徒，治疗能力最强。\n生存能力好，输出偏低。",
+    "战士擅长近战与防御。\n职业专属装备和天赋尚未完整实现。",
+    "法师擅长使用法杖。\n职业专属装备和天赋尚未完整实现。",
+    "盗贼擅长潜行与探索。\n职业专属装备和天赋尚未完整实现。",
+    "女猎手擅长远程与自然。\n职业专属装备和天赋尚未完整实现。",
+    "决斗家擅长武器技巧。\n职业专属装备和天赋尚未完整实现。",
+    "牧师使用光明的力量。\n职业专属装备和天赋尚未完整实现。",
 };
 
 static C3D_RenderTarget* g_top = nullptr;
@@ -921,7 +923,7 @@ int main() {
           int rule_failures = 0;
           int variable_maps = 0, largest_width = 0, largest_height = 0;
           int chasm_maps = 0;
-          int crowded_rooms = 0;
+          int invalid_weights = 0;
           int builders[3]{};
           for (uint32_t seed = 1; seed <= 32; ++seed) {
             G.seed = 0x9e3779b9u * seed;
@@ -929,8 +931,8 @@ int main() {
             for (int floor = 1; floor <= 25; ++floor) {
               G.floor = floor;
               G.gen_level();
-              for (const auto& room : G.spawn_rooms)
-                crowded_rooms += G.room_spawn_count(room) > G.room_spawn_limit(room);
+              invalid_weights += G.spawn_rooms.size() != G.spawn_weights.size();
+              for (auto weight : G.spawn_weights) invalid_weights += weight < 1 || weight > 3;
               if (floor % 5 != 0) ++builders[G.layout_builder];
               if (floor % 5 != 0 && (G.map_width != LEGACY_MAP_SIZE || G.map_height != LEGACY_MAP_SIZE)) ++variable_maps;
               largest_width = std::max(largest_width, G.map_width);
@@ -1011,8 +1013,145 @@ int main() {
           dlog("[layout] non-legacy dimensions=%d/640 max width=%d max height=%d", variable_maps, largest_width, largest_height);
           dlog("[layout] loop=%d figure-eight=%d fallback=%d", builders[1], builders[2], builders[0]);
           dlog("[terrain] %d maps with non-walkable chasms", chasm_maps);
-          dlog("[population] rooms exceeding spawn limit=%d", crowded_rooms);
+          dlog("[population] invalid room weights=%d", invalid_weights);
           G.new_run(0, 0x12345678);
+          G.demo_lock = true;
+        }
+        else if (want == 104) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          G.mob_cap = 0;
+          const bool initial = G.hp == 20 && G.maxhp == 20 && G.strength == 10;
+          G.inv_n = 0;
+          G.add_item(IT_POTION_STR);
+          G.use_item(0);
+          const bool strength = G.strength == 11 && G.maxhp == 20;
+          G.hp = 10;
+          G.hunger = 400;
+          G.regen_ticks = 0;
+          G.add_item(IT_FOOD_RATION);
+          const int before = G.turns;
+          G.use_item(0);
+          const bool food = G.hp == 10 && G.hunger == 103 && G.turns == before + 3;
+          G.hunger = 449;
+          G.hp = 20;
+          G.shield = 10;
+          G.tick_survival();
+          const bool threshold = G.hunger == 450 && G.hp == 19 && G.shield == 10;
+          G.shield = 0;
+          for (int i = 0; i < 50; ++i) G.tick_survival();
+          const bool starvation = G.hp == 19;
+          G.tick_survival();
+          const bool fraction = G.hp == 18;
+          G.hunger = 0; G.regen_ticks = 0;
+          for (int i = 0; i < 10; ++i) G.tick_survival();
+          const bool regen = G.hp == 19;
+          G.earn_exp(25);
+          const bool experience = G.level == 3 && G.xp == 0 && G.xpnext == 20 && G.maxhp == 30;
+          G.add_item(IT_POTION_XP);
+          G.use_item(0);
+          const bool potion = G.level == 4 && G.xpnext == 25;
+          G.armor = IT_PLATE; G.armor_level = 0;
+          const bool heavy = G.hero_evasion() < 1.f;
+          G.strength = 18;
+          const bool adequate = G.hero_evasion() == 8.f;
+          G.hp = 1;
+          G.add_item(IT_POTION_HEAL);
+          G.use_item(0);
+          const bool healing = G.healing_left > 0 && G.hp > 1 && G.hp < G.maxhp;
+          const int injured_hp = G.hp;
+          G.hp = G.maxhp; G.inv_n = 0; G.add_item(IT_POTION_HEAL);
+          G.use_item(0);
+          const bool full_health_potion = G.inv_n == 0 && G.healing_left > 0;
+          G.hp = injured_hp;
+          G.hunger = 333; G.starvation_damage = 701; G.regen_ticks = 6;
+          G.blessed_t = 12;
+          G.action_remainder = .5f;
+          const int health = G.hp, pending = G.healing_left;
+          // A dedicated fixture slot: never touches front-end slots 0..2.
+          char filename[128];
+          snprintf(filename, sizeof(filename), DATA_DIR "/slot104.bin");
+          struct stat existing;
+          const bool unused = stat(filename, &existing) != 0;
+          const bool saved = unused && G.save(104);
+          const bool restored = saved && G.load(104) && G.strength == 18 && G.hunger == 333 &&
+              G.starvation_damage == 701 && G.regen_ticks == 6 && G.hp == health &&
+              G.healing_left == pending && G.blessed_t == 12 && G.action_remainder == .5f &&
+              G.spawn_weights.size() == G.spawn_rooms.size();
+          bool migration = false, truncated = false;
+          if (saved) {
+            FILE* fixture = fopen(filename, "r+b");
+            if (fixture) {
+              const uint16_t version = 10;
+              fseek(fixture, 4, SEEK_SET);
+              const bool changed = fwrite(&version, sizeof(version), 1, fixture) == 1;
+              fclose(fixture);
+              migration = changed && G.load(104) && G.strength == 10 && G.hunger == 0 &&
+                  G.hp == health && G.healing_left == 0 && G.xpnext == 25 && G.action_remainder == 0.f;
+            }
+            fixture = fopen(filename, "r+b");
+            if (fixture) {
+              const uint16_t version = 11;
+              fseek(fixture, 4, SEEK_SET);
+              const bool changed = fwrite(&version, sizeof(version), 1, fixture) == 1;
+              fseek(fixture, 0, SEEK_END);
+              const long bytes = ftell(fixture);
+              fclose(fixture);
+              // Truncate only the disposable fixture's new trailer.
+              fixture = fopen(filename, "r+b");
+              if (fixture) {
+                const bool shortened = ftruncate(fileno(fixture), bytes - 4) == 0;
+                fclose(fixture);
+                truncated = changed && shortened && !G.load(104);
+              }
+            }
+          }
+          if (saved) remove(filename);
+          G.mobs.clear(); G.mob_cap = 0;
+          G.action_remainder = 0.f;
+          const int action_turn = G.turns;
+          G.spend_action(1.5f);
+          G.spend_action(1.5f);
+          const bool timing = G.turns == action_turn + 3 && G.action_remainder == 0.f;
+          G.level = 29; G.xp = 0; G.xpnext = hero_rules::max_exp(29);
+          G.earn_exp(G.xpnext);
+          G.inv_n = 0; G.add_item(IT_POTION_XP); G.use_item(0);
+          const bool capped = G.level == 30 && G.xp == 0 && G.blessed_t > 0;
+          G.level = 4; G.xpnext = hero_rules::max_exp(4);
+          dlog("[wiki hero] initial=%d strength=%d food=%d threshold=%d starvation=%d fraction=%d regen=%d xp=%d potion=%d heavy=%d adequate=%d healing=%d save=%d migration=%d truncated=%d",
+               initial, strength, food, threshold, starvation, fraction, regen, experience,
+               potion, heavy, adequate, healing, restored, migration, truncated);
+          dlog("[wiki hero] action_timing=%d level_cap=%d full_health_potion=%d", timing, capped, full_health_potion);
+          G.dialog = false; G.demo_lock = true;
+        }
+        else if (want == 105) {
+          G.new_run(0, 0x12345678);
+          SCENE = Scene::GAME;
+          G.map_width = 21; G.map_height = 11;
+          memset(G.tiles, T_WALL, sizeof(G.tiles));
+          memset(G.seen, 1, sizeof(G.seen));
+          G.mobs.clear(); G.items.clear(); G.features.clear();
+          G.mob_cap = 0;
+          G.pvx = G.cursor_x = G.px = 3; G.pvy = G.cursor_y = G.py = 6;
+          for (int y = 4; y <= 7; ++y)
+            for (int x = 2; x <= 19; ++x) G.tiles[y][x] = T_FLOOR;
+          G.features.push_back({4,6,F_TRAP_FOUND,0,TR_ALARM});
+          G.features.push_back({8,6,F_TRAP,0,TR_DART});
+          G.path_goal = 7 * MW + 8;
+          for (int i = 0; i < 120; ++i) G.tick(100);
+          const bool avoided = G.px == 8 && G.py == 7 && G.features[0].type == F_TRAP_FOUND;
+          G.features.push_back({8,7,F_TRAP_FOUND,0,TR_ALARM});
+          Mob distant;
+          distant.x = distant.vx = 19; distant.y = distant.vy = 5;
+          distant.ai = Mob::Sleeping; distant.sleep_t = 8;
+          G.mobs.push_back(distant);
+          G.trigger_trap(2);
+          const bool alarm = G.mobs[0].sleep_t == 0 && G.mobs[0].target == 7 * MW + 8;
+          G.mobs.clear();
+          G.inv_n = 0; G.add_item(IT_SCROLL_MAP); G.use_item(0);
+          const bool mapped = G.features[1].type == F_TRAP_FOUND;
+          dlog("[wiki traps] avoidance=%d whole_floor_alarm=%d mapping_reveals=%d", avoided, alarm, mapped);
           G.demo_lock = true;
         }
         else if (want == 102 || want == 103) {
@@ -1163,15 +1302,15 @@ int main() {
           G.respawn_t = 3;
           G.recompute_fov();
           G.advance_turn();
-          const bool retry = G.mobs.empty() && G.respawn_t == 3 && G.spawn_deck.size() == 2;
+          const bool retry = G.mobs.empty() && G.respawn_t == 3 && G.spawn_deck.size() == 1;
           for (int x = 3; x < 15; ++x) G.tiles[10][x] = T_FLOOR;
           G.tiles[10][8] = T_DOOR;
           G.recompute_fov();
           G.advance_turn();
-          const bool spawned = G.mobs.size() == 1 && G.mobs[0].type == M_RAT &&
+          const bool spawned = G.mobs.size() == 1 && G.mobs[0].type == M_SNAKE &&
               G.mobs[0].ai == Mob::Wandering && G.respawn_t > 3;
-          const bool room_full = spawned && !G.try_respawn() && G.spawn_deck.size() == 1;
-          dlog("[respawn] unreachable retry=%d, connected rotation=%d, room full=%d", retry, spawned, room_full);
+          const bool occupied = spawned && !G.try_respawn() && G.mobs.size() == 1;
+          dlog("[respawn] unreachable retry=%d, connected rotation=%d, occupied=%d", retry, spawned, occupied);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }

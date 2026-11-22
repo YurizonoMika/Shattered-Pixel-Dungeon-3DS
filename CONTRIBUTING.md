@@ -23,6 +23,13 @@ make
 Load the resulting `spd3ds.3dsx` in Azahar or on hardware. Use the `scene.txt` debug
 entry (see README) to jump directly to the screen you are working on.
 
+Close test emulator instances after verification. Keep only one instance on
+the title menu for the user's playtest. Never use the user's normal save slots
+for destructive fixtures.
+
+测试结束关闭测试模拟器，只保留一个标题菜单的试玩实例。
+会修改或删除存档的测试必须使用独立测试目录或专用槽位。
+
 ## Pull requests
 
 - Describe what changed and which screen/system it affects.

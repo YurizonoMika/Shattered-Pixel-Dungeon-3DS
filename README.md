@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.10alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.11alpha-e60012)
 ![Status](https://img.shields.io/badge/status-25%20floors%20playable-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,15 +15,16 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.10alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.10alpha)**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.10alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.11alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.11alpha)**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.11alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-In v0.1.7alpha, weapon attacks check accuracy against evasion, and physical armor
-rolls can absorb the entire hit. The hero and enemies fall and fade on defeat.
-The game-over dialog appears after the hero's animation.
+v0.1.11alpha begins the [Wiki mechanics audit](docs/wiki-mechanics-audit.md),
+with strength, hunger, food, healing, XP and equipment corrections. Monster
+room weights replace the port's occupancy cap. **Many mechanics remain partial**;
+the audit records sources, conflicts, completed work and outstanding systems.
 
 > **Status: complete 25-floor run, five regions, full save/load.** All five SPD
 > regions are playable from floor 1 to Yog-Dzewa on floor 25, with region mobs,
@@ -170,8 +171,9 @@ The game-over dialog appears after the hero's animation.
 - **Mob rotation** follows upstream depth-based rotations for the supported roster.
   Floor 1 starts with eight ordinary enemies. Later regular floors use a population
   limit and check for respawns about every 50 turns (33 on dark floors). Initial
-  spawns are distributed across eligible rooms, with a cap of one to four based
-  on floor area. Respawns respect the same room cap.
+  spawns use room size-category weights and a 25% second-spawn attempt.
+  Native room occupancy caps have been removed. Placement still uses the
+  port's LOS and bounded retries; whole-floor population parity is unverified.
 - **Traps** use a regional mix of darts, toxic gas, alarms, frost, fire and shock.
   Traps have distinct markers and display their name on activation. The base
   count uses `NormalIntRange(2, 3 + depth/5)`. Trap floors can place up to five
@@ -245,11 +247,15 @@ Implementation was cross-checked against:
 
 ### Saves
 
-The current save format is **V10**. Slots store the run seed, current map and fog,
+The current save format is **V11**. Slots store the run seed, current map and fog,
 inventory, actors, quest and boss state, typed keys, and loot and respawn state.
 Leaving the game auto-saves. **V9 saves from v0.1.0alpha still load**: the current
 floor keeps its old shared key balance until descent, and newly generated floors
-use the current rules. Back up `sdmc:/3ds/spd/` before updating an alpha build.
+use the current rules. V10 saves also load. Older saves lack strength and hunger:
+strength starts at 10 and hunger at 0, existing HP/enemies are retained, and XP
+uses the corrected threshold. V11 additionally saves survival state, room weights
+and fractional action costs. Older builds cannot load V11; back up `sdmc:/3ds/spd/`
+before updating. A fresh run is recommended for comparing mechanics.
 
 Select an occupied slot and press **X**, or tap its **删除** button. Press **A**
 to permanently delete the selected save or **B** to cancel. Both choices are
@@ -506,13 +512,15 @@ Drop `sdmc:/3ds/spd/scene.txt` (Azahar:
 | 87 | Check stairs, keys, initial monsters, food, and planned supply drops on each of 800 floors |
 | 88 | Check long hero route, door closure, and pursuit of a last-seen target |
 | 89/90 | Freeze a melee exchange / fire wand projectile to inspect combat effects |
-| 91 | Check one-turn respawn retry, rotation order and room occupancy |
+| 91 | Check one-turn respawn retry, rotation order and occupied cells |
 | 92 | Check typed locks, trap activation and an active gas cloud save round-trip |
 | 93–97 | Inspect animated water, shorelines, chasm edges and fog in all five regions (1× / 1.33×) |
 | 98 | Preview a generated chasm connector in the dungeon |
 | 99 | Check evasion, surprise attacks, armor, shields, Ankh revival, and death timing |
 | 100/101 | Freeze an enemy or the hero mid-fall for visual inspection |
 | 102/103 | Inspect toxic gas, alarm waves and trap names |
+| 104 | Check strength, food, hunger, regen, healing, XP, action costs and save migration |
+| 105 | Check trap avoidance, whole-floor alarm and mapping discovery |
 | 78 | Visited / mapped fog test |
 | 79 | Door auto-close self-test (writes to log) |
 | 80 | 1.6× zoom preview |
@@ -536,14 +544,14 @@ useful when the emulator shows an exception dialog.
       scrolls/rings/bombs/missiles/seeds) with gameplay effects
 - [x] Shopkeeper warn/flee, bags, alchemy UI, Stone of Augmentation, tipped darts
 - [x] Integer-scaled, shadow-free UI text; fixed multiline wrapping measurement
-- [x] Wandmaker wraith spawns, pickaxe/ore mine area, class-neutral talent tiers
+- [x] Wandmaker wraith spawns, pickaxe/ore mine area
 - [x] SPD room budgets, special-room rotation, locked special rooms + keys
 - [x] SPD depth-specific mob rotations, mob cap, respawns, rare alts
 - [x] SPD level feelings, traps, loot decks, chests/mimics, gold range
 - [x] CIA packaging (makerom, banner + icon, RSF permissions)
 - [ ] True Old Mine / Imp Vault sub-levels (currently rooms on the same floor)
 - [ ] Boss arenas as separate levels (regular rooms + boss room for now)
-- [ ] Full class-specific 3-way talent trees (currently 4 fixed talent tiers)
+- [ ] Full class-specific talent trees (current tier notices have no stat bonuses)
 - [ ] Artifacts, trinkets, exotic consumables and full alchemy recipes
 - [ ] Exact layouts for every special room (crystal/sacrifice/fire variants are simplified)
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)

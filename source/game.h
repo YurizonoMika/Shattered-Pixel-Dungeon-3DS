@@ -201,6 +201,10 @@ struct Game {
   int hero = 0;
   int px = 1, py = 1;
   int hp = 20, maxhp = 20, level = 1, xp = 0, xpnext = 10;
+  int strength = 10;
+  int hunger = 0, starvation_damage = 0, regen_ticks = 0, healing_left = 0;
+  int blessed_t = 0;
+  float action_remainder = 0.f;
   int keys = 0, gold = 0, shield = 0;
   int golden_keys = 0;
   int crystal_keys = 0;
@@ -230,11 +234,10 @@ struct Game {
   int mob_cap = 0;
   struct SpawnRoom { uint8_t x, y, w, h; };
   std::vector<SpawnRoom> spawn_rooms;
+  std::vector<uint8_t> spawn_weights;
   std::vector<uint8_t> spawn_deck;
   uint8_t next_spawn_type();
   bool try_respawn();
-  int room_spawn_limit(const SpawnRoom& room) const;
-  int room_spawn_count(const SpawnRoom& room) const;
   int room_count = 0;
   uint8_t layout_builder = 0; // debug: 0 legacy, 1 loop, 2 figure eight
   uint8_t talents[4]{}, talent_tier = 0;
@@ -294,7 +297,7 @@ struct Game {
   void combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
                      CombatStyle style, uint8_t item = IT_NONE);
   void combat_hit(CombatPose& pose, int x, int y, int damage);
-  void take_damage(int damage);
+  void take_damage(int damage, bool bypass_shield = false);
   bool hero_hits(Mob& mob, bool ranged);
 
   bool paused = false, backpack = false;
@@ -321,6 +324,7 @@ struct Game {
   bool los(int x0, int y0, int x1, int y1) const;
   bool walkable(int x, int y) const;
   bool blocks_sight(int x, int y) const;
+  bool visible_trap_at(int x, int y) const;
   int mob_at(int x, int y) const;
   int item_at(int x, int y) const;
   void move_player(int dx, int dy);
@@ -329,6 +333,14 @@ struct Game {
   void attack(int mob, bool ranged, int bonus = 0);
   void damage_mob(int idx, int raw, DamageKind kind = DamageKind::Direct);
   void advance_turn();
+  void spend_action(float duration);
+  void earn_exp(int amount);
+  void tick_survival();
+  int effective_strength() const;
+  int roll_armor();
+  int roll_weapon(const Mob& target);
+  int roll_mob_damage(const Mob& mob);
+  float hero_evasion() const;
   void tick(int dt_ms);
   void clear_path();
   void wait_turns(int n);
@@ -369,13 +381,9 @@ struct Game {
   void talk_npc(int idx);
   void give_loot(int tier, bool chest);
   int bag_capacity() const;
-  int weapon_bonus() const;
-  int armor_bonus() const;
   int ring_atk() const;
   bool ring_has(uint8_t id) const;
   void equip_ring(int idx);
-  int hero_atk() const;
-  int hero_def() const;
   void recharge_wands();
   void search();
   bool drop_item(int idx);
