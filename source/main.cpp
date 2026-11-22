@@ -124,7 +124,9 @@ void scores_add(const ScoreEntry& e) {
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
-static int s_last_dx = 0, s_last_dy = 0, s_rep = 0;
+#include "direction_input.h"
+static direction_input::Axis s_direction_x,s_direction_y;
+static int s_analog_x=0,s_analog_y=0;
 
 void input_update(Input& in) {
   in.down = hidKeysDown();
@@ -132,33 +134,19 @@ void input_update(Input& in) {
   in.up = hidKeysUp();
   in.dx = in.dy = 0;
 
-  int dx = ((in.held & KEY_RIGHT) ? 1 : 0) - ((in.held & KEY_LEFT) ? 1 : 0);
-  int dy = ((in.held & KEY_DOWN) ? 1 : 0) - ((in.held & KEY_UP) ? 1 : 0);
+  int dx = ((in.held & KEY_DRIGHT) ? 1 : 0) - ((in.held & KEY_DLEFT) ? 1 : 0);
+  int dy = ((in.held & KEY_DDOWN) ? 1 : 0) - ((in.held & KEY_DUP) ? 1 : 0);
   circlePosition cp;
   hidCircleRead(&cp);
-  if (!dx) {
-    if (cp.dx > 40) dx = 1;
-    else if (cp.dx < -40) dx = -1;
-  }
-  if (!dy) {
-    if (cp.dy > 40) dy = 1;
-    else if (cp.dy < -40) dy = -1;
-  }
+  s_analog_x=direction_input::analog_axis(cp.dx,s_analog_x);
+  s_analog_y=direction_input::analog_axis(-cp.dy,s_analog_y);
+  if (!dx) dx=s_analog_x;
+  if (!dy) dy=s_analog_y;
   in.pad_dx = dx;
   in.pad_dy = dy;
-  if (dx != s_last_dx || dy != s_last_dy) {
-    in.dx = dx;
-    in.dy = dy;
-    s_rep = 0;
-  } else if (dx || dy) {
-    if (++s_rep >= 6) {
-      s_rep = 0;
-      in.dx = dx;
-      in.dy = dy;
-    }
-  }
-  s_last_dx = dx;
-  s_last_dy = dy;
+  const uint64_t now=osGetTime();
+  in.dx=s_direction_x.update(dx,now);
+  in.dy=s_direction_y.update(dy,now);
 
   touchPosition tp;
   hidTouchRead(&tp);

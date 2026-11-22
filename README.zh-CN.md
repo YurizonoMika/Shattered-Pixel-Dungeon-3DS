@@ -8,27 +8,34 @@
 
 ## 下载和安装
 
-v0.1.12alpha 继续按 Wiki 和固定 v4.0.2 源码对齐机制，新增独立行动时间、
+项目继续按 Wiki 和固定 v4.0.2 源码对齐机制，已加入独立行动时间、
 装备鉴定与诅咒状态、强化石选项、原版弹道/视野/毒气扩散，以及部分怪物能力。
 支持保存已访问楼层、上下楼、第 26 层护符和携带护符返回地表。
 完整来源、冲突和未完成项见 [Wiki 机制复盘](docs/wiki-mechanics-audit.md)，目前尚未实现所有机制一致。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
+本版修复短按方向键或轻推摇杆时光标跳动多格：立即移动一格，长按 350 毫秒后
+每 100 毫秒连发；两轴独立计时，摇杆加入防抖。存档兼容性仍为 V12。
+
 ## 截图
+
+以下截图来自 v0.1.13alpha 的 Azahar 运行画面；游戏示例使用临时演示场景。
 
 | 标题画面 | 英雄选择 |
 | --- | --- |
 | ![标题画面](docs/screens/title.png) | ![英雄选择](docs/screens/heroes.png) |
-| **双屏游戏画面** | **背包** |
-| ![双屏游戏画面](docs/screens/game.png) | ![背包](docs/screens/backpack.png) |
-| **战争迷雾** | **地图缩放** |
-| ![战争迷雾](docs/screens/fog.png) | ![地图缩放](docs/screens/zoom.png) |
+| **存档槽** | **视野与地牢** |
+| ![存档槽](docs/screens/saves.png) | ![游戏画面](docs/screens/game.png) |
+| **卷轴选择已装备目标** | **魔眼蓄力提示** |
+| ![物品选择](docs/screens/transmute.png) | ![魔眼蓄力](docs/screens/eye.png) |
+| **毒气扩散** | **地图缩放** |
+| ![毒气](docs/screens/gas.png) | ![缩放](docs/screens/zoom.png) |
 
 ## 功能与进度
 

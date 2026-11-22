@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.12alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.13alpha-e60012)
 ![Status](https://img.shields.io/badge/status-mechanics%20alignment%20in%20progress-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,13 +15,13 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.12alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.12alpha)**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.12alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.13alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.13alpha)**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
-v0.1.12alpha continues the [Wiki mechanics audit](docs/wiki-mechanics-audit.md)
+The port continues the [Wiki mechanics audit](docs/wiki-mechanics-audit.md)
 with individual actor clocks, selected equipment actions, default use/XP
 identification, augmentation, original Ballistica/ShadowCaster/Blob algorithms,
 selected enemy abilities, remembered floors and the Amulet ascent.
@@ -43,29 +43,23 @@ verification scope and outstanding systems.
 - 开发环境：macOS + devkitPro（Linux 同样可用）
 - 许可：GPL-3.0（与上游一致）
 
+v0.1.13alpha fixes cursor skipping on brief D-pad/Circle Pad input: one immediate
+step, a 350 ms hold delay, then 100 ms repeat, with independent axes and analog
+hysteresis. Save compatibility remains V12.
+
 ## Screenshots
+
+Screenshots captured from v0.1.13alpha in Azahar; gameplay examples use disposable demo scenes.
 
 | Title | Hero select |
 | --- | --- |
 | ![Title](docs/screens/title.png) | ![Heroes](docs/screens/heroes.png) |
-| **Save slots** | **In-game dual screen** |
+| **Save slots** | **Field of view and dungeon** |
 | ![Saves](docs/screens/saves.png) | ![Game](docs/screens/game.png) |
-| **NPC dialog (top screen)** | **Backpack (SPD-style grid)** |
-| ![Dialog](docs/screens/dialog.png) | ![Backpack](docs/screens/backpack.png) |
-| **Item details / actions** | **Pause menu (talents)** |
-| ![Item actions](docs/screens/bag_item.png) | ![Pause](docs/screens/pause.png) |
-| **Alchemy** | **Shop** |
-| ![Alchemy](docs/screens/alchemy.png) | ![Shop](docs/screens/shop.png) |
-| **Transmutation picker** | **Hero info** |
-| ![Transmute](docs/screens/transmute.png) | ![Hero info](docs/screens/hero_info.png) |
-| **Fog of war** | **Smooth shoulder zoom** |
-| ![Fog](docs/screens/fog.png) | ![Zoom](docs/screens/zoom.png) |
-| **Shop** | **Alchemy** |
-| ![Shop](docs/screens/shop.png) | ![Alchemy](docs/screens/alchemy.png) |
-| **Prison (6–10)** | **Caves (11–15)** |
-| ![Prison](docs/screens/prison.png) | ![Caves](docs/screens/caves.png) |
-| **City (16–20)** | **Halls boss (21–25)** |
-| ![City](docs/screens/city.png) | ![Halls](docs/screens/boss_halls.png) |
+| **Equipped-item scroll selection** | **Eye charging warning** |
+| ![Item selection](docs/screens/transmute.png) | ![Eye charging](docs/screens/eye.png) |
+| **Toxic gas diffusion** | **Map zoom** |
+| ![Gas](docs/screens/gas.png) | ![Zoom](docs/screens/zoom.png) |
 
 ## Features
 
