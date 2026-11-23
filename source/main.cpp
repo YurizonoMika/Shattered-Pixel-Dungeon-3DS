@@ -210,7 +210,7 @@ void draw_icon(int sx, int sy, int sw, int sh, float x, float y, float scale,
 
 void draw_item_icon(uint8_t id, float x, float y, float scale) {
   int cx = 0, cy = 0;
-  item_sprite_cell(id, cx, cy);
+  const int sprite=G.display_sprite(id);cx=(sprite%16)*16;cy=(sprite/16)*16;
   draw_cell(A_items, cx, cy, 16, 16, x, y, scale, scale);
 }
 
@@ -1006,6 +1006,24 @@ int main() {
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
+        else if(want>=111 && want<=114) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.spawn_rooms.clear();G.spawn_weights.clear();G.spawn_deck.clear();G.entrance_cell=-1;
+          G.map_width=23;G.map_height=15;memset(G.tiles,T_WALL,sizeof(G.tiles));
+          for(int y=1;y<14;++y) for(int x=1;x<22;++x) G.tiles[y][x]=T_FLOOR;
+          G.pvx=G.px=10;G.pvy=G.py=7;G.cursor_x=12;G.cursor_y=7;
+          for(int y=4;y<=9;++y) for(int x=12;x<=16;++x) G.tiles[y][x]=T_HIGH_GRASS;
+          G.inv_n=0;G.add_item(IT_WATERSKIN);G.inv[0].charges=12;
+          G.add_item(IT_POTION_STR);G.add_item(IT_SCROLL_TELE);G.add_item(IT_RING_MIGHT,1,3,IF_CURSED);
+          G.weapon=IT_LONGSWORD;G.weapon_level=3;G.weapon_flags=0;
+          G.recompute_fov();G.examining=true;
+          if(want==112) {G.examining=false;G.backpack=true;g_bag_sel=-1;g_bag_action=true;}
+          if(want==113) {G.examining=false;G.backpack=true;g_bag_sel=1;g_bag_action=true;}
+          if(want==114) G.examine_at(12,7);
+          dlog("[requested UI] scene=%d inspect=%d grass=%d unknown=%d",want,G.examining,G.tiles[7][12]==T_HIGH_GRASS,!G.identity_known(IT_POTION_STR));
+          G.demo_lock=true;
+        }
         else if(want==109 || want==110) {
           G.new_run(0,0x12345678);SCENE=Scene::GAME;
           G.mobs.clear();G.mob_cap=0;G.keys=3;G.golden_keys=2;
@@ -1134,7 +1152,7 @@ int main() {
             }
             fixture = fopen(filename, "r+b");
             if (fixture) {
-              const uint16_t version = 12;
+              const uint16_t version = 13;
               fseek(fixture, 4, SEEK_SET);
               const bool changed = fwrite(&version, sizeof(version), 1, fixture) == 1;
               fseek(fixture, 0, SEEK_END);

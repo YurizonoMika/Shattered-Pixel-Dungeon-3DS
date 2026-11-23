@@ -53,6 +53,7 @@ enum ItemId : uint8_t {
   IT_FLAIL, IT_ASSASSINS_BLADE, IT_CROSSBOW, IT_KATANA,
   IT_GREATSHIELD, IT_GAUNTLET, IT_WAR_SCYTHE,
   IT_RING_FUROR, IT_RING_TENACITY, IT_RING_SHARPSHOOTING, IT_RING_ARCANA,
+  IT_DEWDROP, IT_WATERSKIN,
   IT_COUNT
 };
 
@@ -101,3 +102,4 @@ int item_value(uint8_t id);
 void item_sprite_cell(uint8_t id, int& cx, int& cy);
 bool item_is_equipment(uint8_t id);
 bool item_is_stackable(uint8_t id);
+bool item_random_identity(uint8_t id);

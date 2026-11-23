@@ -442,6 +442,64 @@ int main() {
   assert(game.save(106));
   game.toxic_gas.left=-1;assert(!game.save(106));
   assert(restored.load(106));
+  // v0.1.14 requested mechanics: physical swarm splitting before DR.
+  arena(game,M_SWARM,9,7);game.mobs[0].hp=game.mobs[0].maxhp=50;game.mobs[0].def=0;
+  game.damage_mob(0,10,DamageKind::Physical);
+  assert(game.pending_swarms.size()==1 && game.mobs[0].hp==20 && game.pending_swarms[0].hp==20);
+  assert(game.pending_swarms[0].variant==1);
+  game.spend_action(.01f);assert(game.mobs.size()==2 && game.pending_swarms.empty());
+  game.damage_mob(1,1000);assert(game.xp==0);
+  arena(game,M_SWARM,9,7);game.damage_mob(0,10);assert(game.pending_swarms.empty());
+  arena(game,M_RAT,3,3);game.mobs.clear();game.inv_n=0;game.add_item(IT_WATERSKIN);
+  for(int i=0;i<20;++i) {game.items.push_back({game.px,game.py,IT_DEWDROP});game.pick_item(0);}
+  assert(game.inv[0].charges==20 && game.items.empty());
+  game.hp=500;game.use_item(0);assert(game.hp==1000 && game.inv[0].charges==10);
+  game.items.push_back({game.px,game.py,IT_DEWDROP});game.inv[0].charges=20;
+  game.pick_item(0);assert(game.items.size()==1);
+  game.hp=950;game.pick_item(0);assert(game.hp==1000 && game.items.empty());
+  game.tiles[7][11]=T_HIGH_GRASS;game.trample_grass(11,7,true);assert(game.tiles[7][11]==T_GRASS);
+  auto after_grass_rng=game.rng;game.trample_grass(11,7,true);assert(game.rng==after_grass_rng);
+  game.init_identities();assert(!game.identity_known(IT_POTION_STR));
+  assert(std::string(game.display_name(IT_POTION_STR))!=item_name(IT_POTION_STR));
+  Item unknown;unknown.id=IT_POTION_STR;char details[256];game.describe_item(unknown,details,sizeof(details));
+  assert(std::string(details).find("永久增加")==std::string::npos);
+  unknown.id=IT_RING_MIGHT;unknown.flags=IF_CURSED;unknown.level=5;
+  game.describe_item(unknown,details,sizeof(details));assert(std::string(details).find("+5")==std::string::npos);
+  auto appearance=game.display_sprite(IT_POTION_STR);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.inv[0].charges==20 && !restored.identity_known(IT_POTION_STR));
+  assert(restored.display_sprite(IT_POTION_STR)==appearance);
+  // A V12 prefix has the identical floor/item layout and imports old knowledge.
+  {
+    std::ifstream source("sdmc:/3ds/spd/slot106.bin",std::ios::binary);
+    std::string old{std::istreambuf_iterator<char>(source),{}};
+    const uint16_t version=12;std::memcpy(old.data()+4,&version,sizeof(version));
+    auto marker=old.rfind("DID1");assert(marker!=std::string::npos);old.resize(marker);
+    std::ofstream fixture("sdmc:/3ds/spd/slot108.bin",std::ios::binary);
+    fixture.write(old.data(),old.size());fixture.close();
+    assert(restored.load(108) && restored.identity_known(IT_POTION_STR));
+    SlotMeta meta;assert(Game::slot_meta(108,meta));
+  }
+  game.add_item(IT_POTION_STR);game.use_item(1);assert(game.identity_known(IT_POTION_STR));
+  const int search_turn=game.turns;game.search_button();assert(game.examining && game.turns==search_turn);
+  game.examine_at(game.px,game.py);assert(game.dialog && game.dlg_type==23 && game.turns==search_turn);
+  game.dialog_choose(0);game.search_button();assert(!game.examining && game.turns==search_turn+1);
+  arena(game,M_RAT,7,7);game.recompute_fov();assert(game.next_step_encounter(9,7));
+  const auto safe_rng=game.rng;const auto safe_turn=game.turns;
+  game.pvx=game.px;game.pvy=game.py;game.path_goal=7*MW+2;game.tick(100);
+  assert(game.px==10 && game.turns==safe_turn && game.rng==safe_rng && game.path_goal==-1);
+  arena(game,M_RAT,3,3);game.mobs.clear();game.ghost_floor=2;
+  game.spawn_quest_miniboss();assert(game.ghost_state==1 && game.mobs.size()==1);
+  assert(!game.vis[game.mobs[0].y][game.mobs[0].x]);
+  // Guard must never be injected by SentryRoom in the first region.
+  for(uint32_t seed=1;seed<=12;++seed) {
+    game.new_run(0,seed);
+    for(int depth=1;depth<=4;++depth) {
+      game.floor=depth;game.gen_level();
+      for(const auto& mob:game.mobs) assert(mob.type!=M_GUARD);
+    }
+  }
+  std::puts("Requested mechanics tests passed: region guards, swarm split/XP, grass, dew/flask, identity/save, inspect, encounter stop and distant quest spawn.");
   std::remove("sdmc:/3ds/spd/slot106.bin");
   std::remove("sdmc:/3ds/spd/slot107.bin");
   std::remove("sdmc:/3ds/spd/slot108.bin");

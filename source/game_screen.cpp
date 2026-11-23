@@ -23,14 +23,14 @@ static constexpr int WATER_ATLAS = 2 * 16;
 static int chasm_atlas_tile(uint8_t above) {
   if (above == T_WATER) return CHASM_ATLAS + 4;
   if (wall_like(above) || door_tile(above)) return CHASM_ATLAS + 3;
-  if (above == T_FLOOR || above == T_GRASS) return CHASM_ATLAS + 1;
+  if (above == T_FLOOR || above == T_GRASS || above==T_HIGH_GRASS) return CHASM_ATLAS + 1;
   return CHASM_ATLAS;
 }
 
 static bool water_shore(int x, int y) {
   if (!G.in_map(x, y)) return false;
   const uint8_t t = G.tiles[y][x];
-  return t == T_FLOOR || t == T_GRASS || t == T_STAIRS || t==T_STAIRS_UP || door_tile(t);
+  return t == T_FLOOR || t == T_GRASS || t==T_HIGH_GRASS || t == T_STAIRS || t==T_STAIRS_UP || door_tile(t);
 }
 
 static void draw_water_world(const Img& im, int x, int y, float cell, int camx, int camy) {
@@ -589,6 +589,7 @@ static void draw_map() {
         int idx = 0;
         if(tt==T_STAIRS) idx=17;
         else if(tt==T_STAIRS_UP) idx=16;
+        else if (tt == T_HIGH_GRASS) idx=66;
         else if (tt == T_GRASS) idx = ((x * 7 + y * 13) % 19 == 0) ? 8 : 2;
         else if (tt == T_FLOOR && (x * 31 + y * 17) % 23 == 0) idx = 6;
         draw_tile_world(A_tiles[G.region()], (idx % 16) * 16,
@@ -702,7 +703,7 @@ static void draw_map() {
   draw_combat_fx(camx, camy, true);
 
   // cursor
-  u32 cc = G.targeting ? CLR_YELLOW : CLR_GREEN;
+  u32 cc = G.examining ? CLR_BLUE : G.targeting ? CLR_YELLOW : CLR_GREEN;
   draw_cursor(roundf((float)(G.cursor_x * 16 * z - camx)),
               roundf((float)(G.cursor_y * 16 * z - camy)), roundf(16 * z),
               roundf(16 * z), cc);
@@ -716,8 +717,8 @@ static void draw_map() {
 
   // bottom hint bar
   draw_box(0, TOP_H - 22, TOP_W, 22, C2D_Color32(0, 0, 0, 160), 0.55f);
-  text("B 菜单", 8, TOP_H - 17, CLR_GREY, 1.0f);
-  text("A 移动   Y 交互", TOP_W - 138, TOP_H - 17, CLR_GREY, 1.0f);
+  text(G.examining ? "B 退出查看" : "B 菜单", 8, TOP_H - 17, CLR_GREY, 1.0f);
+  text(G.examining ? "A 详情  搜索:探索" : "A 移动   Y 交互", TOP_W - 138, TOP_H - 17, CLR_GREY, 1.0f);
   if (S.show_fps) textf(TOP_W - 96, 4, CLR_GREY, 1.0f, "FPS %.0f", FPS);
 }
 
@@ -731,6 +732,8 @@ static void draw_dialog() {
   if (G.dlg_type == 2 || G.dlg_type == 3) {
     draw_sprite(A_hero[G.hero], 12, 15, 0, lx + 22, ly + 12,
                 G.dlg_type == 2 ? 0xBBBBBBFF : 0);
+  } else if(G.dlg_type==23) {
+    draw_item_icon(IT_SCROLL_IDENTIFY,lx+16,ly+16,1.5f);
   } else {
     uint8_t npc = G.dlg_type == 4 ? M_NPC_SMITH
                   : G.dlg_type == 5 ? M_NPC_IMP
@@ -866,6 +869,7 @@ static int bag_visible(int out[BAG_MAX]) {
 }
 
 static int bag_sel_inv() {
+  if(g_bag_sel<0) return g_bag_sel;
   int out[BAG_MAX];
   int n = bag_visible(out);
   return (g_bag_sel >= 0 && g_bag_sel < n) ? out[g_bag_sel] : -1;
@@ -895,31 +899,40 @@ static void draw_bag_tab(int i, float x, float y) {
 
 static void draw_bag_action() {
   int idx = bag_sel_inv();
-  if (idx < 0) return;
+  if(idx<0) {
+    const Item item=G.selection_item(idx);if(item.id==IT_NONE) return;
+    char description[256];G.describe_item(item,description,sizeof(description));
+    draw_box(0,0,BOT_W,BOT_H,C2D_Color32(0,0,0,180),.7f);
+    draw_panel(10,24,300,202,2.f);
+    text_wrap(description,22,36,276,CLR_WHITE,1.f,2.f);
+    draw_button(100,184,120,28,"关闭 (B)",false,1.f);return;
+  }
   const ItemDef& d = item_def(G.inv[idx].id);
   draw_box(0, 0, BOT_W, BOT_H, C2D_Color32(0, 0, 0, 170), 0.7f);
   draw_panel(16, 40, 288, 176, 2.0f);
   draw_item_icon(G.inv[idx].id, 30, 54, 2.0f);
-  text(d.name, 72, 54, CLR_YELLOW, 2.0f);
+  text(G.display_name(G.inv[idx].id), 72, 54, CLR_YELLOW, 1.0f);
   char extra[40] = "";
-  if (item_is_equipment(G.inv[idx].id) && !(G.inv[idx].flags & IF_IDENTIFIED))
+  if ((item_is_equipment(G.inv[idx].id) || d.kind==K_WAND) && !(G.inv[idx].flags & IF_IDENTIFIED))
     snprintf(extra, sizeof(extra), "尚未鉴定");
   else if (d.kind == K_WEAPON || d.kind == K_ARMOR)
     snprintf(extra, sizeof(extra), "+%d  力量 %d/%d", G.inv[idx].level, G.effective_strength(),
              hero_rules::strength_requirement(G.inv[idx].id, G.inv[idx].level));
-  else if (d.kind == K_WAND)
+  else if (d.kind == K_WAND || G.inv[idx].id==IT_WATERSKIN)
     snprintf(extra, sizeof(extra), "充能 %d", G.inv[idx].charges);
   else if (G.inv[idx].count > 1)
     snprintf(extra, sizeof(extra), "数量 %d", G.inv[idx].count);
   if (extra[0]) text(extra, 72, 82, CLR_GREY, 1.0f);
   if ((G.inv[idx].flags & (IF_CURSED|IF_CURSE_KNOWN)) == (IF_CURSED|IF_CURSE_KNOWN))
     text("诅咒", 246, 82, CLR_RED, 1.f);
-  text_wrap(d.desc, 30, 104, 260, CLR_WHITE, 1.0f, 2.0f);
+  text_wrap(item_random_identity(G.inv[idx].id) && !G.identity_known(G.inv[idx].id) ?
+      "类型和作用尚未鉴定。" : d.desc,30,104,260,CLR_WHITE,1.f,2.f);
 
   const char* primary = "使用 (A)";
   if (d.kind == K_WEAPON || d.kind == K_ARMOR || d.kind == K_RING)
     primary = "装备 (A)";
   else if (d.kind == K_WAND || d.kind == K_BOMB) primary = "瞄准 (A)";
+  else if (G.inv[idx].id==IT_WATERSKIN) primary="饮用 (A)";
   else if (d.kind == K_QUEST) primary = "任务物品";
 
   draw_button(30, 140, 120, 30, primary, false, 2.0f);
@@ -935,15 +948,19 @@ static void draw_backpack() {
   textf(228, 18, CLR_YELLOW, 1.0f, "%d", G.gold);
   textf(252, 18, CLR_GREY, 1.0f, "%d/%d", G.inv_n, G.bag_capacity());
 
-  textf(14, 44, CLR_GREY, 1.0f, "武器 %s", item_name(G.weapon));
+  textf(14, 44, CLR_GREY, 1.0f, "武器 %s", G.display_name(G.weapon));
   if (G.weapon_level && (G.weapon_flags & IF_IDENTIFIED)) textf(112, 44, CLR_YELLOW, 1.0f, "+%d", G.weapon_level);
-  textf(150, 44, CLR_GREY, 1.0f, "护甲 %s", item_name(G.armor));
+  textf(150, 44, CLR_GREY, 1.0f, "护甲 %s", G.display_name(G.armor));
   if (G.armor_level && (G.armor_flags & IF_IDENTIFIED)) textf(244, 44, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
-  textf(14, 58, CLR_GREY, 1.0f, "戒指一 %s", item_name(G.ring1));
+  textf(14, 58, CLR_GREY, 1.0f, "戒指一 %s", G.display_name(G.ring1));
   if (G.ring1_level && (G.ring1_flags & IF_IDENTIFIED)) textf(100, 58, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
-  textf(156, 58, CLR_GREY, 1.0f, "戒指二 %s", item_name(G.ring2));
+  textf(156, 58, CLR_GREY, 1.0f, "戒指二 %s", G.display_name(G.ring2));
   if (G.ring2_level && (G.ring2_flags & IF_IDENTIFIED)) textf(244, 58, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
+  if(g_bag_sel<0) {
+    const int slot=-g_bag_sel;
+    draw_cursor(slot==1 || slot==3 ? 12 : 150,slot<=2 ? 42 : 56,146,14,CLR_BLUE,.6f,false);
+  }
 
   for (int i = 0; i < 6; i++) draw_bag_tab(i, 10 + i * 50, 70);
 
@@ -965,7 +982,7 @@ static void draw_backpack() {
     }
     if (i == g_bag_sel) draw_cursor(x, y, BAG_W, BAG_H, CLR_YELLOW, 0.6f, false);
   }
-  text_c("L/R 分栏   A 详情/使用   X 丢弃   B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
+  text_c("上键/点装备 查看   A 详情   X 丢弃   B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
   if (g_bag_action) draw_bag_action();
 }
 
@@ -1021,7 +1038,7 @@ static void draw_shop() {
     if (idx >= size) continue;
     Item it = shop_list_item(idx);
     draw_item_icon(it.id, 16, y + 3, 1.0f);
-    text(item_name(it.id), 38, y + 5, CLR_WHITE, 1.0f);
+    text(G.display_name(it.id), 38, y + 5, CLR_WHITE, 1.0f);
     if (it.count > 1) {
       char cnt[16];
       snprintf(cnt, sizeof(cnt), "x%d", it.count);
@@ -1088,7 +1105,7 @@ static void draw_transmute() {
     float y = 82 + row * 20;
     draw_button(16, y, BOT_W - 32, 19, "", pos == G.transmute_sel, 1.0f);
     draw_item_icon(item.id, 22, y + 1, 1.0f);
-    textf(42, y + 3, CLR_WHITE, 1.0f, "%s%s", item_name(item.id), idx<0 ? "（已装备）" : "");
+    textf(42, y + 3, CLR_WHITE, 1.0f, "%s%s", G.display_name(item.id), idx<0 ? "（已装备）" : "");
   }
   textf(BOT_W - 50, 54, CLR_GREY, 1.0f, "%d/%d", G.transmute_page + 1, pages);
   text_c("L/R 翻页  A 确认  B 取消", 0, BOT_W, 190, CLR_GREY, 1.0f);
@@ -1134,13 +1151,13 @@ static bool in_rect(float x, float y, float rx, float ry, float rw, float rh) {
   return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
 }
 
-static void do_search() { G.search(); }
+static void do_search() { G.search_button(); }
 
 static void bag_primary_action() {
   int i = bag_sel_inv();
   if (i < 0) return;
   const ItemDef& d = item_def(G.inv[i].id);
-  if (d.kind == K_QUEST) {
+  if (d.kind == K_QUEST && G.inv[i].id!=IT_WATERSKIN) {
     G.message("这是任务物品，不能使用。");
   } else if (d.kind == K_WAND || d.kind == K_BOMB) {
     G.clear_path();
@@ -1298,6 +1315,7 @@ void game_update() {
   }
 
   if (G.dialog) {
+    if(G.dlg_type==23 && IN.pressed(KEY_B)) {G.dialog=false;G.examining=false;return;}
     if (IN.pressed(KEY_A)) G.dialog_choose(0);
     else if (IN.pressed(KEY_B)) G.dialog_choose(1);
     else if (IN.pressed(KEY_X)) G.dialog_choose(2);
@@ -1333,6 +1351,10 @@ void game_update() {
 
   if (G.backpack) {
     if (g_bag_action) {
+      if(g_bag_sel<0) {
+        if(IN.pressed(KEY_A)||IN.pressed(KEY_B)||IN.tap) g_bag_action=false;
+        return;
+      }
       if (IN.pressed(KEY_B)) { g_bag_action = false; return; }
       if (IN.pressed(KEY_A)) { bag_primary_action(); return; }
       if (IN.pressed(KEY_X)) { bag_drop_action(); return; }
@@ -1350,11 +1372,19 @@ void game_update() {
       g_bag_action = false;
       return;
     }
-    if (IN.dx) g_bag_sel = std::max(0, std::min(BAG_MAX - 1, g_bag_sel + IN.dx));
-    if (IN.dy) g_bag_sel = std::max(0, std::min(BAG_MAX - 1, g_bag_sel + IN.dy * 8));
-    if (IN.pressed(KEY_A) && bag_sel_inv() >= 0) g_bag_action = true;
+    if(IN.dx) g_bag_sel=std::clamp(g_bag_sel+IN.dx,-4,BAG_MAX-1);
+    if(IN.dy) {
+      if(g_bag_sel<0) g_bag_sel=IN.dy>0 ? 0 : g_bag_sel;
+      else if(IN.dy<0 && g_bag_sel<8) g_bag_sel=-1;
+      else g_bag_sel=std::clamp(g_bag_sel+IN.dy*8,0,BAG_MAX-1);
+    }
+    if(IN.pressed(KEY_A) && (g_bag_sel<0 || bag_sel_inv()>=0)) g_bag_action=true;
     if (IN.tap) {
-      if (IN.tap_y >= 58 && IN.tap_y < 80 && IN.tap_x >= 10 && IN.tap_x < 310) {
+      if(IN.tap_y>=40 && IN.tap_y<70) {
+        g_bag_sel=IN.tap_y<56 ? (IN.tap_x<150 ? -1 : -2) : (IN.tap_x<150 ? -3 : -4);
+        g_bag_action=true;return;
+      }
+      if (IN.tap_y >= 70 && IN.tap_y < 92 && IN.tap_x >= 10 && IN.tap_x < 310) {
         int tab = (int)((IN.tap_x - 10) / 50);
         if (tab >= 0 && tab < 6) {
           g_bag_tab = tab;
@@ -1381,7 +1411,8 @@ void game_update() {
   }
 
   if (IN.pressed(KEY_B)) {
-    if (G.targeting) { G.targeting = false; G.message("取消瞄准。"); }
+    if(G.examining) {G.examining=false;G.message("退出查看模式。");}
+    else if (G.targeting) { G.targeting = false; G.message("取消瞄准。"); }
     else { G.clear_path(); G.paused = 1; }
     return;
   }

@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.13alpha-e60012)
+![Version](https://img.shields.io/badge/version-0.1.14alpha-e60012)
 ![Status](https://img.shields.io/badge/status-mechanics%20alignment%20in%20progress-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -15,9 +15,9 @@ for the Nintendo 3DS, built with devkitARM, libctru and citro2d.
 No JVM, no Dalvik, no APK wrapper, no Java-to-C++ transpiler: game logic, rendering,
 input, saves and the dungeon loop are reimplemented from scratch for the 3DS.
 
-**Download [v0.1.13alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.13alpha)**
-[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
-[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.cia) (installable HOME Menu title).
+**Download [v0.1.14alpha](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/tag/v0.1.14alpha)**
+[`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.14alpha/spd3ds.3dsx) (Homebrew Launcher / Azahar) or
+[`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.14alpha/spd3ds.cia) (installable HOME Menu title).
 
 [Release notes / 发布日志](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases) · [Screenshots](#screenshots) · [Build](#building) · [Controls](#controls) · [Roadmap](#roadmap)
 
@@ -43,13 +43,15 @@ verification scope and outstanding systems.
 - 开发环境：macOS + devkitPro（Linux 同样可用）
 - 许可：GPL-3.0（与上游一致）
 
-v0.1.13alpha fixes cursor skipping on brief D-pad/Circle Pad input: one immediate
-step, a 350 ms hold delay, then 100 ms repeat, with independent axes and analog
-hysteresis. Save compatibility remains V12.
+v0.1.14alpha fixes early-floor guards and Swarm splitting, adds high grass/dew/
+waterskins, equipped-item details, blue-cursor inspection and automatic travel
+interruption. Potions, scrolls and rings now hide unknown types behind persistent
+run appearances. Save format is V13; V9–V12 import remains supported. See the
+[release notes](docs/releases/v0.1.14alpha.md) for behavior and remaining gaps.
 
 ## Screenshots
 
-Screenshots captured from v0.1.13alpha in Azahar; gameplay examples use disposable demo scenes.
+Title and inspection screenshots are from v0.1.14alpha; the general gallery is from v0.1.13alpha. All were captured in Azahar using disposable demo scenes.
 
 | Title | Hero select |
 | --- | --- |
@@ -58,6 +60,10 @@ Screenshots captured from v0.1.13alpha in Azahar; gameplay examples use disposab
 | ![Saves](docs/screens/saves.png) | ![Game](docs/screens/game.png) |
 | **Equipped-item scroll selection** | **Eye charging warning** |
 | ![Item selection](docs/screens/transmute.png) | ![Eye charging](docs/screens/eye.png) |
+| **Blue-cursor inspection** | **Equipped-item details** |
+| ![Inspection](docs/screens/inspect.png) | ![Equipped details](docs/screens/equipped.png) |
+| **Unknown potion** | **Terrain details** |
+| ![Unknown potion](docs/screens/unknown.png) | ![Terrain details](docs/screens/terrain.png) |
 | **Toxic gas diffusion** | **Map zoom** |
 | ![Gas](docs/screens/gas.png) | ![Zoom](docs/screens/zoom.png) |
 
@@ -143,7 +149,7 @@ Screenshots captured from v0.1.13alpha in Azahar; gameplay examples use disposab
   **使用 / 装备 / 瞄准 / 丢弃 / 关闭**.
 - **Targeting mode** for bombs and wands; quick slots show counts/charges.
 - Bottom HUD: HP/shield, level/XP, region + floor, keys, gold, 2×4 quick slots,
-  wait/search/backpack/pause; search/wait long-press behaves like SPD.
+  wait/search/backpack/pause. Search enters inspection; press it again to search nearby.
 - ABXY dialog overlay with NPC portrait, name, text and four key actions.
 - Floor 25 victory screen after Yog-Dzewa.
 
@@ -248,17 +254,18 @@ Implementation was cross-checked against:
 
 ### Saves
 
-The current save format is **V12**. Slots store the run seed, current/visited maps
+The current save format is **V13**. Slots store the run seed, current/visited maps
 and fog, full entity vectors, actor/AI clocks, selected ability/status state,
-equipment flags/augmentation/identification, wand recharge, gas, quests, bosses,
+equipment flags/augmentation/identification, type knowledge, waterskin volume,
+Swarm generations/drop limits, wand recharge, gas, quests, bosses,
 typed keys, shops and respawn state. Failed writes retain the previous file.
 Leaving the game auto-saves. **V9 saves from v0.1.0alpha still load**: the current
 floor keeps its old shared key balance until descent, and newly generated floors
-use the current rules. V10/V11 saves also load. V9/V10 saves lack strength and hunger:
+use the current rules. V10/V11/V12 saves also load. V9/V10 saves lack strength and hunger:
 strength starts at 10 and hunger at 0, existing HP/enemies are retained, and XP
 uses the corrected threshold. Imported equipment is known and uncursed; previously
 visited floors absent from old saves cannot be reconstructed. Older builds cannot
-load V12; back up `sdmc:/3ds/spd/` before updating. The extended archive uses native
+load V13; back up `sdmc:/3ds/spd/` before updating. The extended archive uses native
 value layouts; cross-platform save exchange is not claimed. A fresh run is
 recommended for comparing mechanics.
 
@@ -274,6 +281,8 @@ also available on the touch screen. Starting a new game requires an empty slot.
 | Settings | ← → switch tab, ↑ ↓ select, **A** change value |
 | Hero select | **A** select, **A** again on the same hero to start, **X** info popup |
 | Game cursor | D-pad / Circle Pad (hold to repeat), **A** walk to tile, **Y** interact |
+| Inspection | **ZR / Search** enters blue-cursor mode; **A** inspect, **B** exit; Search again searches nearby |
+| Equipped details | Tap an equipped slot, or move up from the first bag row and press **A** |
 | Game actions | **B** pause menu, **X** backpack, **L/R** hold to zoom the map smoothly, **ZL/ZR** wait/search (touch bar also has both), **START** pause |
 | Targeting | **A** cast/throw at cursor, **B** cancel |
 | Backpack | **L/R** switch tab (全部/药水/卷轴/法杖/装备/其他), D-pad select, **A** details, **A** use/equip/aim, **X** drop, **B** close; tabs and slots are touchable |

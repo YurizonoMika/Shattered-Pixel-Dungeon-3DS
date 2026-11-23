@@ -15,17 +15,18 @@
 
 | 安装包 | 用途 |
 | --- | --- |
-| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
-| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.13alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
+| [`spd3ds.3dsx`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.14alpha/spd3ds.3dsx) | 在 Azahar 中直接打开，或放到 SD 卡的 `/3ds/` 下，通过 Homebrew Launcher 启动。 |
+| [`spd3ds.cia`](https://github.com/YurizonoMika/Shattered-Pixel-Dungeon-3DS/releases/download/v0.1.14alpha/spd3ds.cia) | 在启用 Luma3DS 签名补丁的主机上通过 FBI 或 GodMode9 安装，再从 HOME 菜单启动 **Shattered PD 3DS**。 |
 
 CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下的存档、设置和排行榜。升级 Alpha 版前建议备份该目录。
 
-本版修复短按方向键或轻推摇杆时光标跳动多格：立即移动一格，长按 350 毫秒后
-每 100 毫秒连发；两轴独立计时，摇杆加入防抖。存档兼容性仍为 V12。
+本版修复下水道错误守卫和苍蝇分裂，新增高草、露珠、水袋、装备详情、蓝色光标
+查看模式和自动移动遇敌停步。药水、卷轴和戒指使用每局固定随机外观，隐藏未知类型。
+存档升级为 V13，继续导入 V9–V12；具体行为和未完成项见[发布说明](docs/releases/v0.1.14alpha.md)。
 
 ## 截图
 
-以下截图来自 v0.1.13alpha 的 Azahar 运行画面；游戏示例使用临时演示场景。
+标题与查看功能截图来自 v0.1.14alpha，其余画面来自 v0.1.13alpha；均在 Azahar 中使用临时演示场景实拍。
 
 | 标题画面 | 英雄选择 |
 | --- | --- |
@@ -34,6 +35,10 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 | ![存档槽](docs/screens/saves.png) | ![游戏画面](docs/screens/game.png) |
 | **卷轴选择已装备目标** | **魔眼蓄力提示** |
 | ![物品选择](docs/screens/transmute.png) | ![魔眼蓄力](docs/screens/eye.png) |
+| **蓝色光标查看** | **已装备详情** |
+| ![查看模式](docs/screens/inspect.png) | ![装备详情](docs/screens/equipped.png) |
+| **未知药水** | **地块详情** |
+| ![未知药水](docs/screens/unknown.png) | ![地块详情](docs/screens/terrain.png) |
 | **毒气扩散** | **地图缩放** |
 | ![毒气](docs/screens/gas.png) | ![缩放](docs/screens/zoom.png) |
 
@@ -58,11 +63,11 @@ CIA 标题 ID 为 `00040000051D3000`。CIA 和 3DSX 共用 `sdmc:/3ds/spd/` 下�
 
 ### 存档兼容
 
-当前存档格式为 **V12**，保存已访问楼层、完整实体列表、行动/AI 时间、状态、
-装备已知/诅咒标记、属性调整、鉴定进度、法杖充能和毒气浓度。保存失败时保留原文件。
-V9/V10/V11 仍可读取；缺失力量初始化为10、饥饿为0，保留已有生命和怪物，升级门槛采用新公式。
+当前存档格式为 **V13**，保存已访问楼层、完整实体列表、行动/AI 时间、状态、
+装备已知/诅咒标记、属性调整、鉴定进度、类型知识、水袋水量、苍蝇分裂代数与掉落计数、法杖充能和毒气浓度。保存失败时保留原文件。
+V9/V10/V11/V12 仍可读取；缺失力量初始化为10、饥饿为0，保留已有生命和怪物，升级门槛采用新公式。
 旧装备导入为已鉴定且无诅咒；旧档未记录的历史楼层无法还原。
-建议备份并开新局验证机制。旧版本不能读取 V12 存档；不承诺不同平台间交换存档。
+建议备份并开新局验证机制。旧版本不能读取 V13 存档；不承诺不同平台间交换存档。
 
 ## 操作
 
@@ -73,6 +78,8 @@ V9/V10/V11 仍可读取；缺失力量初始化为10、饥饿为0，保留已有
 | 英雄选择 | **A** 选中，再按 **A** 开始；**X** 查看英雄说明。 |
 | 地图 | 十字键或摇杆移动光标，**A** 走向光标，**Y** 交互。 |
 | 游戏快捷操作 | **B / START** 暂停，**X** 背包；按住 **L / R** 缩小或放大（0.75×–2×）；**ZL / ZR** 等待或搜索，也可点下屏按钮。 |
+| 查看模式 | 搜索按钮或 **ZR** 进入蓝色光标模式，**A** 查看，**B** 退出；再次按搜索会探索附近。 |
+| 已装备详情 | 点击装备栏，或从背包第一行按上进入装备栏再按 **A**。 |
 | 瞄准 | **A** 对光标位置施法或投掷，**B** 取消。 |
 | 背包 | **L / R** 切换分类，十字键选物品，**A** 查看详情并确认操作，**X** 丢弃，**B** 关闭。 |
 | 对话 | 按 **A / B / X / Y** 选择对应选项。 |

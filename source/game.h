@@ -30,6 +30,7 @@ enum TileType : uint8_t {
   T_DOOR_LOCKED,// needs a key
   T_CHASM,      // visible across, not traversable until floor returns exist
   T_STAIRS_UP,
+  T_HIGH_GRASS,
 };
 
 
@@ -246,6 +247,7 @@ struct FloorState {
 };
 
 struct Game {
+  std::vector<Mob> pending_swarms;
   uint32_t seed = 1, rng = 1;
   int floor = 1;
   int hero = 0;
@@ -349,6 +351,10 @@ struct Game {
   uint8_t quest = 0;     // 0 none, 1 accepted, 2 complete
   int cursor_x = 1, cursor_y = 1;
   bool targeting = false;
+  bool examining = false;
+  bool type_known[IT_COUNT]{};
+  uint8_t appearances[IT_COUNT]{};
+  uint8_t swarm_healing_drops=0;
   int target_item = -1;
   int camx = 0, camy = 0;
   int wait_hold = 0;
@@ -481,6 +487,16 @@ struct Game {
   void equip_ring(int idx);
   void recharge_wands();
   void search();
+  void search_button();
+  void examine_at(int x,int y);
+  void describe_item(const Item& item,char* out,size_t size) const;
+  const char* display_name(uint8_t id) const;
+  int display_sprite(uint8_t id) const;
+  bool identity_known(uint8_t id) const;
+  void identify_type(uint8_t id);
+  void init_identities(bool legacy=false);
+  void trample_grass(int x,int y,bool hero_step=false);
+  bool next_step_encounter(int x,int y) const;
   bool drop_item(int idx);
   void cast_or_throw(int cx, int cy);
   SlotMeta meta() const;

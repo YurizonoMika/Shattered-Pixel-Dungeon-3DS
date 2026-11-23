@@ -126,9 +126,16 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"韧性指环", "生命越低，受到的伤害越少。", K_RING, CAT_GEAR, 0, 0, 233},
     {"神射指环", "提升投掷武器等级与耐久。", K_RING, CAT_GEAR, 0, 0, 234},
     {"奥术指环", "增强附魔与刻印；效果系统尚在实现。", K_RING, CAT_GEAR, 0, 0, 235},
+    {"露珠", "每滴恢复最大生命的5%，水袋未满时优先收集。", K_QUEST, CAT_MISC, 0, 0, 19},
+    {"水袋", "最多储存20滴露珠。饮用按缺失生命消耗露珠，每滴恢复最大生命的5%。", K_QUEST, CAT_POTION, 0, 0, 480},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
+
+bool item_random_identity(uint8_t id) {
+  const auto& def=item_def(id);
+  return def.kind==K_RING || (def.kind==K_USE && (def.cat==CAT_POTION || def.cat==CAT_SCROLL));
+}
 
 static bool is_scroll(uint8_t id) {
   return (id >= IT_SCROLL_MAP && id <= IT_SCROLL_TELE) ||
