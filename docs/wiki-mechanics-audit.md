@@ -47,11 +47,12 @@ formulas pass tests. No whole-game or whole-floor parity is claimed.
 | Strength | Absent; potion adds HP | Persistent STR, +1 potion, equipment requirements, Might HT multiplier and cursed ring penalties; mastery and negative item levels remain |
 | Hunger and food | Food heals directly; unconditional regen every 12 turns | Persistent hunger, satiety, three-turn food, starvation and 10-turn regen; food talents/holiday effects and full hunger modifiers remain |
 | Healing potion | Instant +15 HP | Healing pool and per-turn recovery; complete cleansing, challenge and trinket effects remain |
-| Physical combat | Fixed weapon power and ad hoc armor upper bound | Individual actor clocks/priorities, base weapon ranges/reach/DR, encumbrance, augmentation and selected debuffs implemented. Buffs still share category clocks; complete procs, enchanted/cursed effects and per-effect application clocks remain |
-| Item catalog | Around 90 entries, including native substitutes | 31 normally generated melee weapons now present with base formulas; 12 ring entries. Arcana/enchantments and Sharpshooting/missile durability effects remain absent. Full consumables, missiles/seeds/stones, artifacts, trinkets and unique hero items remain |
+| Physical combat | Fixed weapon power and ad hoc armor upper bound | Individual actor clocks, base weapon ranges, reach, DR, encumbrance and augmentation. The native enchantment and glyph engine shares the buff clock. Individual effect timing and interactions still need comparisons. |
+| Item catalog | Around 90 entries, including native substitutes | 31 normally generated melee weapons, 12 rings, 13 artifacts, 12 seeds and 15 ordinary thrown weapons. Missile hit durability, pinning and group recovery are implemented. Tipped darts, more consumables, stones and trinkets remain incomplete. See the v0.1.15alpha development notes for effect coverage. |
+| Foresight artifact | Square scan around the selected target, rounded whole-charge cost | Pinned cone rays, distance clamp, fractional charge/debt, discovery XP, timed enemy/heap awareness and visible-trap warning transitions. 12,072 Java cases and host runtime tests pass. Native heap identity, shared buff timing and other-class talent hooks remain partial. |
 | Identification/curse | Identify/Remove Curse only print success | Stored known/curse state, equip locks, selected scroll targets and default use/XP identification. Per-run potion/scroll/ring appearances and global type knowledge now stored; full appearance catalogs, complete curse effects, class/trinket ID modifiers and negative levels remain |
-| Upgrade/transmutation | Automatically chooses equipped weapon; category reroll | Selected upgrades/removal/identification, augmentation picker, wand charge preservation and no armor transmutation. Exotic pairs, full category decks, item metadata and durability remain |
-| RNG/loot | Native run plan, category decks; wrong weapon/armor tier mappings; artifacts become rings | Supported equipment now maps to actual tiers; complete per-category decks, artifact uniqueness, depth seed schedule and exact guaranteed drops remain |
+| Upgrade/transmutation | Automatically chooses equipped weapon; category reroll | Selected upgrades/removal/identification, augmentation picker, wand charge preservation and no armor transmutation. Projectile durability and group identity persist. Full category decks, item metadata, Metamorphosis and several exotic effects remain incomplete. |
+| RNG/loot | Native run plan, category decks, incomplete equipment tier mappings | Equipment tier tables and run-wide artifact uniqueness are implemented. Per-category decks, depth seed schedules and exact guaranteed drops remain outstanding. |
 | Normal map | Builders and several masks matched on identical explicit inputs | Complete painters, room constraints, merging, door hiding, terrain vetoes and full-floor fixtures remain |
 | Population | Area-based 1–4 cap added to address crowded rooms | Removed this non-upstream cap; restored size-category weights, 25% second-spawn attempt and bounded room sampling. Full eligibility, original AI/scheduler and same-seed population fixtures remain |
 | Traps | Six custom types and region weights; radius/turn gas | ToxicGas/Blob diffusion and depth damage now ported; alarm/avoidance corrected. Full trap tables/effects, fire/freezing/electricity, item activation and glyphs remain |
@@ -61,7 +62,7 @@ formulas pass tests. No whole-game or whole-floor parity is claimed.
 | Alchemy | Three fixed seed-to-potion recipes | Energy, seed mixtures, catalysts, bombs, spells, elixirs and exotic recipes remain |
 | Run completion | Ends after floor-25 boss | Persistent visited floors, stairs up, LastLevel walkable geometry, Amulet choice/surface victory and base ascent stacks/modifiers implemented. Exact transition timing, reset exceptions, original panoramas and full ascent interactions remain |
 | Meta/UI/audio | Native 3DS UI and ranking, no gameplay audio | Badges, challenges, daily/seeded runs, journal, localization and audio remain |
-| Saves | V9/V10; bounded entity tables | V13 adds saved type knowledge and Swarm drops to the V12 archive of floors and full entity vectors, actor/AI/ability clocks, item flags/augmentation/ID/recharge and gas. V9–12 import supported; atomic replacement preserves old file on failure. Future systems need their own metadata; negative levels still absent |
+| Saves | V9/V10 and bounded entity tables | V15 retains V14 magic/entity prefixes and appends plant/spell actor state, ghost gear, Cleric talents, Trinity imprints and spellbook order. V9–V14 import paths remain; independent historical runtime fixtures cover V12/V13. Atomic replacement preserves the previous file on failure. |
 
 V9/V10 migration retains existing HP and enemies. Missing strength defaults to
 10, hunger to 0, and the XP threshold becomes `5+5×level`. The old files cannot
@@ -79,6 +80,29 @@ the corrected tier tables. All 31 normally generated melee weapons are now
 represented, but category depletion decks and exact RNG consumption still differ.
 
 ## Current verification / 本轮验证
+
+Plant follow-up: 26,650 Earthroot absorption cases, 18,000 Sungrass healing ticks,
+nine cure entries and three buff durations match pinned Java. Runtime tests cover
+independent anchors, shared potion/Mageroyal cleansing, movement-only Blindweed
+Cripple, duration preservation and V15 saving. Swiftthistle, Warden, immunities,
+full Frost and elemental terrain/item behavior remain incomplete. Swiftthistle
+now has independent TimeBubble consumption, queued presses/save state and
+transition disarming; 93,600 states match Java reset/processTime. Independent
+VFX scheduling and complete offensive dispel coverage remain partial. Azahar
+scene 122 passes bubble boundary, queue deduplication, saving/loading and expiry.
+
+For the unpublished v0.1.15alpha tree, the runtime ASan/UBSan suite and
+30,690 pinned Java projectile formula cases and 12,072 Foresight cone/charge
+cases pass. Scene 120 passes mapping, awareness, charge, save/load and expiry
+on the latest rebuilt ARM binary. Azahar scenes 117/118/119
+cover cross-floor ghost/link/save state, Trinity selection and Cleric talent
+menus. Scenes 115/116/109/106/108/105 and scene 87 were rerun on the rebuilt
+development binary: 800 floors, zero generation/rule/room-weight failures,
+341 Loop, 299 FigureEight and zero ordinary-floor fallbacks. The real slot0
+SHA256 remains `783b26d7473c32b4515f056532095d34531a12f3ed44846f7c8d1dccf38af3c9`.
+Disposable fixture slots were removed. This does not establish complete
+artifact, spell, scroll or terrain parity; see the
+[development notes](releases/v0.1.15alpha.md).
 
 - `bash tools/check-game-rules.sh`: actual runtime built on host with only
   platform stubs, AddressSanitizer and UndefinedBehaviorSanitizer. Covers actor
@@ -99,19 +123,21 @@ represented, but category depletion decks and exact RNG consumption still differ
   supply/route or room-weight failures; 429 contained chasms, 341 regular floors
   used Loop and 299 FigureEight, with zero ordinary-floor fallbacks.
 - Existing builder/room/painter/pathfinder comparisons were rerun successfully.
-- Both release formats built; CIA installed and booted to the title in Azahar
-  with `v0.1.12alpha` visible. All 16 SMDH language entries have version-free
-  titles/descriptions. The real slot hash is unchanged; disposable slots removed.
+- Both release formats build for the development tree. The historical
+  v0.1.12alpha CIA install/title check is separate from the current V15 3DSX
+  scene tests. All 16 SMDH language entries have version-free titles/descriptions.
+  The real slot hash is unchanged; disposable slots removed.
 
-V12 keeps the original header and V10/V11 trailers for migration, then appends
+V12 introduced the original header and V10/V11 trailers for migration, then appended
 versioned actor, item, status, gas and visited-floor data. Old saves import as
 known, uncursed equipment; missing prior floors cannot be reconstructed. V12
 cannot be loaded by older releases. The extended floor archive preserves native
 value-struct layouts for the ARM build; portable cross-platform save interchange
 is not claimed. No hardware testing or whole-game parity is claimed.
 
-V12 保存已访问楼层、完整实体、行动时间、装备状态、鉴定进度和毒气浓度。
-旧档导入时原装备视为已知且无诅咒，缺失的历史楼层不能还原；不支持降级。
+V12 起保存已访问楼层、完整实体、行动时间、装备状态、鉴定进度和毒气浓度。
+V15 在原有布局后扩展种子/法术状态、牧师、幽灵装备和先见感知等状态。
+旧版缺失的历史楼层不能还原；不支持降级。
 
 ## Verified in v0.1.11alpha / 前版验证
 
@@ -150,7 +176,7 @@ V12 保存已访问楼层、完整实体、行动时间、装备状态、鉴定�
 
 测试结束关闭测试模拟器，只保留一个标题菜单的试玩实例。
 
-## v0.1.14alpha requested fixes / 本轮八项修正
+## v0.1.14alpha requested fixes / 历史八项修正
 
 Wiki requests for Swarm/grass pages returned HTTP 403 on 2026-11-23; formulas
 were verified against pinned v4.0.2 `Swarm.defenseProc`, `HighGrass.trample`,
@@ -161,8 +187,8 @@ the original stationary sentry remains outstanding.
 - Physical Swarm splits share remaining HP, delay clone turns and grant no clone
   XP. Generation and limited healing-potion counts are persistent.
 - High grass blocks sight, tramples to grass and uses base 1/25 seed, 1/6 dew
-  chances (half dew on grassy floors). The native seed catalog remains partial;
-  Huntress furrowed grass, artifacts and trinket modifiers remain outstanding.
+  chances (half dew on grassy floors). V15 adds all twelve seed entries;
+  Huntress furrowed grass, full elemental effects and trinket modifiers remain outstanding.
 - Waterskin holds 20 drops; each heals 5% HT. Pickup retains dew if full-health
   and unable to store it. Native water uses the existing persistent charges field.
 - Equipped inspection, blue-cursor tile inspection, conservative next-step enemy
@@ -170,8 +196,8 @@ the original stationary sentry remains outstanding.
   current/next FOV and action windows, not a speculative full-game simulation.
 - Potions/scrolls/rings have per-run appearance permutations and saved global
   type knowledge. Equipment upgrade/curse fields stay hidden until known. This
-  does not implement missing artifacts, enchantments, every identification
-  source, or the original complete appearance catalogs.
+  did not include artifacts/enchantments, which are added in V15; every
+  identification source and the original complete appearance catalogs remain incomplete.
 - V13 appends DID1 knowledge/drop counts after the unchanged V12 archive; V12
   imports retain old type knowledge. V9–V11 migration still applies. Old versions
   cannot read V13. ASan/UBSan requested-mechanics tests and the existing runtime

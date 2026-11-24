@@ -125,21 +125,77 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"狂怒指环", "提高攻击速度。", K_RING, CAT_GEAR, 0, 0, 232},
     {"韧性指环", "生命越低，受到的伤害越少。", K_RING, CAT_GEAR, 0, 0, 233},
     {"神射指环", "提升投掷武器等级与耐久。", K_RING, CAT_GEAR, 0, 0, 234},
-    {"奥术指环", "增强附魔与刻印；效果系统尚在实现。", K_RING, CAT_GEAR, 0, 0, 235},
+    {"奥术指环", "增强附魔与刻印的触发概率或强度。", K_RING, CAT_GEAR, 0, 0, 235},
     {"露珠", "每滴恢复最大生命的5%，水袋未满时优先收集。", K_QUEST, CAT_MISC, 0, 0, 19},
     {"水袋", "最多储存20滴露珠。饮用按缺失生命消耗露珠，每滴恢复最大生命的5%。", K_QUEST, CAT_POTION, 0, 0, 480},
+    {"炼金工具箱","佩戴后随经验积累炼金能量，消耗能量升级。",K_ARTIFACT,CAT_GEAR,0,0,245},
+    {"蓄血圣杯","加速自然恢复；献血升级会造成危险的伤害。",K_ARTIFACT,CAT_GEAR,0,0,253},
+    {"暗影斗篷","潜行时消耗充能，随使用成长。",K_ARTIFACT,CAT_GEAR,0,0,240},
+    {"干枯玫瑰","充能完毕后召唤幽灵盟友，收集花瓣升级。",K_ARTIFACT,CAT_GEAR,0,0,260},
+    {"虚无锁链","消耗充能拉动敌人或自己，穿过障碍。",K_ARTIFACT,CAT_GEAR,0,0,248},
+    {"神圣法典","牧师的神圣法术源泉，随施法成长。",K_ARTIFACT,CAT_GEAR,0,0,263},
+    {"丰饶之角","随经验储存食物，喂食可升级。",K_ARTIFACT,CAT_GEAR,0,0,249},
+    {"神偷袖章","消耗充能偷窃物品，随偷窃成长。",K_ARTIFACT,CAT_GEAR,0,0,241},
+    {"自然之履","喂食不同种子成长，踩草积蓄自然能量。",K_ARTIFACT,CAT_GEAR,0,0,256},
+    {"万能钥匙","消耗充能打开锁或施放钥匙之墙。",K_ARTIFACT,CAT_GEAR,0,0,264},
+    {"先见护符","感知隐藏危险，消耗充能探查目标区域。",K_ARTIFACT,CAT_GEAR,0,0,243},
+    {"时光沙漏","消耗充能冻结时间或进入时间静止。",K_ARTIFACT,CAT_GEAR,0,0,244},
+    {"无序魔典","消耗充能释放随机卷轴；注入卷轴升级。",K_ARTIFACT,CAT_GEAR,0,0,246},
+    {"附魔符石","为选择的武器或护甲赋予随机附魔或刻印。",K_USE,CAT_MISC,0,0,344},
+    {"附魔卷轴","为武器或护甲提供三个附魔或刻印选项。",K_USE,CAT_SCROLL,0,0,320},
+    {"奥术刻笔","为护甲刻上随机刻印。",K_USE,CAT_MISC,0,0,49},
+    {"幽灵花瓣","用于提升干枯玫瑰。",K_USE,CAT_MISC,0,0,20},
+    {"沙袋","用于提升时光沙漏。",K_USE,CAT_MISC,0,0,21},
+    {"腐莓种子","种植腐莓，激活后释放毒气并留下种子。",K_SEED,CAT_MISC,0,0,384},
+    {"速行蓟种子","激活后获得6回合时间气泡。",K_SEED,CAT_MISC,0,0,386},
+    {"冰冠花种子","冻结周围的生物并扑灭火焰。",K_SEED,CAT_MISC,0,0,388},
+    {"风暴藤种子","令生物陷入眩晕。",K_SEED,CAT_MISC,0,0,389},
+    {"断肠苔种子","令生物中毒，毒素随深度增长。",K_SEED,CAT_MISC,0,0,390},
+    {"梦皇花种子","清除多种负面状态。",K_SEED,CAT_MISC,0,0,391},
+    {"地缚根种子","站定时获得能吸收伤害的草药护甲。",K_SEED,CAT_MISC,0,0,392},
+    {"星花种子","使目标获得祝福。",K_SEED,CAT_MISC,0,0,393},
+    {"衰落叶种子","将生物传送至本层另一处。",K_SEED,CAT_MISC,0,0,394},
+    {"投掷尖刺","一阶投掷武器，可回收。",K_MISSILE,CAT_MISC,1,0,145},
+    {"投石","一阶投掷武器，不会留在敌人体内。",K_MISSILE,CAT_MISC,1,0,147},
+    {"捕鱼矛","二阶投掷武器。",K_MISSILE,CAT_MISC,2,0,148},
+    {"手里剑","二阶投掷武器。",K_MISSILE,CAT_MISC,2,0,149},
+    {"投掷棒","二阶投掷武器，可立即拾取。",K_MISSILE,CAT_MISC,2,0,150},
+    {"投矛","三阶投掷武器。",K_MISSILE,CAT_MISC,3,0,151},
+    {"流星索","三阶投掷武器，命中使敌人残废。",K_MISSILE,CAT_MISC,3,0,152},
+    {"苦无","三阶投掷武器，伏击伤害更稳定。",K_MISSILE,CAT_MISC,3,0,153},
+    {"飞斧","四阶投掷武器，使目标流血。",K_MISSILE,CAT_MISC,4,0,155},
+    {"重型回旋镖","四阶投掷武器，五回合后返回出手位置。",K_MISSILE,CAT_MISC,4,0,156},
+    {"三叉戟","五阶投掷武器。",K_MISSILE,CAT_MISC,5,0,157},
+    {"飞锤","五阶投掷武器，可立即拾取。",K_MISSILE,CAT_MISC,5,0,158},
+    {"原力魔方","五阶投掷武器，影响目标周围的生物。",K_MISSILE,CAT_MISC,5,0,159},
+    {"占卜卷轴","揭示四种尚未识别的药水、卷轴或戒指类型。",K_USE,CAT_SCROLL,0,0,321},
+    {"驱魔卷轴","暂时使魔法失效。",K_USE,CAT_SCROLL,0,0,322},
+    {"虹卫卷轴","建立一个保护你的虹色守卫。",K_USE,CAT_SCROLL,0,0,323},
+    {"神秘能量卷轴","在30回合内持续为神器充能。",K_USE,CAT_SCROLL,0,0,324},
+    {"归返卷轴","返回上方最近的区域入口。",K_USE,CAT_SCROLL,0,0,325},
+    {"塞壬之歌卷轴","永久魅惑一个目标，并暂时魅惑视野内的其他敌人。",K_USE,CAT_SCROLL,0,0,326},
+    {"预知卷轴","在较长时间内自动发现附近的隐藏事物。",K_USE,CAT_SCROLL,0,0,327},
+    {"恐惧卷轴","使可见敌人逃离楼层。",K_USE,CAT_SCROLL,0,0,330},
+    {"灵爆卷轴","对可见敌人造成极大伤害；目标少时反噬更强。",K_USE,CAT_SCROLL,0,0,329},
+    {"蜕变卷轴","替换已投入点数的天赋。",K_USE,CAT_SCROLL,0,0,331},
+    {"决斗卷轴","建立持续100回合的决斗区域。",K_USE,CAT_SCROLL,0,0,328},
+    {"镜像卷轴","召唤与你并肩战斗的镜像。",K_USE,CAT_SCROLL,0,0,307},
+    {"复仇卷轴","根据受伤程度伤害并致盲可见敌人。",K_USE,CAT_SCROLL,0,0,313},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
 
 bool item_random_identity(uint8_t id) {
+  if(item_is_exotic(id)) return false;
   const auto& def=item_def(id);
   return def.kind==K_RING || (def.kind==K_USE && (def.cat==CAT_POTION || def.cat==CAT_SCROLL));
 }
+bool item_is_exotic(uint8_t id) {
+  return id==IT_SCROLL_ENCHANT || (id>=IT_SCROLL_DIVINATION && id<=IT_SCROLL_ARENA);
+}
 
 static bool is_scroll(uint8_t id) {
-  return (id >= IT_SCROLL_MAP && id <= IT_SCROLL_TELE) ||
-         (id >= IT_SCROLL_IDENTIFY && id <= IT_SCROLL_TRANSMUTE);
+  return item_def(id).cat==CAT_SCROLL;
 }
 
 int item_value(uint8_t id) {
@@ -153,7 +209,7 @@ int item_value(uint8_t id) {
     case K_WEAPON: return 40 + d.power * 10;
     case K_ARMOR: return 35 + d.power * 10;
     case K_WAND: return 80 + d.power * 10;
-    case K_RING: return 120;
+    case K_RING: case K_ARTIFACT: return 120;
     case K_MISSILE: return 15 + d.power * 5;
     case K_BAG: return 100;
     case K_SEED: return 25;
@@ -170,7 +226,7 @@ void item_sprite_cell(uint8_t id, int& cx, int& cy) {
 
 bool item_is_equipment(uint8_t id) {
   uint8_t k = item_def(id).kind;
-  return k == K_WEAPON || k == K_ARMOR || k == K_RING;
+  return k == K_WEAPON || k == K_ARMOR || k == K_RING || k==K_ARTIFACT;
 }
 
 bool item_is_stackable(uint8_t id) {

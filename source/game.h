@@ -7,6 +7,9 @@
 #include "ballistica.h"
 #include "blob_rules.h"
 #include "identification_rules.h"
+#include "magic_rules.h"
+#include "mechanics_rules.h"
+#include "cleric_rules.h"
 
 constexpr int MW = 64, MH = 64;
 constexpr int LEGACY_MAP_SIZE = 41;
@@ -59,6 +62,7 @@ enum FeatureType : uint8_t {
   F_MIMIC_LOOT, // hidden payload; aux is the index of the active mimic
   F_TRAP_DISARMED,
   F_CHEST_CRYSTAL,
+  F_KEY_WALL,
 };
 
 struct Feature {
@@ -70,6 +74,7 @@ struct Feature {
   uint8_t loot_level = 0;
   int16_t loot_gold = 0;
   uint8_t loot_flags = IF_KNOWN;
+  uint8_t loot_effect = 0;
 };
 
 // Feature::aux stores the trap type. Keep the two older IDs readable.
@@ -137,6 +142,9 @@ struct Mob {
   uint8_t adrenaline=0;
   uint8_t pumped_up=0;
   CombatPose combat;
+  magic_rules::Effects effects;
+  bool lucky=false;
+  bool rose_ally=false;
 };
 
 struct FloorItem {
@@ -148,6 +156,7 @@ struct FloorItem {
   float partial_charge=0.f;
   uint8_t augment=0;
   Identification identification{0.f,item_def(id).kind==K_ARMOR || item_def(id).kind==K_WAND ? 5.f : 10.f};
+  magic_rules::State magic;
 };
 
 struct Item {
@@ -159,6 +168,7 @@ struct Item {
   float partial_charge=0.f;
   uint8_t augment=0;
   Identification identification{0.f,item_def(id).kind==K_ARMOR || item_def(id).kind==K_WAND ? 5.f : 10.f};
+  magic_rules::State magic;
 };
 
 // Binary save layout. Fixed-size on purpose: 3DS homebrew, no protobuf.
@@ -244,6 +254,7 @@ struct FloorState {
   Item shop_items[20]{};
   int shop_prices[20]{};
   bool shop_sold[20]{};
+  std::vector<mechanics_rules::Actor> effects;
 };
 
 struct Game {
@@ -268,7 +279,7 @@ struct Game {
   int crystal_keys = 0;
   bool legacy_keys = false;
   bool loot_second_deck = false;
-  uint8_t loot_remaining[10]{};
+  uint8_t loot_remaining[11]{};
   int map_width = LEGACY_MAP_SIZE, map_height = LEGACY_MAP_SIZE;
   bool in_map(int x, int y) const {
     return x >= 0 && y >= 0 && x < map_width && y < map_height;
@@ -347,6 +358,103 @@ struct Game {
   uint8_t ring1_flags = IF_KNOWN, ring2_flags = IF_KNOWN;
   uint8_t weapon_augment=0,armor_augment=0;
   Identification weapon_identification,armor_identification,ring1_identification,ring2_identification;
+  magic_rules::State weapon_magic,armor_magic,ring1_magic,ring2_magic;
+  magic_rules::Effects hero_effects;
+  float deferred_damage=0,kinetic_damage=0,freeze_left=0;
+  uint16_t artifact_generated=0;
+  int alchemy_energy=0;
+  int magic_target=-1,magic_choice[3]{},artifact_slot=-3;
+  bool artifact_targeting=false;
+  bool artifact_brewing=false;
+  bool time_stasis=false;
+  int rose_ghost=-1;
+  mechanics_rules::Actor spell_effects;
+  std::vector<mechanics_rules::Actor> mob_effects;
+  std::vector<mechanics_rules::HeapAwareness> scry_heaps;
+  std::vector<int> bubble_presses;
+  void end_time_bubble(bool disarm=false);
+  void dispel_action();
+  Item rose_weapon,rose_armor;
+  int rose_command=-1,rose_enemy=-1;
+  uint32_t projectile_serial=1;
+  bool projectile_proc=false;
+  bool returning_projectile=false;
+  int artifact_feed_slot=0;
+  uint8_t book_scroll=IT_NONE;
+  bool book_empowered=false;
+  bool inscription_replay=false;
+  uint8_t cleric_ranks[cleric_rules::Count]{};
+  uint8_t cleric_subclass=0,cleric_ability=0;
+  int cleric_page=0,cleric_menu_mode=0;
+  int cleric_choices[3]{-1,-1,-1};
+  void cleric_menu(int mode=0);
+  bool cleric_unlocked(int spell) const;
+  bool cleric_learn(int spell);
+  float cleric_lance_cooldown=0,cleric_priest_cooldown=0;
+  int linked_ally=-1,stasis_ally=-1;
+  float link_left=0,stasis_left=0;
+  bool extra_proc=false;
+  bool virtual_projectile=false;
+  Item form_item;
+  Item trinity_body,trinity_mind,trinity_spirit;
+  bool discovered_items[IT_COUNT]{};
+  uint32_t discovered_enchants=0,discovered_glyphs=0;
+  int trinity_spell=-1;
+  std::vector<Item> trinity_options;
+  void discover_item(const Item& item);
+  void trinity_menu(int spell);
+  void trinity_imbue(const Item& item);
+  void trinity_use(int form,int target=-1);
+  void finish_tome_cast(int spell,int cost);
+  int tome_slot() const;
+  magic_rules::State& tome_state();
+  uint8_t& tome_level();
+  void cleric_food();
+  uint8_t recalled_item=IT_NONE;
+  float recall_left=0;
+  float armor_charge=100,ascended_left=0;
+  int ascended_casts=0,ascended_flashes=0,powered_ally=-1;
+  bool divine_used=false;
+  int magic_actor=-1;
+  int magic_hero_cell=-1;
+  struct AllyExperience {int amount;bool advance;};
+  std::vector<AllyExperience> pending_ally_experience;
+  std::vector<int> pending_ally_blasts;
+  void award_combat_experience(int amount,bool advance=true);
+  void finish_ally_combat();
+  uint8_t spellbook_order[10]{};
+  void init_spellbook();
+  void cleric_armor_action(int target=-1);
+  void rose_attack(int target);
+  void rose_defend(int attacker,int& damage);
+  void carry_allies(bool depart);
+  struct CarriedAlly {
+    Mob mob;
+    mechanics_rules::Actor effects;
+    bool powered=false,linked=false,stasis=false;
+  };
+  std::vector<CarriedAlly> carried_allies;
+  void cancel_item_selection();
+  void remember_inscription(uint8_t id);
+  void cleric_form(int spell,int index);
+  void spellbook_read();
+  void spellbook_resolve(bool exotic);
+  bool scroll_effect(uint8_t id,int target=-1);
+  void seed_effect(uint8_t seed,int cell);
+  void plant_seed(int index,int cell);
+  void tick_extended_effects();
+  void release_stasis();
+  mechanics_rules::Actor& actor_effects(int mob);
+  void shop_steal(int index);
+  float shop_steal_chance(int index,int& charges) const;
+  void artifact_feed(int slot,int index);
+  bool artifact_feedable(int slot,int index) const;
+  void rose_outfit(int index);
+  void rose_menu();
+  void tome_menu();
+  void tome_cast(int spell,int target=-1);
+  void throw_projectile(int index,int x,int y);
+  bool missile_similar(const Item& first,const Item& second) const;
   uint8_t haste_t = 0, invis_t = 0, might_t = 0, levit_t = 0, mind_t = 0, rage_t = 0;
   uint8_t quest = 0;     // 0 none, 1 accepted, 2 complete
   int cursor_x = 1, cursor_y = 1;
@@ -408,7 +516,7 @@ struct Game {
   void act_at(int x, int y, bool interact);
   void interact_at(int x, int y);
   void attack(int mob, bool ranged, int bonus = 0);
-  void damage_mob(int idx, int raw, DamageKind kind = DamageKind::Direct);
+  void damage_mob(int idx, int raw, DamageKind kind = DamageKind::Direct, int enchantment=0);
   void advance_turn();
   void spend_action(float duration);
   void earn_exp(int amount);
@@ -490,6 +598,28 @@ struct Game {
   void search_button();
   void examine_at(int x,int y);
   void describe_item(const Item& item,char* out,size_t size) const;
+  int random_enchant(bool armor,bool cursed=false,int rarity=-1,int exclude=0);
+  void enchant_item(int target,int effect);
+  int weapon_proc(int target,int damage,int& enchantment);
+  int weapon_enchant_proc(int target,int damage,int& enchantment);
+  int weapon_final_damage(Mob& enemy,int damage,int enchantment);
+  int armor_proc(Mob& attacker,int damage,bool magic=false);
+  int armor_glyph_proc(Mob& attacker,int damage,bool magic);
+  void tick_magic();
+  float enchant_power() const;
+  float movement_cost(int x=-1,int y=-1) const;
+  int accessory_bonus(uint8_t ring) const;
+  int melee_reach() const;
+  bool melee_reaches(int x,int y) const;
+  void push_mob(int index,int from_x,int from_y,int distance);
+  void teleport_mob(int index);
+  void artifact_menu(int slot);
+  void artifact_action(int slot,int action,int target=-1);
+  void artifact_experience(float portion);
+  void artifact_charge(float amount);
+  uint8_t generate_artifact();
+  bool has_artifact(uint8_t id) const;
+  int artifact_level(uint8_t id) const;
   const char* display_name(uint8_t id) const;
   int display_sprite(uint8_t id) const;
   bool identity_known(uint8_t id) const;

@@ -996,6 +996,7 @@ int main() {
                      crystal, crystal_chests);
               }
             }
+            dlog("[generation progress] %lu/32 seeds",(unsigned long)seed);
           }
           dlog("[generation] 800 maps, %d failures", bad);
           dlog("[floor rules] 800 maps, %d failures", rule_failures);
@@ -1005,6 +1006,121 @@ int main() {
           dlog("[population] invalid room weights=%d", invalid_weights);
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
+        }
+        else if(want==122) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.seed_effect(IT_SEED_SWIFTTHISTLE,G.py*MW+G.px);
+          const int before=G.turns;G.spend_action(1);G.spend_action(6);
+          const bool boundary=G.spell_effects.bubble_active && G.spell_effects.time_bubble==0 && G.turns==before;
+          Feature trap;trap.x=G.px;trap.y=G.py;trap.type=F_TRAP;trap.aux=TR_FIRE;G.features.push_back(trap);
+          const int health=G.hp;G.trigger_tile_features();G.trigger_tile_features();
+          const bool queued=G.bubble_presses.size()==1 && G.hp==health;
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot122.bin");struct stat exists;
+          const bool saved=stat(path,&exists)!=0 && G.save(122);
+          const bool loaded=saved && G.load(122) && G.bubble_presses.size()==1 && G.spell_effects.bubble_active;
+          if(saved)remove(path);
+          G.spend_action(1);
+          const bool expiry=!G.spell_effects.bubble_active && G.features[0].type==F_TRAP_DISARMED && G.hp==health-5 && G.turns==before;
+          dlog("[V15 bubble] boundary=%d queue=%d save=%d load=%d expiry=%d",boundary,queued,saved,loaded,expiry);
+          G.demo_lock=true;
+        }
+        else if(want==121) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          const int cell=G.py*MW+G.px;
+          G.seed_effect(IT_SEED_STARFLOWER,cell);
+          const bool blessing=G.spell_effects.bless==30;
+          G.hero_effects.poison=20;G.hero_effects.blind=10;G.hero_effects.bleeding=8;G.hero_effects.burning=12;
+          G.spell_effects.drowsy=5;G.spell_effects.vertigo=10;
+          G.seed_effect(IT_SEED_MAGEROYAL,cell);
+          const bool cure=G.hero_effects.poison==0 && G.hero_effects.blind==0 && G.hero_effects.bleeding==0 && G.hero_effects.burning==12 && G.spell_effects.drowsy==0 && G.spell_effects.vertigo==0;
+          G.seed_effect(IT_SEED_SUNGRASS,cell);
+          G.seed_effect(IT_SEED_EARTHROOT,cell);G.spell_effects.earth=1;
+          const int hp=G.hp;G.take_damage(10);
+          const bool block=G.hp==hp-7 && G.spell_effects.earth==0;
+          G.hero_effects.burning=0;
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot121.bin");struct stat exists;
+          const bool saved=stat(path,&exists)!=0 && G.save(121);
+          const bool loaded=saved && G.load(121) && G.spell_effects.anchor==cell && G.spell_effects.earth_anchor==cell && G.spell_effects.bless==30;
+          if(saved)remove(path);
+          dlog("[V15 plants] blessing=%d cure=%d absorption=%d save=%d load=%d",blessing,cure,block,saved,loaded);
+          G.demo_lock=true;
+        }
+        else if(want==120) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.spawn_rooms.clear();G.spawn_weights.clear();G.spawn_deck.clear();G.entrance_cell=-1;
+          G.map_width=23;G.map_height=15;G.px=G.pvx=10;G.py=G.pvy=7;
+          memset(G.tiles,T_WALL,sizeof(G.tiles));memset(G.seen,0,sizeof(G.seen));
+          for(int y=1;y<14;++y)for(int x=1;x<22;++x)G.tiles[y][x]=T_FLOOR;
+          G.tiles[7][11]=T_WALL;G.tiles[7][13]=T_SECRET;
+          G.ring1=IT_ART_FORESIGHT;G.ring1_level=0;G.ring1_magic={};G.ring1_magic.aux=100;
+          Mob enemy;enemy.x=14;enemy.y=7;enemy.hp=enemy.maxhp=100;enemy.ai=Mob::Sleeping;enemy.sleep_t=100;
+          G.mobs.push_back(enemy);G.items.push_back({14,7,IT_GOLD,5});
+          Feature trap;trap.x=12;trap.y=7;trap.type=F_TRAP;G.features.push_back(trap);
+          G.recompute_fov();G.artifact_action(-3,0,7*MW+15);
+          const bool mapped=G.tiles[7][13]==T_DOOR && G.features[0].type==F_TRAP_FOUND;
+          const bool sensed=G.actor_effects(0).scry==4 && G.scry_heaps.size()==1 && G.vis[7][14];
+          const bool charged=G.ring1_magic.aux==90 && std::fabs(G.ring1_magic.stored-.655f)<.0001f;
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot120.bin");struct stat exists;
+          const bool saved=stat(path,&exists)!=0 && G.save(120);
+          const bool loaded=saved && G.load(120) && G.actor_effects(0).scry==4 && G.scry_heaps.size()==1;
+          if(saved)remove(path);
+          G.actor_effects(0).scry=0;G.scry_heaps[0].left=1;G.tick_extended_effects();G.recompute_fov();
+          const bool expired=G.scry_heaps.empty() && !G.vis[7][14];
+          dlog("[V15 foresight] mapping=%d awareness=%d charge=%d save=%d load=%d expiry=%d",mapped,sensed,charged,saved,loaded,expired);
+          G.cursor_x=15;G.cursor_y=7;G.demo_lock=true;
+        }
+        else if(want>=117 && want<=119) {
+          G.new_run(5,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.inv_n=0;G.level=25;G.cleric_subclass=1;G.cleric_ability=2;
+          G.ring1_level=7;G.ring1_magic.aux=10;
+          G.boss_dead[1]=G.boss_dead[3]=1;
+          if(want==117) {
+            G.ring2=IT_ART_ROSE;G.ring2_magic.aux=100;G.artifact_action(-4,0);
+            const bool summoned=G.rose_ghost>=0;
+            if(summoned){G.powered_ally=G.linked_ally=G.rose_ghost;G.link_left=9;G.actor_effects(G.rose_ghost).power_left=75;}
+            G.descend();
+            const bool carried=G.rose_ghost>=0 && G.powered_ally==G.rose_ghost && G.linked_ally==G.rose_ghost;
+            G.ascend();
+            const bool returned=G.floor==1 && G.rose_ghost>=0;
+            char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot117.bin");struct stat exists;
+            const bool unused=stat(path,&exists)!=0;
+            const bool saved=unused && G.save(117);
+            const bool loaded=saved && G.load(117) && G.rose_ghost>=0 && G.actor_effects(G.rose_ghost).power_left==75;
+            if(saved)remove(path);
+            dlog("[V15 allies] summon=%d carry=%d return=%d save=%d load=%d",summoned,carried,returned,saved,loaded);
+            G.cleric_menu();
+          } else if(want==118) {
+            G.cleric_ranks[cleric_rules::BodyForm]=1;
+            G.cleric_ranks[cleric_rules::MindForm]=1;
+            G.cleric_ranks[cleric_rules::SpiritForm]=2;
+            G.add_item(IT_DAGGER);G.inv[0].magic.effect=magic_rules::Blazing;G.discover_item(G.inv[0]);
+            G.add_item(IT_WAND_MAGIC);G.add_item(IT_RING_MIGHT);
+            G.trinity_menu(cleric_rules::BodyForm);
+            dlog("[V15 trinity UI] options=%d dialog=%d",int(G.trinity_options.size()),G.dlg_type);
+          } else {
+            G.cleric_menu(1);dlog("[V15 talents UI] dialog=%d count=%d",G.dlg_type,int(cleric_rules::Count));
+          }
+          G.demo_lock=true;
+        }
+        else if(want==115 || want==116) {
+          G.new_run(2,0x12345678);
+          SCENE=Scene::GAME;
+          G.mobs.clear();G.mob_cap=0;
+          G.backpack=true;
+          g_bag_sel=-3;
+          if(want==115) G.artifact_menu(-3);
+          else {
+            const int index=G.inv_n;
+            G.add_item(IT_SCROLL_ENCHANT);
+            G.use_item(index);
+            G.select_item(-1);
+          }
+          dlog("[magic UI] scene=%d dialog=%d options=%d",want,G.dlg_type,G.dlg_optn);
+          G.demo_lock=true;
         }
         else if(want>=111 && want<=114) {
           G.new_run(0,0x12345678);SCENE=Scene::GAME;

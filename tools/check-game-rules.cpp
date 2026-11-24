@@ -1,5 +1,9 @@
 #include "game.h"
 #include "actor_rules.h"
+#include "artifact_rules.h"
+#include "foresight_rules.h"
+#include "projectile_rules.h"
+#include "seed_rules.h"
 #include "hero_rules.h"
 #include <cassert>
 #include <cmath>
@@ -431,7 +435,7 @@ int main() {
   assert(game.save(106));
   std::ifstream valid_input("sdmc:/3ds/spd/slot106.bin",std::ios::binary);
   std::string corrupt{std::istreambuf_iterator<char>(valid_input),{}};
-  const auto archive_start=corrupt.find("FLR1");assert(archive_start!=std::string::npos);
+  const auto archive_start=corrupt.find("FLR2");assert(archive_start!=std::string::npos);
   // A valid file with an invalid archived width must be rejected before mutation.
   const int invalid_width=1000;
   std::memcpy(corrupt.data()+archive_start+8,&invalid_width,sizeof(invalid_width));
@@ -469,16 +473,22 @@ int main() {
   assert(game.save(106) && restored.load(106));
   assert(restored.inv[0].charges==20 && !restored.identity_known(IT_POTION_STR));
   assert(restored.display_sprite(IT_POTION_STR)==appearance);
-  // A V12 prefix has the identical floor/item layout and imports old knowledge.
+  // Genuine fixtures written by the released V13 runtime, not relabeled V14.
   {
-    std::ifstream source("sdmc:/3ds/spd/slot106.bin",std::ios::binary);
+    std::ifstream source("legacy-v12.bin",std::ios::binary);
     std::string old{std::istreambuf_iterator<char>(source),{}};
-    const uint16_t version=12;std::memcpy(old.data()+4,&version,sizeof(version));
-    auto marker=old.rfind("DID1");assert(marker!=std::string::npos);old.resize(marker);
+    assert(!old.empty());
     std::ofstream fixture("sdmc:/3ds/spd/slot108.bin",std::ios::binary);
     fixture.write(old.data(),old.size());fixture.close();
     assert(restored.load(108) && restored.identity_known(IT_POTION_STR));
     SlotMeta meta;assert(Game::slot_meta(108,meta));
+    std::ifstream v13("legacy-v13.bin",std::ios::binary);
+    std::string legacy{std::istreambuf_iterator<char>(v13),{}};
+    std::ofstream save13("sdmc:/3ds/spd/slot108.bin",std::ios::binary);
+    save13.write(legacy.data(),legacy.size());save13.close();
+    assert(restored.load(108) && !restored.identity_known(IT_POTION_STR));
+    assert(restored.inv[0].id==IT_WATERSKIN && restored.inv[0].charges==17);
+    assert(restored.mobs.size()>0 && restored.weapon_magic.effect==0);
   }
   game.add_item(IT_POTION_STR);game.use_item(1);assert(game.identity_known(IT_POTION_STR));
   const int search_turn=game.turns;game.search_button();assert(game.examining && game.turns==search_turn);
@@ -500,6 +510,445 @@ int main() {
     }
   }
   std::puts("Requested mechanics tests passed: region guards, swarm split/XP, grass, dew/flask, identity/save, inspect, encounter stop and distant quest spawn.");
+
+  // End-to-end entry points for the new item engine.
+  arena(game,M_RAT,9,7);
+  game.mobs[0].sleep_t=10;
+  game.weapon_magic.effect=magic_rules::Crystal;
+  game.attack(0,false);
+  assert(game.weapon_magic.durability<100 && game.mobs[0].hp<100);
+  game.mobs.clear();
+  game.add_item(IT_SCROLL_ENCHANT);
+  game.use_item(0);game.select_item(-1);
+  assert(game.dlg_type==24 && game.dlg_optn==4);
+  const int before_cancel=game.turns;
+  game.dialog_choose(3);
+  assert(game.inv_n==1 && game.turns==before_cancel && game.weapon_magic.effect==magic_rules::Crystal);
+  game.use_item(0);game.select_item(-1);
+  const int chosen=game.magic_choice[1];game.dialog_choose(1);
+  assert(game.inv_n==0 && game.weapon_magic.effect==chosen);
+  game.add_item(IT_ARCANE_STYLUS);
+  game.use_item(0);assert(!game.can_select_item(-1));
+  game.select_item(-2);assert(game.inv_n==1); // arena has no armor
+  game.armor=IT_CLOTH_ARMOR;game.use_item(0);game.select_item(-2);
+  assert(game.inv_n==0 && game.armor_magic.effect>0);
+  game.armor_magic.effect=magic_rules::Stench;
+  game.armor_flags=IF_KNOWN|IF_CURSED;
+  game.add_item(IT_SCROLL_CURSE);game.use_item(0);game.select_item(-2);
+  assert(game.armor_magic.effect==0 && !(game.armor_flags&IF_CURSED));
+
+  game.artifact_generated=0;
+  unsigned generated=0;
+  for(int i=0;i<11;++i) {
+    const uint8_t id=game.generate_artifact();
+    assert(artifact_rules::ordinary(id));
+    const unsigned bit=1u<<artifact_rules::index(id);
+    assert(!(generated&bit));generated|=bit;
+  }
+  assert(game.generate_artifact()==IT_NONE && game.artifact_generated==generated);
+  game.add_item(IT_ART_HOURGLASS);game.use_item(0);
+  assert(game.ring1==IT_ART_HOURGLASS && game.ring1_magic.aux==5);
+  game.artifact_menu(-3);game.dialog_choose(0);
+  assert(game.dlg_type==27);
+  const int before_freeze=game.turns;
+  game.dialog_choose(1);game.spend_action(1);
+  assert(game.freeze_left==9 && game.turns==before_freeze);
+  game.add_item(IT_ART_ROSE);game.use_item(0);
+  game.artifact_action(-4,0);
+  assert(game.rose_ghost>=0 && game.mobs[game.rose_ghost].effects.ally);
+  game.add_item(IT_DAGGER);game.inv[0].magic.effect=magic_rules::Blazing;
+  assert(game.drop_item(0));
+  game.hero_effects.bleeding=4;game.deferred_damage=8;game.loot_remaining[10]=1;
+  assert(game.save(106) && restored.load(106));
+  assert(restored.ring1==IT_ART_HOURGLASS && restored.freeze_left==game.freeze_left);
+  assert(restored.weapon_magic.effect==chosen && restored.items.back().magic.effect==magic_rules::Blazing);
+  assert(restored.artifact_generated==game.artifact_generated && restored.loot_remaining[10]==1);
+  assert(restored.hero_effects.bleeding==4 && restored.deferred_damage==8);
+  assert(restored.rose_ghost==game.rose_ghost && restored.mobs[restored.rose_ghost].rose_ally);
+  game.new_run(2,42);assert(game.ring1==IT_ART_CLOAK && game.turns==0);
+  game.new_run(5,42);assert(game.ring1==IT_ART_TOME && game.turns==0);
+  std::puts("Magic tests passed: Crystal combat, selection/cancel, stylus, cleansing, unique drops, starting artifacts, freeze and V14 persistence.");
+  // V15 mechanics exercise real UI dispatch, save continuation and failed paths.
+  arena(game,M_RAT,15,7);game.mobs[0].ai=Mob::Sleeping;game.mobs[0].sleep_t=30;
+  game.strength=30;game.add_item(IT_KNIFE,3);game.inv[0].magic.effect=magic_rules::Crystal;
+  const auto serial=game.inv[0].magic.aux2;
+  game.throw_projectile(0,15,7);
+  assert(game.inv[0].count==2 && game.inv[0].magic.durability<100 && game.inv[0].magic.aux2==serial);
+  assert(game.items.size()==1 && game.items[0].magic.aux==1);
+  assert(game.items[0].magic.durability==100); // stack absorbs wear
+  game.pick_item(0);assert(game.items.size()==1); // pinned until enemy dies
+  assert(game.save(106) && restored.load(106));
+  assert(restored.items[0].magic.aux==1 && restored.inv[0].magic.durability==game.inv[0].magic.durability);
+  game.damage_mob(0,1000);assert(game.items[0].magic.aux==0);
+  game.pick_item(0);assert(game.inv[0].count==3);
+  for(const auto& drop:game.items)assert(drop.id!=IT_KNIFE);
+  arena(game,M_RAT,15,7);game.mobs.clear();game.add_item(IT_KNIFE);
+  game.tiles[7][12]=T_WALL;game.throw_projectile(0,16,7);
+  assert(game.inv_n==0 && game.items.size()==1 && game.items[0].x<13);
+  assert(game.items[0].magic.durability==100); // miss/empty-cell throws do not wear
+  assert(projectile_rules::durability_cost(IT_DART,0,-4,0,0)==0);
+  assert(projectile_rules::durability_cost(IT_KNIFE,0,0,0,magic_rules::Crystal)>projectile_rules::durability_cost(IT_KNIFE,0,0,0,0));
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_SANDALS;game.ring1_magic={};
+  for(int i=1;i<12;++i)game.add_item(seed_rules::ids[i]);
+  for(int n=0;n<3;++n)game.artifact_feed(-3,0);
+  assert(game.ring1_level==1 && game.ring1_magic.experience==0);
+  for(int n=0;n<6;++n)game.artifact_feed(-3,0);
+  assert(game.ring1_level==2 && game.ring1_magic.experience==0);
+  game.ring1_level=3;game.ring1_magic.aux2=IT_SEED_SUNGRASS;
+  game.add_item(IT_SEED_EARTHROOT);const int root_index=game.inv_n-1;
+  assert(game.artifact_feedable(-3,root_index));game.artifact_feed(-3,root_index);
+  game.ring1_magic.aux=100;game.artifact_action(-3,0,game.py*MW+game.px);
+  assert(game.spell_effects.earth>0 && game.ring1_magic.aux==60);
+  const int health=game.hp;game.take_damage(5);assert(game.hp>health-5);
+  game.px++;game.tick_extended_effects();assert(game.spell_effects.earth==0);
+  game.seed_effect(IT_SEED_SUNGRASS,game.py*MW+game.px);game.hp=500;
+  for(int n=0;n<5;++n)game.tick_extended_effects();assert(game.hp>500);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.spell_effects.healing==game.spell_effects.healing);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_ARMBAND;game.ring1_magic.aux=5;
+  game.shop_open=true;game.shop_n=1;game.shop_items[0]={IT_FOOD_MEAT};game.shop_sold[0]=false;
+  int used=0;assert(game.shop_steal_chance(0,used)==1 && used==2);
+  const int prior_gold=game.gold;game.shop_steal(0);
+  assert(game.shop_sold[0] && game.gold==prior_gold && game.inv[0].id==IT_FOOD_MEAT && game.ring1_magic.aux==3);
+  const auto after_theft=game.rng;game.shop_steal(0);assert(game.rng==after_theft);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_ROSE;game.ring1_magic.aux=100;
+  game.add_item(IT_DAGGER);game.rose_outfit(0);assert(game.rose_weapon.id==IT_DAGGER && game.inv_n==0);
+  game.add_item(IT_PLATE);game.rose_outfit(0);assert(game.rose_armor.id==IT_NONE && game.inv_n==1);
+  game.artifact_action(-3,0);assert(game.rose_ghost>=0);
+  game.rose_command=6*MW+7;
+  assert(game.save(106) && restored.load(106));
+  assert(restored.rose_weapon.id==IT_DAGGER && restored.rose_command==game.rose_command);
+  // Cross-floor ownership uses the new actor index, including hidden stasis
+  // actors. Ordinary mirror images stay on their original floor.
+  const int ghost=game.rose_ghost;
+  game.actor_effects(ghost).power_left=75;game.actor_effects(ghost).wall=7;
+  game.powered_ally=game.linked_ally=ghost;game.link_left=9;
+  game.stasis_ally=ghost;game.stasis_left=60;game.mobs[ghost].alive=false;game.rose_ghost=-1;
+  Mob mirror;mirror.type=M_WRAITH;mirror.x=11;mirror.y=7;mirror.effects.ally=true;
+  game.mobs.push_back(mirror);game.actor_effects(game.mobs.size()-1).mirror=1;
+  game.spell_effects.light_shield=4;game.spell_effects.shield_target=ghost;
+  game.spell_effects.earth=30;game.spell_effects.earth_anchor=game.py*MW+game.px;
+  game.entrance_cell=game.py*MW+game.px;
+  game.descend();assert(game.floor==2 && game.stasis_ally>=0);
+  const int carried=game.stasis_ally;
+  assert(game.powered_ally==carried && game.linked_ally==carried && game.link_left==9);
+  assert(!game.mobs[carried].alive && game.mobs[carried].rose_ally && game.stasis_left==60);
+  assert(game.actor_effects(carried).power_left==75 && game.actor_effects(carried).wall==7);
+  assert(game.spell_effects.light_shield==0 && game.spell_effects.shield_target==-1);
+  assert(game.spell_effects.earth==0 && game.spell_effects.anchor==-1);
+  assert(game.save(106) && restored.load(106));
+  for(float duration:{.2f,.8f,1.5f}) {
+    game.spend_action(duration);restored.spend_action(duration);
+    assert(game.rng==restored.rng && game.hp==restored.hp && game.stasis_left==restored.stasis_left);
+  }
+  game.ascend();assert(game.floor==1 && game.stasis_ally>=0);
+  int mirror_count=0;for(size_t i=0;i<game.mobs.size();++i)if(game.mobs[i].alive && game.actor_effects(i).mirror>0)++mirror_count;
+  assert(mirror_count==1);
+  game.stasis_left=.001f;game.tick_extended_effects();
+  assert(game.stasis_ally==-1 && game.rose_ghost>=0 && game.rose_ghost==game.powered_ally);
+  assert(game.linked_ally==game.rose_ghost && game.actor_effects(game.rose_ghost).wall==7);
+  arena(game,M_RAT,15,7);game.hero=5;game.ring1=IT_ART_TOME;game.ring1_magic.aux=3;
+  game.mobs[0].sleep_t=20;game.tome_cast(cleric_rules::GuidingLight,7*MW+15);
+  assert(game.mobs[0].hp<100 && game.actor_effects(0).illuminated && game.ring1_magic.aux==2);
+  const int turn_before_buff=game.turns;game.tome_cast(cleric_rules::HolyWeapon);
+  assert(game.spell_effects.holy_weapon==50 && game.turns==turn_before_buff && game.ring1_magic.aux==0);
+  assert(!game.cleric_learn(cleric_rules::Sunray));
+  game.level=7;assert(game.cleric_learn(cleric_rules::Sunray));
+  assert(game.cleric_unlocked(cleric_rules::Sunray) && !game.cleric_unlocked(cleric_rules::HolyLance));
+  game.actor_effects(0).sunray_recent=5;game.actor_effects(0).sunray_used=true;
+  assert(game.save(106) && restored.load(106));
+  assert(restored.cleric_ranks[cleric_rules::Sunray]==1 && restored.actor_effects(0).sunray_used);
+  arena(game,M_RAT,15,7);game.ring1=IT_ART_SPELLBOOK;game.ring1_magic.aux=3;
+  game.book_scroll=IT_SCROLL_RECHARGE;game.spellbook_resolve(true);
+  assert(game.spell_effects.artifact_recharge>0 && game.ring1_magic.aux<=2);
+  game.book_scroll=IT_SCROLL_IDENTIFY;game.spellbook_resolve(false);
+  game.add_item(IT_DAGGER,1,0,0);game.select_item(0);
+  assert((game.inv[0].flags&IF_KNOWN)==IF_KNOWN && !game.book_empowered && game.book_scroll==IT_NONE);
+  game.init_identities();int known_before=0;for(int i=0;i<IT_COUNT;++i)known_before+=game.identity_known(i);
+  game.scroll_effect(IT_SCROLL_DIVINATION);int known_after=0;for(int i=0;i<IT_COUNT;++i)known_after+=game.identity_known(i);
+  assert(known_after==known_before+4);
+  // Cancelling a free book picker must not empower a subsequent physical scroll.
+  game.book_scroll=IT_SCROLL_IDENTIFY;game.book_empowered=true;game.transmute_open=true;
+  game.artifact_feed_slot=101;game.cancel_item_selection();
+  assert(!game.transmute_open && !game.book_empowered && game.book_scroll==IT_NONE && game.artifact_feed_slot==0);
+  arena(game,M_RAT,15,7);game.hp=500;game.mobs[0].hp=40;game.mobs[0].maxhp=100;
+  game.scroll_effect(IT_SCROLL_RETRIBUTION);
+  assert(game.mobs[0].hp==10 && game.mobs[0].effects.blind==10);
+  assert(game.hero_effects.blind==10 && game.debuffs[status_rules::Weakness]==20);
+  arena(game,M_RAT,15,7);game.hp=100;game.mobs[0].hp=40;game.mobs[0].maxhp=100;
+  game.scroll_effect(IT_SCROLL_RETRIBUTION);assert(!game.mobs[0].alive);
+  // A prismatic actor still queued at save time keeps its actor extension.
+  arena(game,M_RAT,14,7);game.spell_effects.prismatic_guard=12;
+  game.tick_extended_effects();assert(game.pending_swarms.size()==1);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.mobs.size()==game.mobs.size()+1 && restored.actor_effects(restored.mobs.size()-1).prismatic==1);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.add_item(IT_SHURIKEN,3);game.strength=30;
+  const int initial_turns=game.turns;game.throw_projectile(0,15,7);
+  assert(game.turns==initial_turns && game.spell_effects.shuriken_cooldown==19);
+  game.throw_projectile(0,15,7);assert(game.turns>initial_turns && game.spell_effects.shuriken_cooldown<19);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.hero=5;game.ring1=IT_ART_TOME;
+  game.ring1_level=7;game.ring1_magic.aux=10;game.cleric_ability=2;game.cleric_ranks[cleric_rules::SpiritForm]=2;
+  game.add_item(IT_RING_MIGHT);const int original_max=game.maxhp,original_str=game.effective_strength();
+  game.cleric_form(cleric_rules::SpiritForm,0);
+  assert(game.trinity_spirit.id==IT_RING_MIGHT && game.ring1_magic.aux==6 && game.spell_effects.spirit_left==0);
+  game.trinity_use(2);
+  assert(game.effective_strength()==original_str+3 && game.maxhp>original_max);
+  game.spell_effects.spirit_left=1;game.tick_extended_effects();
+  assert(game.maxhp==original_max && game.effective_strength()==original_str);
+  game.spell_effects.spirit_left=20;game.spell_effects.spirit_ring=IT_RING_FUROR;
+  assert(game.melee_delay()<hero_rules::attack_delay(game.weapon,game.weapon_level,game.effective_strength()));
+  game.discover_item(game.inv[0]);game.remove_item(0);game.trinity_menu(cleric_rules::SpiritForm);
+  assert(!game.trinity_options.empty() && game.trinity_options[0].id==IT_RING_MIGHT);
+  game.cleric_ranks[cleric_rules::MindForm]=1;game.ring1_magic.aux=10;game.add_item(IT_WAND_MAGIC);
+  game.cleric_form(cleric_rules::MindForm,0);
+  assert(game.trinity_mind.id==IT_WAND_MAGIC && game.ring1_magic.aux==7);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.trinity_mind.id==IT_WAND_MAGIC && restored.trinity_spirit.id==IT_RING_MIGHT && restored.discovered_items[IT_RING_MIGHT]);
+  const float armor_before=game.armor_charge;const int charges_before=game.ring1_magic.aux;
+  game.trinity_use(1);assert(game.targeting && game.armor_charge==armor_before);
+  game.trinity_use(1,game.py*MW+game.px);assert(game.armor_charge==armor_before);
+  game.trinity_use(1,7*MW+15);assert(game.armor_charge<armor_before && game.ring1_magic.aux>=charges_before);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.strength=30;game.add_item(IT_BOOMERANG);
+  game.throw_projectile(0,15,7);assert(game.inv_n==0 && game.items.size()==1 && game.items[0].magic.cooldown>0);
+  game.pick_item(0);assert(game.inv_n==0); // cannot pick up an airborne boomerang
+  for(int n=0;n<5;++n)game.tick_extended_effects();
+  assert(game.inv_n==1 && game.inv[0].id==IT_BOOMERANG && game.items.empty());
+  arena(game,M_RAT,10,7);game.px=12;game.strength=30;game.mobs[0].sleep_t=100;
+  FloorItem returning{15,7,IT_BOOMERANG};returning.magic.aux=-(7*MW+10)-1;returning.magic.cooldown=1;
+  game.items.push_back(returning);const int return_turn=game.turns;
+  game.tick_extended_effects();assert(game.turns==return_turn && game.mobs[0].hp<100);
+  assert(game.items.size()==1 && game.items[0].magic.aux==0 && game.items[0].magic.cooldown==0 && game.items[0].magic.durability<100);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.hero=5;game.ring1=IT_ART_TOME;game.ring1_level=7;game.ring1_magic.aux=10;
+  game.cleric_ranks[cleric_rules::RecallInscription]=2;game.recalled_item=IT_SCROLL_ENCHANT;game.recall_left=300;
+  game.add_item(IT_DAGGER);game.tome_cast(cleric_rules::RecallInscription);assert(game.transmute_open && game.ring1_magic.aux==2);
+  game.select_item(0);assert(game.dlg_type==24);game.dialog_choose(0);
+  assert(game.inv_n==1 && game.inv[0].magic.effect>0 && game.recalled_item==IT_NONE && !game.inscription_replay);
+  // Physical scrolls and spellbook reads share the same timed effects.
+  arena(game,M_RAT,15,7);game.add_item(IT_SCROLL_LULLABY);game.use_item(0);
+  assert(game.inv_n==0 && game.spell_effects.drowsy>0 && game.actor_effects(0).drowsy>0 && game.mobs[0].sleep_t==0);
+  for(int n=0;n<5;++n)game.tick_extended_effects();
+  assert(game.actor_effects(0).magical_sleep);
+  game.damage_mob(0,1);assert(!game.actor_effects(0).magical_sleep);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.add_item(IT_WAND_MAGIC);game.inv[0].charges=0;
+  game.scroll_effect(IT_SCROLL_RECHARGE);game.recharge_wands();
+  assert(game.inv[0].charges==0 && game.inv[0].partial_charge>.25f);
+  const auto partial=game.inv[0].partial_charge;game.spell_effects.magic_immunity=20;game.recharge_wands();
+  assert(game.inv[0].partial_charge==partial);
+  arena(game,M_RAT,15,7);game.mobs[0].effects.ally=true;game.mobs[0].effects.poison=4;
+  game.hero=5;game.ring1=IT_ART_TOME;game.ring1_magic.aux=3;game.cleric_subclass=1;game.cleric_ranks[cleric_rules::Cleanse]=2;
+  game.hero_effects.poison=4;game.tome_cast(cleric_rules::Cleanse);
+  assert(game.hero_effects.poison==0 && game.mobs[0].effects.poison==0 && game.shield>=20 && game.actor_effects(0).shield>=20);
+  // Ghost kills award XP after restoring the hero's equipment and health.
+  arena(game,M_RAT,15,7);game.ring1=IT_ART_ROSE;game.ring1_magic.aux=100;
+  game.artifact_action(-3,0);game.rose_weapon.id=IT_GREATSWORD;game.rose_weapon.level=10;
+  game.mobs[0].hp=1;game.mobs[0].sleep_t=100;game.xp=9;game.xpnext=10;
+  const int ghost_max=game.mobs[game.rose_ghost].maxhp;game.rose_attack(0);
+  assert(game.level==2 && game.maxhp==1005 && game.mobs[game.rose_ghost].maxhp==ghost_max);
+  assert(game.pending_ally_experience.empty() && game.magic_actor==-1 && game.magic_hero_cell==-1);
+  // Viscosity on the ghost owns its deferred damage and cannot change the hero.
+  game.rose_armor.id=IT_CLOTH_ARMOR;game.rose_armor.magic.effect=magic_rules::Viscosity;
+  Mob attacker;attacker.type=M_RAT;attacker.x=14;attacker.y=7;game.mobs.push_back(attacker);
+  game.deferred_damage=7;const int hero_health=game.hp;int incoming=12;
+  game.rose_defend(game.mobs.size()-1,incoming);
+  assert(incoming==10 && game.deferred_damage==7 && game.hp==hero_health && game.actor_effects(game.rose_ghost).deferred==2);
+  arena(game,M_RAT,15,7);game.hero=5;game.cleric_ranks[cleric_rules::LightReading]=3;
+  game.cleric_ranks[cleric_rules::SatiatedSpells]=2;game.cleric_ranks[cleric_rules::EnlighteningMeal]=2;
+  game.add_item(IT_ART_TOME);game.inv[0].magic.aux=2;game.inv[0].charges=2;
+  assert(game.tome_slot()==0);game.cleric_food();assert(game.inv[0].magic.aux==3 && game.spell_effects.satiated_spell);
+  game.tome_cast(cleric_rules::HolyWeapon);
+  assert(game.inv[0].magic.aux==1 && game.inv[0].charges==1 && game.shield==5 && !game.spell_effects.satiated_spell);
+  const float stored=game.inv[0].magic.stored;game.tick_magic();assert(game.inv[0].magic.stored>stored);
+  game.use_item(0);assert(game.dialog && game.dlg_type==28);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.cleric_ranks[cleric_rules::LightReading]==3 && restored.tome_slot()==0 && restored.inv[0].charges==1);
+  const auto saved_health=restored.hp;
+  game.spell_effects.bless=std::nanf("");assert(!game.save(106));
+  assert(restored.load(106) && restored.hp==saved_health && restored.spell_effects.bless==0);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.hero=5;game.cleric_ability=2;game.trinity_spirit.id=IT_ART_HOURGLASS;
+  game.cleric_ranks[cleric_rules::SpiritForm]=2;game.cleric_ranks[cleric_rules::HeroicEnergy]=4;
+  game.trinity_use(2);assert(game.armor_charge==79 && game.spell_effects.bubble_active && game.spell_effects.time_bubble==6);
+  // Holy effects run once after the weapon/glyph and the Trinity imprint.
+  arena(game,M_RAT,15,7);game.mobs[0].sleep_t=100;game.cleric_subclass=2;
+  game.spell_effects.holy_weapon=50;game.spell_effects.body_left=20;
+  game.spell_effects.body_effect=magic_rules::Crystal;game.spell_effects.body_durability=30;
+  const auto real_weapon=game.weapon;int combined=0;
+  game.weapon_proc(0,30,combined);
+  assert(game.mobs[0].hp==84 && game.weapon==real_weapon && game.spell_effects.body_durability<30);
+  game.spell_effects.body_durability=.001f;game.weapon_proc(0,1,combined);
+  assert(game.weapon==real_weapon && game.spell_effects.body_left==0);
+  game.spell_effects.holy_ward=50;game.spell_effects.body_left=20;game.spell_effects.body_armor=true;
+  game.spell_effects.body_effect=magic_rules::Viscosity;game.armor_magic.effect=0;game.armor_level=0;
+  const float deferred_before=game.deferred_damage;
+  assert(game.armor_proc(game.mobs[0],12)==7 && game.deferred_damage==deferred_before+2);
+  arena(game,M_RAT,15,7);game.weapon=IT_CROSSBOW;game.weapon_magic.effect=magic_rules::Explosive;
+  game.weapon_magic.durability=50;game.strength=30;game.mobs[0].sleep_t=100;game.add_item(IT_DART);
+  game.throw_projectile(0,15,7);assert(game.weapon==IT_CROSSBOW && game.weapon_magic.durability<50);
+  arena(game,M_RAT,15,7);game.magic_target=-4;game.ring1=IT_ART_CHAINS;game.ring1_magic.aux=5;
+  game.artifact_action(-3,0);assert(game.targeting && game.magic_target==-1);
+  game.targeting=game.artifact_targeting=false;game.magic_target=-3;game.add_item(IT_SCROLL_SIREN);game.use_item(0);
+  assert(game.targeting && game.magic_target==-1 && game.book_scroll==IT_SCROLL_SIREN);
+  // Foresight scans from the hero, through walls, rather than around its target.
+  arena(game,M_RAT,14,7);game.mobs[0].ai=Mob::Sleeping;game.mobs[0].sleep_t=100;
+  game.ring1=IT_ART_FORESIGHT;game.ring1_magic.aux=100;
+  game.tiles[7][11]=T_WALL;game.tiles[7][13]=T_SECRET;
+  Feature hidden;hidden.x=12;hidden.y=7;hidden.type=F_TRAP;game.features.push_back(hidden);
+  game.items.push_back({14,7,IT_GOLD,5});game.items.push_back({14,7,IT_DAGGER});
+  memset(game.seen,0,sizeof(game.seen));memset(game.vis,0,sizeof(game.vis));
+  const auto expected_scan=foresight_rules::scan(7*MW+10,7*MW+15,MW,23,15,0,100);
+  const int expected_exp=int(expected_scan.cells.size())+100+10+10+10;
+  game.invis_t=10;const auto scan_turn=game.turns;
+  game.artifact_action(-3,0,7*MW+15);
+  assert(game.tiles[7][13]==T_DOOR && game.features[0].type==F_TRAP_FOUND);
+  assert(game.ring1_level==1 && game.ring1_magic.experience==expected_exp-100);
+  assert(game.ring1_magic.aux==90 && std::fabs(game.ring1_magic.stored-.655f)<.0001f);
+  assert(game.invis_t==0 && game.turns==scan_turn+1 && !(game.seen[7][8]&2));
+  assert(game.actor_effects(0).scry==4 && game.scry_heaps.size()==1 && game.scry_heaps[0].left==4);
+  assert(game.vis[7][14] && (game.seen[7][14]&4));
+  // Awareness follows the actor, while heap awareness stays at the scanned cell.
+  game.mobs[0].x=19;game.recompute_fov();assert(game.vis[7][19] && game.vis[7][14]);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.actor_effects(0).scry==4 && restored.scry_heaps.size()==1 && restored.vis[7][19]);
+  FloorState scry_floor;game.capture_floor(scry_floor);game.visited_floors.push_back(scry_floor);
+  game.floor=2;game.mobs.clear();game.mob_effects.clear();game.recompute_fov();
+  assert(!game.vis[7][14]);game.tick_extended_effects();
+  assert(game.visited_floors[0].effects[0].scry==3 && game.scry_heaps[0].left==3);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.scry_heaps[0].depth==1 && !restored.vis[7][14]);
+  game.apply_floor(game.visited_floors[0]);game.recompute_fov();
+  assert(game.actor_effects(0).scry==3 && game.vis[7][19] && game.vis[7][14]);
+  game.actor_effects(0).scry=0;game.scry_heaps[0].left=1;game.tick_extended_effects();game.recompute_fov();
+  assert(game.scry_heaps.empty() && !game.vis[7][19] && !game.vis[7][14]);
+  // Previously mapped terrain still grants first-time heap discovery XP.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_FORESIGHT;game.ring1_magic.aux=100;
+  memset(game.seen,2,sizeof(game.seen));memset(game.vis,0,sizeof(game.vis));
+  game.items.push_back({14,7,IT_GOLD,1});game.items.push_back({14,7,IT_DAGGER});
+  game.artifact_action(-3,0,7*MW+15);assert(game.ring1_magic.experience==10);
+  game.artifact_action(-3,0,7*MW+15);assert(game.ring1_magic.experience==10);
+  // Minimum five charge can leave a fractional debt after a diagonal scan.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_FORESIGHT;game.ring1_magic.aux=5;
+  game.artifact_action(-3,0,8*MW+11);
+  assert(game.ring1_magic.aux==0 && game.ring1_magic.stored<0);
+  assert(game.save(106) && restored.load(106));
+  assert(restored.ring1_magic.stored==game.ring1_magic.stored);
+  game.add_item(IT_ART_FORESIGHT);game.inv[0].magic=game.ring1_magic;
+  assert(game.save(106) && restored.load(106) && restored.inv[0].magic.stored<0);
+  const auto debt=game.ring1_magic.stored;game.artifact_charge(1);
+  assert(std::fabs(game.ring1_magic.stored-(debt+2))<.0001f && game.ring1_magic.aux==0);
+  const auto no_charge_turn=game.turns;game.artifact_action(-3,0);
+  assert(!game.targeting && game.turns==no_charge_turn);
+  game.ring1_magic.aux=100;game.artifact_action(-3,0,game.py*MW+game.px);
+  assert(game.ring1_magic.aux==100 && game.turns==no_charge_turn);
+  // Warnings require visible hidden traps and only fire on entry into danger.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_FORESIGHT;
+  hidden.x=12;hidden.y=7;game.features.push_back(hidden);
+  game.recompute_fov();game.tick_magic();assert(game.ring1_magic.consumed==1);
+  game.message("sentinel");game.tick_magic();assert(std::string(game.msg)=="sentinel");
+  game.tiles[7][11]=T_WALL;game.recompute_fov();game.tick_magic();assert(game.ring1_magic.consumed==0);
+  game.tiles[7][11]=T_FLOOR;game.recompute_fov();game.tick_magic();assert(game.ring1_magic.consumed==1);
+  game.spell_effects.magic_immunity=2;game.tick_magic();assert(game.ring1_magic.consumed==0);
+  arena(game,M_RAT,14,7);game.hero=5;game.cleric_subclass=1;
+  game.ring1=IT_ART_FORESIGHT;game.ring1_magic.aux=100;game.actor_effects(0).illuminated=true;
+  game.mobs[0].ai=Mob::Sleeping;game.mobs[0].sleep_t=100;
+  game.artifact_action(-3,0,7*MW+15);
+  assert(game.mobs[0].hp==94 && !game.actor_effects(0).illuminated);
+  game.new_run(0,42);assert(game.scry_heaps.empty());
+  std::puts("Foresight passed: cone mapping, wall penetration, discovery XP, actor/heap awareness and expiry, fractional debt/save, low-charge/self-target guards and visibility-gated warning transitions.");
+  // Plants preserve longer buffs, and their position-dependent buffs are independent.
+  arena(game,M_RAT,15,7);
+  const int hero_cell=game.py*MW+game.px;
+  game.seed_effect(IT_SEED_STARFLOWER,hero_cell);assert(game.spell_effects.bless==30);
+  game.spell_effects.bless=45;game.seed_effect(IT_SEED_STARFLOWER,hero_cell);assert(game.spell_effects.bless==45);
+  game.hero_effects.poison=50;game.seed_effect(IT_SEED_SORROWMOSS,hero_cell);assert(game.hero_effects.poison==50);
+  game.seed_effect(IT_SEED_SUNGRASS,hero_cell);game.px++;
+  game.seed_effect(IT_SEED_EARTHROOT,hero_cell+1);game.tick_extended_effects();
+  assert(game.spell_effects.healing==0 && game.spell_effects.earth==1000 && game.spell_effects.earth_anchor==hero_cell+1);
+  game.px++;game.seed_effect(IT_SEED_SUNGRASS,hero_cell+2);game.tick_extended_effects();
+  assert(game.spell_effects.earth==0 && game.spell_effects.healing>0 && game.spell_effects.anchor==hero_cell+2);
+  game.spell_effects.healing=1;game.spell_effects.partial_heal=.9f;game.hp=900;game.tick_extended_effects();
+  assert(game.hp==907 && game.spell_effects.healing==0); // final tick is not capped to remaining pool
+  game.seed_effect(IT_SEED_EARTHROOT,hero_cell+2);game.spell_effects.earth=1;
+  const int root_hp=game.hp;game.take_damage(10);
+  assert(game.hp==root_hp-7 && game.spell_effects.earth==0); // final absorption still blocks 3
+  game.hero_effects={};game.hero_effects.poison=20;game.hero_effects.poison_delay=3;
+  game.hero_effects.bleeding=8;game.hero_effects.blind=10;game.hero_effects.burning=12;
+  game.hero_effects.paralysis=6;game.hero_effects.roots=9;game.hero_effects.charm=7;game.hero_effects.chill=5;
+  game.spell_effects.drowsy=5;game.spell_effects.vertigo=10;game.spell_effects.slow=9;
+  game.spell_effects.magical_sleep=true;
+  for(int type:{status_rules::Poison,status_rules::Cripple,status_rules::Weakness,status_rules::Vulnerable,status_rules::Hex})game.debuffs[type]=15;
+  game.seed_effect(IT_SEED_MAGEROYAL,hero_cell+2);
+  assert(game.hero_effects.poison==0 && game.hero_effects.poison_delay==0 && game.hero_effects.bleeding==0 && game.hero_effects.blind==0);
+  assert(game.spell_effects.drowsy==0 && game.spell_effects.vertigo==0 && game.spell_effects.slow==0);
+  assert(game.hero_effects.burning==12 && game.hero_effects.paralysis==6 && game.hero_effects.chill==5 && game.hero_effects.charm==7 && game.spell_effects.magical_sleep);
+  assert(game.debuffs[status_rules::Poison]==0 && game.debuffs[status_rules::Cripple]==0 && game.debuffs[status_rules::Hex]==15);
+  // Healing potion uses the same cure list, without clearing unrelated effects.
+  game.hero_effects.poison=20;game.hero_effects.blind=10;game.hero_effects.bleeding=8;game.spell_effects.vertigo=10;
+  game.add_item(IT_POTION_HEAL);game.use_item(0);
+  assert(game.hero_effects.poison==0 && game.hero_effects.blind==0 && game.hero_effects.bleeding==0 && game.spell_effects.vertigo==0 && game.hero_effects.burning>0);
+  arena(game,M_RAT,15,7);game.mobs[0].effects.blind=25;game.mobs[0].effects.chill=4;
+  game.seed_effect(IT_SEED_BLINDWEED,7*MW+15);
+  assert(game.mobs[0].effects.blind==25 && game.mobs[0].effects.chill==4 && game.actor_effects(0).cripple==10);
+  game.mobs[0].effects.chill=game.mobs[0].effects.blind=0;game.mobs[0].ai=Mob::Hunting;
+  assert(game.mob_turn(game.mobs[0])==2); // Cripple slows movement, not attack
+  game.mobs[0].x=11;assert(game.mob_turn(game.mobs[0])==1);
+  game.actor_effects(0).slow=7;game.actor_effects(0).weakness=9;game.actor_effects(0).vulnerable=8;
+  game.actor_effects(0).drowsy=6;game.actor_effects(0).vertigo=5;
+  game.mobs[0].effects.poison=10;game.mobs[0].effects.blind=10;game.mobs[0].effects.burning=12;
+  game.seed_effect(IT_SEED_MAGEROYAL,7*MW+11);
+  assert(game.actor_effects(0).cripple==0 && game.actor_effects(0).slow==0 && game.actor_effects(0).weakness==0 && game.actor_effects(0).vulnerable==0);
+  assert(game.actor_effects(0).drowsy==0 && game.actor_effects(0).vertigo==0 && game.mobs[0].effects.poison==0 && game.mobs[0].effects.blind==0 && game.mobs[0].effects.burning==12);
+  game.mobs[0].effects.paralysis=40;game.mobs[0].effects.chill=4;
+  game.seed_effect(IT_SEED_ICECAP,7*MW+11);
+  assert(game.mobs[0].effects.paralysis==40 && game.mobs[0].effects.chill==0 && game.mobs[0].effects.burning==0);
+  game.seed_effect(IT_SEED_EARTHROOT,game.py*MW+game.px);game.actor_effects(0).cripple=10;
+  assert(game.save(106) && restored.load(106));
+  assert(restored.spell_effects.earth_anchor==game.spell_effects.earth_anchor && restored.actor_effects(0).cripple==10);
+  std::puts("Plant corrections passed: cure list, duration preservation, independent anchors, final heal/block overshoot, Blindweed movement-only cripple, Icecap refresh and V15 persistence.");
+  arena(game,M_RAT,20,7);game.mobs.clear();
+  game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);
+  assert(game.spell_effects.bubble_active && game.spell_effects.time_bubble==7 && game.freeze_left==0);
+  const int bubble_turn=game.turns,bubble_hunger=game.hunger;
+  game.spend_action(1);assert(game.spell_effects.time_bubble==6 && game.turns==bubble_turn);
+  game.spend_action(6);assert(game.spell_effects.bubble_active && game.spell_effects.time_bubble==0);
+  game.spend_action(.0005f);assert(game.spell_effects.bubble_active);
+  assert(game.save(106) && restored.load(106) && restored.spell_effects.time_bubble<0);
+  game.spend_action(.001f);assert(!game.spell_effects.bubble_active && game.turns==bubble_turn && game.hunger==bubble_hunger);
+  game.spend_action(1);assert(game.turns==bubble_turn+1);
+  // Pending presses are unique, survive saving and resolve on detachment.
+  arena(game,M_RAT,20,7);game.mobs.clear();
+  Feature queued;queued.x=game.px;queued.y=game.py;queued.type=F_TRAP;queued.aux=TR_FIRE;
+  game.features.push_back(queued);game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);
+  const int trapped_hp=game.hp;game.trigger_tile_features();game.trigger_tile_features();
+  assert(game.features[0].type==F_TRAP_FOUND && game.bubble_presses.size()==1 && game.hp==trapped_hp);
+  assert(game.save(106) && restored.load(106) && restored.bubble_presses==game.bubble_presses);
+  game.end_time_bubble();restored.end_time_bubble();
+  assert(game.features[0].type==F_TRAP_DISARMED && game.hp==trapped_hp-5 && game.hp==restored.hp);
+  // A queued plant affects whoever occupies its cell when time resumes.
+  arena(game,M_RAT,20,7);game.mobs.clear();
+  queued.type=F_PLANT;queued.aux=IT_SEED_STARFLOWER;queued.x=game.px;queued.y=game.py;game.features.push_back(queued);
+  game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);game.trigger_tile_features();
+  assert(game.spell_effects.bless==0 && game.features.size()==1);
+  game.end_time_bubble();assert(game.spell_effects.bless==30 && game.features.empty());
+  // Transition disarms pending cells but keeps remaining bubble time.
+  queued.type=F_TRAP;queued.aux=TR_DART;game.features.push_back(queued);
+  game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);game.trigger_tile_features();
+  game.end_time_bubble(true);
+  assert(game.spell_effects.bubble_active && game.spell_effects.time_bubble==7 && game.bubble_presses.empty() && game.features[0].type==F_TRAP_DISARMED);
+  // Sandals dispel the previous effect before creating the new bubble.
+  game.ring1=IT_ART_SANDALS;game.ring1_level=3;game.ring1_magic.aux=100;game.ring1_magic.aux2=IT_SEED_SWIFTTHISTLE;
+  game.artifact_action(-3,0,game.py*MW+game.px);
+  assert(game.spell_effects.bubble_active && game.spell_effects.time_bubble==6 && game.ring1_magic.aux==80);
+  // Offensive actions break the bubble before their ordinary time cost.
+  arena(game,M_RAT,11,7);game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);
+  game.attack(0,false);assert(!game.spell_effects.bubble_active);
+  game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);game.add_item(IT_KNIFE);game.throw_projectile(0,11,7);
+  assert(!game.spell_effects.bubble_active && game.turns>0);
+  arena(game,M_RAT,15,7);game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);
+  game.add_item(IT_WAND_MAGIC);game.cast_wand(0,15,7);assert(!game.spell_effects.bubble_active);
+  arena(game,M_RAT,20,7);game.seed_effect(IT_SEED_SWIFTTHISTLE,7*MW+20);
+  assert(game.actor_effects(0).bubble_active && game.actor_effects(0).haste==0 && !game.spell_effects.bubble_active);
+  game.spend_action(.1f);assert(game.mobs[0].x==11 && !game.actor_effects(0).bubble_active);
+  std::puts("Time bubble passed: seven-point reset, zero/tolerance boundary, full-action expiry, queued presses/save/disarm, sandals order, offensive detachment and monster-local time.");
+  std::puts("V15 mechanics passed: projectile wear/recovery/pinning, selected seed feeding, plant anchors, shop theft, rose equipment, tome gates, spellbook and extended saves.");
   std::remove("sdmc:/3ds/spd/slot106.bin");
   std::remove("sdmc:/3ds/spd/slot107.bin");
   std::remove("sdmc:/3ds/spd/slot108.bin");

@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Toolchain](https://img.shields.io/badge/devkitARM-r68-6f42c1)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.14alpha-e60012)
+![Development version](https://img.shields.io/badge/development-0.1.15alpha-e60012)
 ![Status](https://img.shields.io/badge/status-mechanics%20alignment%20in%20progress-2ea44f)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -48,6 +48,18 @@ waterskins, equipped-item details, blue-cursor inspection and automatic travel
 interruption. Potions, scrolls and rings now hide unknown types behind persistent
 run appearances. Save format is V13; V9–V12 import remains supported. See the
 [release notes](docs/releases/v0.1.14alpha.md) for behavior and remaining gaps.
+
+The v0.1.15alpha development build adds 13 artifacts, weapon enchantments,
+armor glyphs and their curses. Equip artifacts in the backpack accessory rows,
+then press **A** on the equipped artifact to open its action menu. The build
+writes V15 saves and imports V9–V14. It also adds the twelve seed entries,
+fifteen ordinary thrown weapons, artifact feeding/theft, and the Cleric spell
+and talent menus. Foresight uses the pinned cone scan, fractional charge,
+discovery XP and timed enemy/heap awareness. Plant fixes include the shared
+healing-potion cure list, separate Sungrass/Earthroot anchors and Blindweed's
+movement-only Cripple. Swiftthistle has an independent time bubble with queued
+plant/trap presses and persistent remaining time. Several interactions remain partial; see the
+[development notes](docs/releases/v0.1.15alpha.md).
 
 ## Screenshots
 
@@ -109,10 +121,12 @@ Title and inspection screenshots are from v0.1.14alpha; the general gallery is f
 - **Shops**: shops on depths 6/11/16 plus the Imp's depth-20 shop after his quest.
 - **Equipment** includes all 31 normally generated melee weapons with pinned
   base formulas, legacy weapon/armor entries, 13 native wand types and a partial
-  consumable/missile/seed catalog. Exact generation decks and many effects remain.
+  consumable catalog, twelve seeds and fifteen ordinary thrown weapons.
+  Exact generation decks and many effects remain.
 - **Rings** with two equipment slots: might, accuracy, evasion, haste, wealth,
-  energy, force, elements, furor, tenacity, sharpshooting and arcana. Arcana and
-  Sharpshooting effects remain absent; wealth and missile interactions are partial.
+  energy, force, elements, furor, tenacity, sharpshooting and arcana. Arcana affects
+  enchantment/glyph strength; Sharpshooting affects thrown damage and durability.
+  Wealth and several missile interactions remain partial.
 - **Equipment state** survives swapping, drops, floor changes, shops and saves:
   known level, curse lock, augmentation, use/XP identification and wand recharge.
   Identify, Remove Curse and Upgrade offer a target picker including equipped gear.
@@ -196,8 +210,8 @@ against upstream. Whole floors do not yet match upstream from the same seed.
 - Normal floors roll **3 / 4 / 5 items** at **60% / 30% / 10%**; large floors add 2.
   Loose food is guaranteed on regular floors, with an extra food drop on large floors.
 - Category decks follow SPD's first/second generator deck: weapons 2, armor 2/1,
-  missiles 1/2, wands 1, rings 1, potions 8, scrolls 8, seeds 1, stones 1, gold 10
-  (artifacts are mapped to rings).
+  missiles 1/2, wands 1, rings 1, potions 8, scrolls 8, seeds 1, stones 1, gold 10,
+  and artifacts 0/1. The 11 standard artifacts are unique per run.
 - Item tiers use SPD's per-floor-set table
   `{0,75,20,4,1} / {0,25,50,20,5} / {0,0,40,50,10} / {0,0,20,40,40} / {0,0,0,20,80}`.
 - Heap presentation: 1/20 skeleton, 4/20 chest, 1/20 **mimic**, otherwise a floor
@@ -219,6 +233,8 @@ against upstream. Whole floors do not yet match upstream from the same seed.
   price) and the last **3 sold items** can be bought back at the same price.
 - Shop UI has 购买 / 出售 / 回购 tabs, 6 rows per page, **X** switches tabs,
   **L/R** pages, **A** trades and **B** closes.
+- With a charged Master Thieves' Armband equipped, **Y** attempts to steal the
+  selected stock item. Failed theft makes the shopkeeper leave with his wares.
 - Shopkeeper warn/flee is implemented: damaging or debuffing him warns once,
   the second offense makes him vanish with all wares (saved per floor).
 - Bag stock: Potion Bandolier / Scroll Holder / Magical Holster, each +5 slots;
@@ -254,18 +270,20 @@ Implementation was cross-checked against:
 
 ### Saves
 
-The current save format is **V13**. Slots store the run seed, current/visited maps
+The development build uses **V15**. Slots store the run seed, current/visited maps
 and fog, full entity vectors, actor/AI clocks, selected ability/status state,
 equipment flags/augmentation/identification, type knowledge, waterskin volume,
 Swarm generations/drop limits, wand recharge, gas, quests, bosses,
-typed keys, shops and respawn state. Failed writes retain the previous file.
+typed keys, shops, respawn state, enchantments, artifact progression, plant/spell
+effects, ghost equipment, spellbook study order, Cleric talents and Trinity
+imprints. Failed writes retain the previous file.
 Leaving the game auto-saves. **V9 saves from v0.1.0alpha still load**: the current
 floor keeps its old shared key balance until descent, and newly generated floors
-use the current rules. V10/V11/V12 saves also load. V9/V10 saves lack strength and hunger:
+use the current rules. V10–V14 saves also load. V9/V10 saves lack strength and hunger:
 strength starts at 10 and hunger at 0, existing HP/enemies are retained, and XP
 uses the corrected threshold. Imported equipment is known and uncursed; previously
-visited floors absent from old saves cannot be reconstructed. Older builds cannot
-load V13; back up `sdmc:/3ds/spd/` before updating. The extended archive uses native
+visited floors absent from old saves cannot be reconstructed. Keep a backup of `sdmc:/3ds/spd/`
+if you use both V15 and the released V13 build. The extended archive uses native
 value layouts; cross-platform save exchange is not claimed. A fresh run is
 recommended for comparing mechanics.
 
@@ -569,7 +587,7 @@ useful when the emulator shows an exception dialog.
 - [ ] True Old Mine / Imp Vault sub-levels (currently rooms on the same floor)
 - [ ] Boss arenas as separate levels (regular rooms + boss room for now)
 - [ ] Full class-specific talent trees (current tier notices have no stat bonuses)
-- [ ] Artifacts, trinkets, exotic consumables and full alchemy recipes
+- [ ] Artifact and enchantment behavior parity, trinkets, exotic consumables and full alchemy recipes
 - [ ] Exact layouts for every special room (crystal/sacrifice/fire variants are simplified)
 - [ ] Audio: `ndsp` or SDL2_mixer (library already built for 3DS)
 - [ ] Difficulty tuning across all 25 floors

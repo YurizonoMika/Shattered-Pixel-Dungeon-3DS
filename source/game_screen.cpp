@@ -396,6 +396,10 @@ static void draw_feature(const Feature& f, int camx, int camy) {
     case F_BARRICADE:
       tile16(9 + 7 * 16);
       break;
+    case F_KEY_WALL:
+      draw_box(x+z,y+z,14*z,14*z,C2D_Color32(161,125,75,255),.52f);
+      draw_item_icon(IT_ART_KEY,x,y,z);
+      break;
     case F_CHEST:
     case F_CHEST_LOCKED:
     case F_CHEST_CRYSTAL:
@@ -622,6 +626,7 @@ static void draw_map() {
 
   // floor items: subtle floating animation + shadow
   for (const FloorItem& it : G.items) {
+    if(item_def(it.id).kind==K_MISSILE && it.magic.aux!=0)continue;
     if (!G.vis[it.y][it.x] && G.mind_t == 0) continue;
     float ix = roundf((float)(it.x * 16 * z - camx));
     float iy = roundf((float)(it.y * 16 * z - camy));
@@ -711,7 +716,7 @@ static void draw_map() {
   if (G.targeting) {
     bool wand = G.target_item >= 0 && G.target_item < G.inv_n &&
                 item_def(G.inv[G.target_item].id).kind == K_WAND;
-    text(wand ? "选择目标: A 施法   B 取消" : "选择目标: A 投掷   B 取消",
+    text(G.artifact_targeting ? "选择目标: A 发动   B 取消" : wand ? "选择目标: A 施法   B 取消" : "选择目标: A 投掷   B 取消",
          10, 8, CLR_YELLOW, 1.0f);
   }
 
@@ -734,6 +739,8 @@ static void draw_dialog() {
                 G.dlg_type == 2 ? 0xBBBBBBFF : 0);
   } else if(G.dlg_type==23) {
     draw_item_icon(IT_SCROLL_IDENTIFY,lx+16,ly+16,1.5f);
+  } else if(G.dlg_type>=24 && G.dlg_type<=34) {
+    draw_item_icon(G.dlg_type==24 ? IT_SCROLL_ENCHANT : G.selection_item(G.artifact_slot).id,lx+16,ly+16,1.5f);
   } else {
     uint8_t npc = G.dlg_type == 4 ? M_NPC_SMITH
                   : G.dlg_type == 5 ? M_NPC_IMP
@@ -925,13 +932,19 @@ static void draw_bag_action() {
   if (extra[0]) text(extra, 72, 82, CLR_GREY, 1.0f);
   if ((G.inv[idx].flags & (IF_CURSED|IF_CURSE_KNOWN)) == (IF_CURSED|IF_CURSE_KNOWN))
     text("诅咒", 246, 82, CLR_RED, 1.f);
-  text_wrap(item_random_identity(G.inv[idx].id) && !G.identity_known(G.inv[idx].id) ?
+  const Item& item=G.inv[idx];
+  const bool weapon=d.kind==K_WEAPON || d.kind==K_MISSILE,armor=d.kind==K_ARMOR;
+  const bool curse=weapon ? magic_rules::curse_enchant(item.magic.effect) : magic_rules::curse_glyph(item.magic.effect);
+  if((weapon||armor) && item.magic.effect && (!curse || (item.flags&IF_CURSE_KNOWN))) {
+    text(weapon ? magic_rules::enchant_name(item.magic.effect) : magic_rules::glyph_name(item.magic.effect),
+         30,104,curse ? CLR_RED : CLR_BLUE,1.f);
+  } else text_wrap(item_random_identity(item.id) && !G.identity_known(item.id) ?
       "类型和作用尚未鉴定。" : d.desc,30,104,260,CLR_WHITE,1.f,2.f);
 
   const char* primary = "使用 (A)";
-  if (d.kind == K_WEAPON || d.kind == K_ARMOR || d.kind == K_RING)
+  if (d.kind == K_WEAPON || d.kind == K_ARMOR || d.kind == K_RING || d.kind == K_ARTIFACT)
     primary = "装备 (A)";
-  else if (d.kind == K_WAND || d.kind == K_BOMB) primary = "瞄准 (A)";
+  else if (d.kind == K_WAND || d.kind == K_BOMB || d.kind==K_MISSILE) primary = "瞄准 (A)";
   else if (G.inv[idx].id==IT_WATERSKIN) primary="饮用 (A)";
   else if (d.kind == K_QUEST) primary = "任务物品";
 
@@ -953,9 +966,9 @@ static void draw_backpack() {
   textf(150, 44, CLR_GREY, 1.0f, "护甲 %s", G.display_name(G.armor));
   if (G.armor_level && (G.armor_flags & IF_IDENTIFIED)) textf(244, 44, CLR_YELLOW, 1.0f, "+%d", G.armor_level);
 
-  textf(14, 58, CLR_GREY, 1.0f, "戒指一 %s", G.display_name(G.ring1));
+  textf(14, 58, CLR_GREY, 1.0f, "饰品一 %s", G.display_name(G.ring1));
   if (G.ring1_level && (G.ring1_flags & IF_IDENTIFIED)) textf(100, 58, CLR_YELLOW, 1.0f, "+%d", G.ring1_level);
-  textf(156, 58, CLR_GREY, 1.0f, "戒指二 %s", G.display_name(G.ring2));
+  textf(156, 58, CLR_GREY, 1.0f, "饰品二 %s", G.display_name(G.ring2));
   if (G.ring2_level && (G.ring2_flags & IF_IDENTIFIED)) textf(244, 58, CLR_YELLOW, 1.0f, "+%d", G.ring2_level);
   if(g_bag_sel<0) {
     const int slot=-g_bag_sel;
@@ -1051,7 +1064,8 @@ static void draw_shop() {
          (G.shop_mode == 0 && G.shop_sold[idx]) ? CLR_GREY : CLR_YELLOW, 1.0f);
   }
   if (size == 0) text_c("没有物品", 0, BOT_W, 120, CLR_GREY, 1.0f);
-  text_c("X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
+  text_c(G.has_artifact(IT_ART_ARMBAND) && G.shop_mode==0 ? "Y 偷窃  X 切换  A 交易  B 关闭" :
+      "X 切换  L/R 翻页  A 交易  B 关闭", 0, BOT_W, 208, CLR_GREY, 1.0f);
 }
 
 static int count_item(uint8_t id) {
@@ -1159,7 +1173,7 @@ static void bag_primary_action() {
   const ItemDef& d = item_def(G.inv[i].id);
   if (d.kind == K_QUEST && G.inv[i].id!=IT_WATERSKIN) {
     G.message("这是任务物品，不能使用。");
-  } else if (d.kind == K_WAND || d.kind == K_BOMB) {
+  } else if (d.kind == K_WAND || d.kind == K_BOMB || d.kind==K_MISSILE) {
     G.clear_path();
     G.use_item(i);
     G.backpack = false;
@@ -1167,7 +1181,7 @@ static void bag_primary_action() {
   } else if (d.kind == K_WEAPON || d.kind == K_ARMOR) {
     G.equip_item(i);
     g_bag_action = false;
-  } else if (d.kind == K_RING) {
+  } else if (d.kind == K_RING || d.kind == K_ARTIFACT) {
     G.equip_ring(i);
     bag_clamp_sel();
     g_bag_action = false;
@@ -1237,6 +1251,7 @@ void game_update() {
       G.shop_sel = std::max(0, std::min(maxsel, G.shop_sel + IN.dy));
     }
     int idx = G.shop_page * 6 + G.shop_sel;
+    if(IN.pressed(KEY_Y) && G.shop_mode==0){G.shop_steal(idx);return;}
     if (IN.pressed(KEY_A)) {
       if (G.shop_mode == 0) { if (idx < G.shop_n) G.shop_buy(idx); }
       else if (G.shop_mode == 1) { if (idx < G.inv_n) G.shop_sell(idx); }
@@ -1269,7 +1284,7 @@ void game_update() {
   if (G.transmute_open) {
     int list[BAG_MAX+4];
     int n = transmute_list(list);
-    if (IN.pressed(KEY_B)) { G.transmute_open = false; return; }
+    if (IN.pressed(KEY_B)) { G.cancel_item_selection(); return; }
     int pages = (n + 4) / 5;
     if (pages < 1) pages = 1;
     if (IN.pressed(KEY_L) && G.transmute_page > 0) { G.transmute_page--; G.transmute_sel = G.transmute_page * 5; }
@@ -1293,7 +1308,7 @@ void game_update() {
           return;
         }
       }
-      G.transmute_open = false;
+      G.cancel_item_selection();
     }
     return;
   }
@@ -1315,6 +1330,17 @@ void game_update() {
   }
 
   if (G.dialog) {
+    if((G.dlg_type==24 || G.dlg_type==22 || G.dlg_type==35) && IN.pressed(KEY_Y)) {
+      G.dialog=false;G.cancel_item_selection();return;
+    }
+    if(G.dlg_type==35 && (IN.pressed(KEY_L)||IN.pressed(KEY_R))) {
+      G.cleric_page=std::max(0,G.cleric_page+(IN.pressed(KEY_R) ? 1 : -1));G.trinity_menu(G.trinity_spell);return;
+    }
+    if(G.dlg_type==28 || G.dlg_type==32) {
+      if(IN.pressed(KEY_ZR) && G.dlg_type==28){G.dialog=false;G.cleric_armor_action();return;}
+      if(IN.pressed(KEY_SELECT)){G.cleric_page=0;G.cleric_menu(G.dlg_type==28 ? 1 : 0);return;}
+      if(IN.pressed(KEY_L)||IN.pressed(KEY_R)){G.cleric_page=std::max(0,G.cleric_page+(IN.pressed(KEY_R) ? 1 : -1));G.cleric_menu(G.dlg_type==32);return;}
+    }
     if(G.dlg_type==23 && IN.pressed(KEY_B)) {G.dialog=false;G.examining=false;return;}
     if (IN.pressed(KEY_A)) G.dialog_choose(0);
     else if (IN.pressed(KEY_B)) G.dialog_choose(1);
@@ -1378,11 +1404,16 @@ void game_update() {
       else if(IN.dy<0 && g_bag_sel<8) g_bag_sel=-1;
       else g_bag_sel=std::clamp(g_bag_sel+IN.dy*8,0,BAG_MAX-1);
     }
-    if(IN.pressed(KEY_A) && (g_bag_sel<0 || bag_sel_inv()>=0)) g_bag_action=true;
+    if(IN.pressed(KEY_A) && (g_bag_sel<0 || bag_sel_inv()>=0)) {
+      if(g_bag_sel<0 && item_def(G.selection_item(g_bag_sel).id).kind==K_ARTIFACT) G.artifact_menu(g_bag_sel);
+      else g_bag_action=true;
+    }
     if (IN.tap) {
       if(IN.tap_y>=40 && IN.tap_y<70) {
         g_bag_sel=IN.tap_y<56 ? (IN.tap_x<150 ? -1 : -2) : (IN.tap_x<150 ? -3 : -4);
-        g_bag_action=true;return;
+        if(item_def(G.selection_item(g_bag_sel).id).kind==K_ARTIFACT) G.artifact_menu(g_bag_sel);
+        else g_bag_action=true;
+        return;
       }
       if (IN.tap_y >= 70 && IN.tap_y < 92 && IN.tap_x >= 10 && IN.tap_x < 310) {
         int tab = (int)((IN.tap_x - 10) / 50);
@@ -1412,7 +1443,7 @@ void game_update() {
 
   if (IN.pressed(KEY_B)) {
     if(G.examining) {G.examining=false;G.message("退出查看模式。");}
-    else if (G.targeting) { G.targeting = false; G.message("取消瞄准。"); }
+    else if (G.targeting) { G.targeting = G.artifact_targeting = false; G.book_scroll=IT_NONE;G.book_empowered=G.inscription_replay=false;G.form_item={};G.message("取消瞄准。"); }
     else { G.clear_path(); G.paused = 1; }
     return;
   }

@@ -13,7 +13,15 @@ Reference: [Shattered Pixel Dungeon v4.0.2](https://github.com/00-Evan/shattered
 | Traps | `RegularPainter.paintTraps`, regional trap tables | The port samples distinct available floor cells. Extra traps on trap floors are visible. Its six-type regional mix remains partial. Toxic gas now uses ported Blob diffusion, concentration and depth damage; no fixed six-turn expiry. Alarms redirect monsters across the floor; mapping reveals traps and routes avoid visible traps. Complete trap tables and other effects remain outstanding. |
 | Floor returns / finale | `Dungeon.switchLevel`, `LastLevel`, `AscensionChallenge` | V12 remembers maps, entities, keys, shops and gas. Upstairs, floor-26 walkable geometry, Amulet completion/surface victory and base ascent modifiers are present. Falling, exact transition costs, reset exceptions, panoramas and full ascent interactions remain. |
 
-V12 adds full floor/entity archives, actor/AI clocks, item state and gas to the existing header/trailers. V9/V10/V11 still load; missing strength starts at 10 and hunger at 0. Old HP/enemies are retained. Prior floors absent from old saves cannot be reconstructed. V9 files without spawn-room metadata cannot replenish ordinary monsters on the loaded floor. Older releases cannot load V12; its native value layouts are not a cross-platform interchange format. See [Wiki mechanics audit](wiki-mechanics-audit.md) for migration limits and outstanding mechanisms.
+V15 retains the V14 magic/entity archive and appends plant/spell actor state,
+ghost equipment, Cleric progression, spellbook order and Trinity imprints.
+Ghosts, light allies and nearby prismatic guards carry across stairs; stasis
+and life-link ownership are remapped to the destination actor indices. Ordinary
+mirror images stay on their original floor. V9–V14 still load. Missing strength
+starts at 10 and missing hunger at 0. Old HP and enemies are retained. V9 files
+without spawn-room metadata cannot replenish ordinary monsters on the loaded
+floor. See the [Wiki mechanics audit](wiki-mechanics-audit.md) for migration
+limits and outstanding mechanics.
 
 `bash tools/check-floor-layout.sh [path-to-upstream]` compiles the pinned v4.0.2 Java builders and terrain algorithms on the host. It compares 1,000 builder outputs with shared room descriptors, 500 patch masks and 100 maze masks. A separate oracle extracts the original room factories, budget methods and geometry methods and compares 2,000 ordinary-floor input lists (with the same initial RNG state, depth and Large flag), including room classes, size limits, sampled dimensions, door eligibility and final RNG state. This does not compare the incoming RNG state of a full game run, or the entire floor from the same run seed.
 

@@ -10,6 +10,11 @@
 #include "actor_rules.h"
 #include "shadowcaster.h"
 #include "ascent_rules.h"
+#include "artifact_rules.h"
+#include "legacy_save.h"
+#include "projectile_rules.h"
+#include "seed_rules.h"
+#include "time_bubble_rules.h"
 
 void dlog(const char* fmt, ...);
 
@@ -48,12 +53,18 @@ static int normal_roll(Game& g, int minimum, int maximum) {
   return minimum + int((first + second) * (maximum - minimum + 1) * .5f);
 }
 static int ring_bonus(const Game& g, uint8_t ring, bool buffed = true) {
+  if(g.magic_actor>=0)return 0;
   auto bonus = [&](int level, uint8_t flags) {
     if (buffed) level = g.buffed_level(level);
     return flags & IF_CURSED ? std::min(0,level-2) : level+1;
   };
   return (g.ring1 == ring ? bonus(g.ring1_level,g.ring1_flags) : 0) +
-         (g.ring2 == ring ? bonus(g.ring2_level,g.ring2_flags) : 0);
+         (g.ring2 == ring ? bonus(g.ring2_level,g.ring2_flags) : 0) +
+         (g.spell_effects.spirit_left>0 && g.spell_effects.spirit_ring==ring ?
+            bonus(g.cleric_ranks[cleric_rules::SpiritForm],IF_KNOWN) : 0);
+}
+int Game::accessory_bonus(uint8_t ring) const {
+  return ring_bonus(*this,ring);
 }
 static int absi(int v) { return v < 0 ? -v : v; }
 static int grid_distance(int x, int y, int tx, int ty) {
@@ -134,7 +145,7 @@ void Game::update_maxhp(bool boost_hp) {
 }
 
 int Game::buffed_level(int level) const {
-  return debuffs[status_rules::Degrade] ? status_rules::degraded_level(level) : level;
+  return magic_actor<0 && debuffs[status_rules::Degrade] ? status_rules::degraded_level(level) : level;
 }
 
 int Game::wand_capacity(const Item& item) const {
@@ -153,7 +164,14 @@ int Game::roll_armor() {
 
 float Game::melee_delay() const {
   return hero_rules::attack_delay(weapon,weapon_level,effective_strength())/
-      std::pow(1.09051f,ring_bonus(*this,IT_RING_FUROR))*(weapon_augment==1 ? 2.f/3.f : weapon_augment==2 ? 5.f/3.f : 1.f);
+      std::pow(1.09051f,ring_bonus(*this,IT_RING_FUROR))*(weapon_augment==1 ? 2.f/3.f : weapon_augment==2 ? 5.f/3.f : 1.f)*(spell_effects.slow>0 ? 2.f : 1.f);
+}
+
+bool Game::melee_reaches(int x,int y) const {
+  const int distance=grid_distance(px,py,x,y);
+  if(distance>melee_reach()) return false;
+  if(weapon_magic.effect!=magic_rules::Projecting) return los(px,py,x,y);
+  return distance<=1 || walkable(x,y);
 }
 
 int Game::roll_weapon(const Mob& target) {
@@ -191,32 +209,37 @@ int Game::roll_mob_damage(const Mob& mob) {
 }
 void Game::equip_ring(int idx) {
   if (idx < 0 || idx >= inv_n) return;
-  Item& it = inv[idx];
-  const uint8_t flags = it.flags | IF_CURSE_KNOWN;
-  const bool replacing = ring1!=IT_NONE && ring2!=IT_NONE;
-  if (ring1 == IT_NONE) {
-    ring1 = it.id; ring1_level = it.level;
-    ring1_flags = flags;
-    ring1_identification=it.identification;
-    remove_item(idx, 1);
-  } else if (ring2 == IT_NONE) {
-    ring2 = it.id; ring2_level = it.level;
-    ring2_flags = flags;
-    ring2_identification=it.identification;
-    remove_item(idx, 1);
-  } else {
-    if (ring1_flags & IF_CURSED) { message("诅咒让你无法取下这枚指环。"); return; }
-    uint8_t old = ring1, oldl = ring1_level;
-    const uint8_t old_flags = ring1_flags;
-    const auto old_identification=ring1_identification;
-    ring1 = it.id; ring1_level = it.level;
-    ring1_flags = flags;
-    ring1_identification=it.identification;
-    inv[idx].id = old; inv[idx].level = oldl; inv[idx].count = 1;
-    inv[idx].flags = old_flags;
-    inv[idx].identification=old_identification;
+  const Item incoming=inv[idx];
+  const bool artifact=artifact_rules::valid(incoming.id);
+  if(!artifact && item_def(incoming.id).kind!=K_RING) return;
+  if(artifact && (ring1==incoming.id || ring2==incoming.id)) {message("不能同时佩戴相同神器。");return;}
+  // Preserve the existing two accessory rows and prefer replacing a ring.
+  const bool first=ring1==IT_NONE || (ring2!=IT_NONE && !(ring1_flags&IF_CURSED) &&
+      (!artifact_rules::valid(ring1) || artifact_rules::valid(ring2) || (ring2_flags&IF_CURSED)));
+  const int slot=first ? -3 : -4;
+  Item outgoing=selection_item(slot);
+  const bool replacing=outgoing.id!=IT_NONE;
+  if(replacing && (outgoing.flags&IF_CURSED)) {message("诅咒让你无法卸下这件饰品。");return;}
+  if(outgoing.id==IT_ART_CLOAK && outgoing.magic.cooldown>0) {invis_t=0;outgoing.magic.cooldown=0;}
+  if(outgoing.id==IT_ART_HOURGLASS) freeze_left=0;
+  if(outgoing.id==IT_ART_ROSE && rose_ghost>=0 && rose_ghost<int(mobs.size())) {
+    mobs[rose_ghost].alive=false;rose_ghost=-1;
   }
-  message("你戴上了一枚指环。");
+  (first ? ring1 : ring2)=incoming.id;
+  (first ? ring1_level : ring2_level)=incoming.level;
+  (first ? ring1_flags : ring2_flags)=incoming.flags | (artifact ? IF_KNOWN : IF_CURSE_KNOWN);
+  (first ? ring1_identification : ring2_identification)=incoming.identification;
+  auto& state=first ? ring1_magic : ring2_magic;
+  state=incoming.magic;
+  if(artifact) {
+    state.aux=incoming.charges;
+    if(incoming.id==IT_ART_TOOLKIT) state.cooldown=std::pow(10-incoming.level,2);
+    artifact_generated|=1u<<artifact_rules::index(incoming.id);
+  }
+  discover_item(selection_item(slot));
+  if(replacing) inv[idx]=outgoing;
+  else remove_item(idx);
+  message(artifact ? "你佩戴了神器。" : "你戴上了一枚指环。");
   update_maxhp();
   spend_action(replacing ? 2.f : 1.f);
 }
@@ -239,6 +262,7 @@ bool Game::feature_blocking(int x, int y) const {
       case F_TOMB:
       case F_SIGN:
       case F_BARRICADE:
+      case F_KEY_WALL:
         return true;
       default:
         break;
@@ -288,7 +312,7 @@ int Game::mob_at(int x, int y) const {
 }
 int Game::item_at(int x, int y) const {
   for (size_t i = 0; i < items.size(); i++)
-    if (items[i].x == x && items[i].y == y) return (int)i;
+    if (items[i].x == x && items[i].y == y && !(item_def(items[i].id).kind==K_MISSILE && items[i].magic.aux>0)) return (int)i;
   return -1;
 }
 
@@ -314,7 +338,7 @@ void Game::message(const char* s) {
 
 void Game::recompute_fov() {
   memset(vis, 0, sizeof(vis));
-  shadowcaster::cast(px,py,fov_radius,
+  shadowcaster::cast(px,py,hero_effects.blind>0 ? 1 : fov_radius,
       [&](int x,int y) { return blocks_sight(x,y); },
       [&](int x,int y) { if (in_map(x,y)) { vis[y][x]=true; seen[y][x]|=1; } });
   if (mind_t>0) for (const Mob& mob : mobs) {
@@ -322,14 +346,34 @@ void Game::recompute_fov() {
     for (int dy=-1; dy<=1; ++dy) for (int dx=-1; dx<=1; ++dx)
       if (in_map(mob.x+dx,mob.y+dy)) vis[mob.y+dy][mob.x+dx]=true;
   }
+  auto reveal = [&](int cell) {
+    const int x=cell%MW,y=cell/MW;
+    for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)
+      if(in_map(x+dx,y+dy)) {vis[y+dy][x+dx]=true;seen[y+dy][x+dx]|=1;}
+  };
+  for(size_t i=0;i<std::min(mobs.size(),mob_effects.size());++i)
+    if(mobs[i].alive && mob_effects[i].scry>0)reveal(mobs[i].y*MW+mobs[i].x);
+  for(const auto& heap:scry_heaps)
+    if(heap.depth==floor && heap.left>0)reveal(heap.cell);
+  // Heap visibility is separate from terrain mapping/visitation (bit 4).
+  for(const auto& item:items)if(vis[item.y][item.x])seen[item.y][item.x]|=4;
+  for(const auto& f:features)if(vis[f.y][f.x] &&
+      (f.type==F_CHEST || f.type==F_CHEST_OPEN || f.type==F_CHEST_LOCKED ||
+       f.type==F_CHEST_CRYSTAL || f.type==F_TOMB || f.type==F_TOMB_USED || f.type==F_REMAINS))
+    seen[f.y][f.x]|=4;
 }
 
 bool Game::mob_sees_hero(const Mob& mob) const {
-  if (invis_t>0) return false;
+  if (invis_t>0 || time_stasis) return false;
   bool visible=false;
-  shadowcaster::cast(mob.x,mob.y,mob.type==M_EYE ? 6 : 8,
+  const int radius=mob.effects.blind>0 ? 1 : mob.type==M_EYE ? 6 : 8;
+  shadowcaster::cast(mob.x,mob.y,radius,
       [&](int x,int y) { return blocks_sight(x,y); },
       [&](int x,int y) { if (x==px && y==py) visible=true; });
+  if(visible && armor_magic.effect==magic_rules::Obfuscation && mob.ai!=Mob::Hunting) {
+    const float stealth=(1+buffed_level(armor_level)*.5f)*enchant_power();
+    return grid_distance(mob.x,mob.y,px,py)<=std::max(2,radius-int(std::round(stealth)));
+  }
   return visible;
 }
 
@@ -368,6 +412,7 @@ struct LootRoll {
   uint8_t level = 0;
   int gold = 0;
   uint8_t flags = IF_KNOWN;
+  uint8_t effect = 0;
 };
 
 static int tier_for_floor(Game& g, int floor) {
@@ -387,13 +432,12 @@ static int tier_for_floor(Game& g, int floor) {
 }
 
 // Generator.random consumes the run's category deck. Default reward draws
-// use combined weights without advancing it. Artifacts share the ring slot
-// until the native artifact catalog is available.
+// use combined weights without advancing it.
 static LootRoll roll_loot(Game& g, bool allowGold = true, bool consume = false) {
   enum { C_WEP, C_ARMOR, C_WAND, C_RING, C_POTION, C_SCROLL, C_SEED, C_STONE,
-         C_GOLD, C_MISSILE, C_COUNT };
+         C_GOLD, C_MISSILE, C_ARTIFACT, C_COUNT };
   static constexpr uint8_t weights[2][C_COUNT] = {
-      {2, 2, 1, 1, 8, 8, 1, 1, 10, 1}, {2, 1, 1, 1, 8, 8, 1, 1, 10, 2}};
+      {2, 2, 1, 1, 8, 8, 1, 1, 10, 1, 0}, {2, 1, 1, 1, 8, 8, 1, 1, 10, 2, 1}};
   static_assert(sizeof(g.loot_remaining) == C_COUNT);
   if (consume && std::none_of(g.loot_remaining, g.loot_remaining + C_COUNT,
                               [](uint8_t count) { return count != 0; })) {
@@ -408,6 +452,7 @@ static LootRoll roll_loot(Game& g, bool allowGold = true, bool consume = false) 
     if (i == C_GOLD && !allowGold) W[i] = 0;
     total += W[i];
   }
+  if(total==0) return {random_ring(g),0,0,0};
   int roll = ri(g, 0, total - 1);
   int cat = 0, acc = 0;
   for (int i = 0; i < C_COUNT; i++) {
@@ -440,24 +485,33 @@ static LootRoll roll_loot(Game& g, bool allowGold = true, bool consume = false) 
       break;
     }
     case C_SCROLL: {
-      static const uint8_t S[11] = {
+      static const uint8_t S[12] = {
           IT_SCROLL_MAP, IT_SCROLL_MAP, IT_SCROLL_TELE, IT_SCROLL_IDENTIFY,
           IT_SCROLL_CURSE, IT_SCROLL_TERROR, IT_SCROLL_LULLABY,
-          IT_SCROLL_RECHARGE, IT_SCROLL_RAGE, IT_SCROLL_CHALLENGE,
-          IT_SCROLL_TRANSMUTE};
-      r.id = S[ri(g, 0, 10)];
+          IT_SCROLL_RECHARGE, IT_SCROLL_RAGE, IT_SCROLL_MIRROR,
+          IT_SCROLL_RETRIBUTION,IT_SCROLL_TRANSMUTE};
+      r.id = S[ri(g, 0, 11)];
       break;
     }
-    case C_STONE: r.id = IT_STONE_AUG; break;
+    case C_STONE: r.id = ri(g,0,2)==0 ? IT_STONE_ENCHANT : IT_STONE_AUG; break;
     case C_RING: r.id = random_ring(g); break;
-    case C_MISSILE: r.id = (uint8_t)ri(g, IT_KNIFE, IT_JAVELIN); break;
-    case C_SEED: r.id = (uint8_t)ri(g, IT_SEED_SUNGRASS, IT_SEED_BLINDWEED); break;
+    case C_ARTIFACT:
+      r.id=g.generate_artifact();
+      if(r.id!=IT_NONE) {r.flags=ri(g,0,99)<30 ? IF_CURSED : 0;return r;}
+      r.id=random_ring(g);
+      break;
+    case C_MISSILE: {
+      const uint8_t missiles[5][3]={{IT_THROWING_SPIKE,IT_KNIFE,IT_THROWING_STONE},{IT_FISHING_SPEAR,IT_SHURIKEN,IT_THROWING_CLUB},
+        {IT_THROWING_SPEAR,IT_BOLAS,IT_KUNAI},{IT_JAVELIN,IT_TOMAHAWK,IT_BOOMERANG},{IT_TRIDENT,IT_THROWING_HAMMER,IT_FORCE_CUBE}};
+      r.id=missiles[tier_for_floor(g,floor)-1][ri(g,0,2)];break;
+    }
+    case C_SEED: r.id = seed_rules::ids[ri(g,1,11)]; break;
     default:
       r.id = IT_GOLD;
       r.gold = ri(g, 30 + floor * 10, 60 + floor * 20);
       break;
   }
-  if (item_is_equipment(r.id) || item_def(r.id).kind == K_WAND) {
+  if (item_is_equipment(r.id) || item_def(r.id).kind == K_WAND || item_def(r.id).kind==K_MISSILE) {
     const int kind = item_def(r.id).kind;
     const int denominator = kind == K_RING || kind == K_WAND ? 3 : 4;
     r.level = 0;
@@ -465,7 +519,12 @@ static LootRoll roll_loot(Game& g, bool allowGold = true, bool consume = false) 
       ++r.level;
       if (ri(g,0,4) == 0) ++r.level;
     }
-    r.flags = ri(g,0,99) < 30 ? IF_CURSED : 0;
+    const int roll_effect=ri(g,0,99);
+    r.flags = roll_effect < 30 ? IF_CURSED : 0;
+    if(kind==K_WEAPON || kind==K_ARMOR || kind==K_MISSILE) {
+      const bool cursed=(r.flags&IF_CURSED)!=0;
+      if(cursed || roll_effect>=(kind==K_ARMOR ? 85 : 90)) r.effect=g.random_enchant(kind==K_ARMOR,cursed);
+    }
   }
   return r;
 }
@@ -475,7 +534,14 @@ static void grant_loot(Game& g, const LootRoll& r) {
     gain_gold(g, r.gold);
     g.message("你找到了金币。");
   } else {
+    const int before=g.inv_n;
     g.add_item(r.id, 1, r.level, r.flags);
+    if(g.inv_n>before) g.inv[before].magic.effect=r.effect;
+    else if(!item_is_stackable(r.id)) {
+      g.items.push_back({g.px,g.py,r.id,r.level,r.flags});
+      g.items.back().magic.effect=r.effect;
+      if(artifact_rules::valid(r.id)) g.items.back().charges=artifact_rules::initial_charge(r.id,r.level);
+    }
     char b[96];
     snprintf(b, sizeof(b), "你找到了 %s", g.display_name(r.id));
     g.message(b);
@@ -743,6 +809,7 @@ static Mob make_floor_mob(Game& g, uint8_t type, int x, int y, Mob::Ai ai) {
 }
 
 static int mob_accuracy(const Game& g, const Mob& m) {
+  if(m.rose_ally)return 9+g.level;
   if (m.type == M_WRAITH) return 10 + g.floor;
   if (m.type == M_MIMIC) return 6 + g.floor;
   if (m.type == M_GOO) return (2 * m.hp <= m.maxhp ? 15 : 10)*(m.pumped_up ? 2 : 1);
@@ -751,6 +818,7 @@ static int mob_accuracy(const Game& g, const Mob& m) {
 
 static int mob_evasion(const Game& g, const Mob& m) {
   if (m.sleep_t || m.ai == Mob::Sleeping) return 0;
+  if(m.rose_ally)return 4+g.level;
   if (m.type == M_WRAITH) return 5 * mob_accuracy(g, m);
   if (m.type == M_MIMIC) return 2 + g.floor / 2;
   const int base = mob_def(m.type).evasion;
@@ -826,6 +894,8 @@ bool Game::try_respawn() {
 // ---------------------------------------------------------------------------
 void Game::gen_level() {
   toxic_gas.clear();
+  mob_effects.clear();
+  rose_ghost=-1;
   map_width = map_height = LEGACY_MAP_SIZE;
   hero_combat = {};
   combat_fx.clear();
@@ -1268,6 +1338,7 @@ void Game::gen_level() {
     if (x < 1 || y < 1 || x >= MW - 1 || y >= MH - 1) return;
     items.push_back({x, y, id, (int16_t)level, flags});
     if(item_def(id).kind==K_WAND) items.back().charges=std::min(10,(id==IT_WAND_MAGIC ? 3 : 2)+level);
+    else if(artifact_rules::valid(id)) items.back().charges=artifact_rules::initial_charge(id,level);
   };
   auto add_random_item = [&](const GRoom& r, uint8_t id, int level = 0) {
     auto p = room_cell(r);
@@ -1277,11 +1348,13 @@ void Game::gen_level() {
   auto place_loot = [&](int x, int y, const LootRoll& loot, int container = -1) {
     if (container < 0) {
       add_item_at(x, y, loot.id, loot.id == IT_GOLD ? loot.gold : loot.level, loot.flags);
+      items.back().magic.effect=loot.effect;
     } else {
       Feature f;
       f.x = x; f.y = y; f.type = container;
       f.loot_id = loot.id; f.loot_level = loot.level; f.loot_gold = loot.gold;
       f.loot_flags = loot.flags;
+      f.loot_effect=loot.effect;
       features.push_back(f);
     }
   };
@@ -1663,9 +1736,21 @@ void Game::gen_level() {
     uint8_t guaranteed = plan_guaranteed[floor - 1];
     if (guaranteed & 1) supply(IT_POTION_STR);
     if (guaranteed & 2) supply(IT_SCROLL_UP);
+    if(floor>1 && floor%4==2) supply(IT_ARCANE_STYLUS);
+    if(floor==7 || floor==12 || floor==17 || floor==22) supply(IT_SCROLL_ENCHANT);
     int itemRoll = ri(*this, 0, 99);
     int nItems = 3 + (itemRoll < 60 ? 0 : (itemRoll < 90 ? 1 : 2)) + (large ? 2 : 0);
     for (int i = 0; i < nItems; i++) add_floor_item(roll_loot(*this, true, true));
+    auto artifact_material=[&](uint8_t id,uint8_t material,int desired) {
+      auto place=[&](magic_rules::State& state) {
+        if(state.aux2<desired && supply(material)) ++state.aux2;
+      };
+      if(ring1==id) place(ring1_magic);
+      else if(ring2==id) place(ring2_magic);
+      else for(int i=0;i<inv_n;++i) if(inv[i].id==id) {place(inv[i].magic);break;}
+    };
+    artifact_material(IT_ART_ROSE,IT_ROSE_PETAL,std::min(10,floor/2));
+    artifact_material(IT_ART_HOURGLASS,IT_HOURGLASS_SAND,std::min(5,floor/4));
   }
 
   cursor_x = px;
@@ -1775,6 +1860,20 @@ void Game::new_run(int hero_class, uint32_t s) {
   ring1 = ring2 = IT_NONE;
   ring1_level = ring2_level = 0;
   weapon_flags = armor_flags = ring1_flags = ring2_flags = IF_KNOWN;
+  weapon_magic={};armor_magic={};ring1_magic={};ring2_magic={};hero_effects={};
+  deferred_damage=kinetic_damage=freeze_left=0;artifact_generated=0;alchemy_energy=0;
+  artifact_targeting=artifact_brewing=time_stasis=false;rose_ghost=-1;
+  spell_effects={};mob_effects.clear();scry_heaps.clear();bubble_presses.clear();rose_weapon={};rose_armor={};rose_command=rose_enemy=-1;projectile_serial=1;artifact_feed_slot=0;
+  std::fill_n(cleric_ranks,cleric_rules::Count,0);cleric_subclass=cleric_ability=0;
+  cleric_lance_cooldown=cleric_priest_cooldown=link_left=stasis_left=0;linked_ally=stasis_ally=-1;
+  book_scroll=IT_NONE;book_empowered=inscription_replay=false;cleric_page=0;
+  magic_actor=-1;init_spellbook();
+  magic_hero_cell=-1;pending_ally_experience.clear();pending_ally_blasts.clear();
+  carried_allies.clear();
+  recalled_item=IT_NONE;recall_left=0;extra_proc=virtual_projectile=returning_projectile=false;form_item={};
+  trinity_body={};trinity_mind={};trinity_spirit={};trinity_spell=-1;trinity_options.clear();
+  std::fill_n(discovered_items,IT_COUNT,false);discovered_enchants=discovered_glyphs=0;
+  armor_charge=100;ascended_left=0;ascended_casts=ascended_flashes=0;powered_ally=-1;divine_used=false;
   weapon_augment=armor_augment=0;
   weapon_identification={};armor_identification={0.f,5.f};
   ring1_identification=ring2_identification={};
@@ -1805,6 +1904,10 @@ void Game::new_run(int hero_class, uint32_t s) {
   add_item(IT_POTION_HEAL, 2);
   add_item(IT_FOOD_RATION, 1);
   add_item(IT_WATERSKIN);
+  if(hero_class==2 || hero_class==5) {
+    ring1=hero_class==2 ? IT_ART_CLOAK : IT_ART_TOME;
+    ring1_magic.aux=artifact_rules::initial_charge(ring1);
+  }
   targeting = false;
   dead = false;
   won = false;
@@ -1842,6 +1945,7 @@ bool Game::identity_known(uint8_t id) const {return id<IT_COUNT && type_known[id
 void Game::identify_type(uint8_t id) {if(id<IT_COUNT) type_known[id]=true;}
 
 const char* Game::display_name(uint8_t id) const {
+  if(id>=IT_COUNT) return item_name(IT_NONE);
   if(!item_random_identity(id) || identity_known(id)) return item_name(id);
   static const char* colors[]={"赤红药水","琥珀药水","碧绿药水","乳白药水","天蓝药水","靛蓝药水","紫色药水","银色药水","黑色药水","棕色药水","金色药水"};
   static const char* runes[]={"符文KA卷轴","符文SO卷轴","符文RA卷轴","符文ZU卷轴","符文NA卷轴","符文TI卷轴","符文WO卷轴","符文PE卷轴","符文LA卷轴","符文MI卷轴","符文DU卷轴"};
@@ -1852,6 +1956,7 @@ const char* Game::display_name(uint8_t id) const {
 }
 
 int Game::display_sprite(uint8_t id) const {
+  if(id>=IT_COUNT) return item_def(IT_NONE).sprite;
   if(!item_random_identity(id) || id==IT_SCROLL_UP) return item_def(id).sprite;
   const auto& d=item_def(id);const int index=appearances[id];
   const int scroll_sprites[]={304,306,307,308,309,310,311,312,313,314};
@@ -1863,14 +1968,23 @@ void Game::describe_item(const Item& item,char* out,size_t size) const {
     snprintf(out,size,"%s\n尚未鉴定，类型和作用未知。",display_name(item.id));return;
   }
   const auto& d=item_def(item.id);
-  if((item_is_equipment(item.id) || d.kind==K_WAND) && !(item.flags&IF_IDENTIFIED)) {
+  if((item_is_equipment(item.id) || d.kind==K_WAND || d.kind==K_MISSILE) && !(item.flags&IF_IDENTIFIED)) {
     snprintf(out,size,"%s\n%s\n升级情况未知，诅咒%s。",display_name(item.id),d.desc,
         item.flags&IF_CURSE_KNOWN ? (item.flags&IF_CURSED ? "已确认" : "不存在") : "情况未知");
+  } else if(d.kind==K_ARTIFACT) {
+    snprintf(out,size,"%s +%d\n%s\n充能 %d/%d%s",d.name,item.level,d.desc,item.charges,
+        artifact_rules::capacity(item.id,item.level),item.flags&IF_CURSED ? " · 受诅咒" : "");
   } else if(d.kind==K_WEAPON) {
     const auto range=hero_rules::weapon_range(item.id,item.level,effective_strength(),false);
     snprintf(out,size,"%s +%d\n%s\n伤害 %d–%d，力量需求 %d\n%s",display_name(item.id),item.level,d.desc,
         range.min,range.max,hero_rules::strength_requirement(item.id,item.level),
         item.flags&IF_CURSED ? "已鉴定：受到诅咒。" : "已鉴定：无诅咒。");
+  } else if(d.kind==K_MISSILE) {
+    const auto range=projectile_rules::damage(item.id,buffed_level(item.level)+accessory_bonus(IT_RING_SHARPSHOOTING),false,
+        weapon==IT_CROSSBOW ? buffed_level(weapon_level) : -1);
+    const float wear=projectile_rules::durability_cost(item.id,item.level,accessory_bonus(IT_RING_SHARPSHOOTING),item.augment,item.magic.effect);
+    snprintf(out,size,"%s +%d\n伤害 %d–%d，力量需求 %d\n耐久 %.1f/100，每次命中消耗 %.2f\n数量 %d",d.name,item.level,
+        range.min,range.max,projectile_rules::strength(item.id,item.level),item.magic.durability,wear,item.count);
   } else if(d.kind==K_ARMOR) {
     const auto range=hero_rules::armor_range(item.id,item.level,item.augment);
     snprintf(out,size,"%s +%d\n%s\n减伤 %d–%d，力量需求 %d\n%s",display_name(item.id),item.level,d.desc,
@@ -1881,17 +1995,42 @@ void Game::describe_item(const Item& item,char* out,size_t size) const {
         item.flags&IF_CURSED ? "已鉴定：受到诅咒。" : "已鉴定：无诅咒。");
   } else if(item.id==IT_WATERSKIN) snprintf(out,size,"水袋 %d/20\n%s",item.charges,d.desc);
   else snprintf(out,size,"%s\n%s",display_name(item.id),d.desc);
+  const auto effect=item.magic.effect;
+  const bool weapon_item=d.kind==K_WEAPON || d.kind==K_MISSILE;
+  const bool cursed=weapon_item ? magic_rules::curse_enchant(effect) : magic_rules::curse_glyph(effect);
+  if((weapon_item || d.kind==K_ARMOR) && effect && (!cursed || (item.flags&IF_CURSE_KNOWN))) {
+    const size_t used=strlen(out);
+    if(used<size) snprintf(out+used,size-used,"\n%s：%s",weapon_item ? "附魔" : "刻印",
+        weapon_item ? magic_rules::enchant_name(effect) : magic_rules::glyph_name(effect));
+  }
 }
 
 void Game::trample_grass(int x,int y,bool hero_step) {
   if(!in_map(x,y) || tiles[y][x]!=T_HIGH_GRASS || (hero_step && levit_t)) return;
   tiles[y][x]=T_GRASS;
-  // Base HighGrass rates without talents, artifacts or trinkets.
-  if(ri(*this,0,24)==0) {
-    const uint8_t seeds[]={IT_SEED_SUNGRASS,IT_SEED_FIREBLOOM,IT_SEED_BLINDWEED};
-    items.push_back({x,y,seeds[ri(*this,0,2)]});
+  int naturalism=0;
+  if(hero_step) {
+    if(armor_magic.effect==magic_rules::Camouflage)
+      invis_t=std::max(int(invis_t),std::clamp(int(std::lround((3+buffed_level(armor_level)*.5f)*enchant_power())),1,255));
+    for(int slot : {-3,-4}) {
+      const auto item=selection_item(slot);
+      if(item.id==IT_ART_SANDALS && !(item.flags&IF_CURSED)) {
+        naturalism=item.level+1;
+        auto& state=slot==-3 ? ring1_magic : ring2_magic;
+        state.stored+=(3.f+2*item.level)/6*std::pow(1.175f,accessory_bonus(IT_RING_ENERGY));
+        while(state.stored>=1 && state.aux<100){++state.aux;--state.stored;}
+        if(state.aux>=100)state.stored=0;
+      }
+      if(item.id==IT_ART_SANDALS && (item.flags&IF_CURSED))naturalism=-1;
+    }
   }
-  if(ri(*this,0,floor<=25 && plan_feeling[floor-1]==2 ? 11 : 5)==0)
+  if(naturalism>=0 && combat_roll(*this)<1.f/(25-naturalism*4)) {
+    const uint8_t ordinary[]={IT_SEED_SUNGRASS,IT_SEED_FADELEAF,IT_SEED_ICECAP,IT_SEED_FIREBLOOM,IT_SEED_SORROWMOSS,
+      IT_SEED_SWIFTTHISTLE,IT_SEED_BLINDWEED,IT_SEED_STORMVINE,IT_SEED_EARTHROOT,IT_SEED_MAGEROYAL};
+    const int roll=ri(*this,0,20);
+    items.push_back({x,y,roll==20 ? uint8_t(IT_SEED_STARFLOWER) : ordinary[roll/2]});
+  }
+  if(naturalism>=0 && combat_roll(*this)<1.f/(6-naturalism/2.f)*(floor<=25 && plan_feeling[floor-1]==2 ? .5f : 1.f))
     items.push_back({x,y,IT_DEWDROP});
   if(hero_step) message("你拨开了高草。");
 }
@@ -1899,7 +2038,7 @@ void Game::trample_grass(int x,int y,bool hero_step) {
 void Game::search_button() {
   clear_path();
   if(examining) {examining=false;search();}
-  else {examining=true;targeting=false;message("查看模式：A 查看，B 退出，再按搜索探索周围。");}
+  else {examining=true;targeting=artifact_targeting=false;message("查看模式：A 查看，B 退出，再按搜索探索周围。");}
 }
 
 void Game::examine_at(int x,int y) {
@@ -1914,7 +2053,7 @@ void Game::examine_at(int x,int y) {
   }
   if(vis[y][x] && item>=0) {
     Item value;value.id=items[item].id;value.level=items[item].level;value.flags=items[item].flags;
-    value.charges=items[item].charges;describe_item(value,description,sizeof(description));
+    value.charges=items[item].charges;value.magic=items[item].magic;describe_item(value,description,sizeof(description));
     open_dialog(23,"地面物品",description,"关闭 (A)","关闭 (B)");return;
   }
   if(vis[y][x] && feature>=0 && features[feature].type!=F_TRAP) {
@@ -1952,7 +2091,7 @@ void Game::add_item(uint8_t id, int count, int level, uint8_t flags) {
   const ItemDef& d = item_def(id);
   if (item_is_stackable(id)) {
     for (int i = 0; i < inv_n; i++) {
-      if (inv[i].id == id) {
+      if (inv[i].id == id && (d.kind!=K_MISSILE || (projectile_rules::dart(id) && inv[i].level==level && inv[i].flags==flags && !inv[i].magic.effect))) {
         inv[i].count = (uint8_t)std::min(99, inv[i].count + count);
         return;
       }
@@ -1965,8 +2104,11 @@ void Game::add_item(uint8_t id, int count, int level, uint8_t flags) {
   it.level = (uint8_t)level;
   it.charges = d.kind == K_WAND ? std::min(10,(id==IT_WAND_MAGIC ? 3 : 2)+level) : 0;
   it.flags = flags;
+  if(d.kind==K_MISSILE && !projectile_rules::dart(id))it.magic.aux2=projectile_serial++;
+  if(d.kind==K_ARTIFACT) {it.charges=artifact_rules::initial_charge(id,level);it.magic.aux=it.charges;}
   if(d.kind==K_ARMOR || d.kind==K_WAND) it.identification.available=5.f;
   inv[inv_n++] = it;
+  discover_item(it);
 }
 
 void Game::equip_item(int idx) {
@@ -1984,7 +2126,8 @@ void Game::equip_item(int idx) {
     weapon_level = it.level;
     weapon_flags = it.flags | IF_CURSE_KNOWN;
     weapon_augment=it.augment;
-    weapon_identification=it.identification;
+  weapon_identification=it.identification;
+    const auto old_magic=weapon_magic;weapon_magic=it.magic;
     char b[96];
     snprintf(b, sizeof(b), "装备了 %s", item_def(weapon).name);
     message(b);
@@ -1994,6 +2137,7 @@ void Game::equip_item(int idx) {
     inv[idx].flags = old_flags;
     inv[idx].augment=old_augment;
     inv[idx].identification=old_identification;
+    inv[idx].magic=old_magic;
     if (old == IT_NONE) remove_item(idx, 1);
   } else if (kind == K_ARMOR) {
     if (armor_flags & IF_CURSED) { message("诅咒让你无法脱下这件护甲。"); return; }
@@ -2006,6 +2150,7 @@ void Game::equip_item(int idx) {
     armor_flags = it.flags | IF_CURSE_KNOWN;
     armor_augment=it.augment;
     armor_identification=it.identification;
+    const auto old_magic=armor_magic;armor_magic=it.magic;
     char b[96];
     snprintf(b, sizeof(b), "穿上了 %s", item_def(armor).name);
     message(b);
@@ -2015,12 +2160,18 @@ void Game::equip_item(int idx) {
     inv[idx].flags = old_flags;
     inv[idx].augment=old_augment;
     inv[idx].identification=old_identification;
+    inv[idx].magic=old_magic;
     if (old == IT_NONE) remove_item(idx, 1);
   }
   spend_action(replacing ? 2.f : 1.f);
 }
 
 void Game::use_item(int idx) {
+  if(idx>=0 && idx<inv_n && inv[idx].id==IT_ART_TOME && cleric_ranks[cleric_rules::LightReading]){tome_menu();return;}
+  if(idx>=0 && idx<inv_n && (inv[idx].id==IT_ROSE_PETAL || inv[idx].id==IT_HOURGLASS_SAND)) {
+    message("在已佩戴的神器菜单中使用培养材料。");return;
+  }
+  if(idx>=0 && idx<inv_n && item_def(inv[idx].id).kind==K_ARTIFACT) {equip_ring(idx);return;}
   if(idx>=0 && idx<inv_n && inv[idx].id==IT_WATERSKIN) {
     auto& flask=inv[idx];
     if(!flask.charges) {message("水袋空了。");return;}
@@ -2031,9 +2182,19 @@ void Game::use_item(int idx) {
   if (idx < 0 || idx >= inv_n) return;
   Item& it = inv[idx];
   const ItemDef& d = item_def(it.id);
+  if(item_is_exotic(it.id) && it.id!=IT_SCROLL_ENCHANT) {
+    const uint8_t id=it.id;
+    if(id==IT_SCROLL_SIREN){magic_target=-1;book_scroll=id;book_empowered=false;targeting=artifact_targeting=true;backpack=false;return;}
+    if(!scroll_effect(id)){message("当前无法使用这张卷轴。");return;}
+    remember_inscription(id);remove_item(idx);dispel_action();spend_action(1);return;
+  }
   if(d.kind==K_USE && item_random_identity(it.id)) identify_type(it.id);
+  if(d.cat==CAT_SCROLL && it.id!=IT_SCROLL_UP && it.id!=IT_SCROLL_IDENTIFY && it.id!=IT_SCROLL_CURSE && it.id!=IT_SCROLL_TRANSMUTE && it.id!=IT_SCROLL_ENCHANT && it.id!=IT_SCROLL_CHALLENGE) {
+    const uint8_t id=it.id;if(!scroll_effect(id))return;remember_inscription(id);remove_item(idx);dispel_action();spend_action(1);return;
+  }
   if (it.id == IT_SCROLL_UP || it.id == IT_SCROLL_IDENTIFY ||
-      it.id == IT_SCROLL_CURSE || it.id == IT_SCROLL_TRANSMUTE || it.id==IT_STONE_AUG) {
+      it.id == IT_SCROLL_CURSE || it.id == IT_SCROLL_TRANSMUTE || it.id==IT_STONE_AUG ||
+      it.id==IT_STONE_ENCHANT || it.id==IT_SCROLL_ENCHANT || it.id==IT_ARCANE_STYLUS) {
     selection_scroll = it.id;
     int eligible = 0;
     for (int i = -4; i < inv_n; ++i) eligible += can_select_item(i);
@@ -2048,8 +2209,9 @@ void Game::use_item(int idx) {
         return;
       }
       if (it.id == IT_POTION_HEAL) {
-        debuffs[status_rules::Poison] = debuffs[status_rules::Cripple] = 0;
-        debuffs[status_rules::Weakness] = debuffs[status_rules::Vulnerable] = 0;
+        seed_rules::cure(hero_effects, spell_effects);
+        for(int type:{status_rules::Poison,status_rules::Cripple,status_rules::Weakness,status_rules::Vulnerable})
+          debuffs[type]=0;
         healing_left = std::max(healing_left, int(.8f * maxhp + 14));
         message("你喝下治疗药水。");
       } else if (it.id == IT_POTION_STR) {
@@ -2122,6 +2284,7 @@ void Game::use_item(int idx) {
         }
         message(it.id == IT_SCROLL_TERROR ? "敌人陷入恐惧！" : "敌人陷入沉睡。");
       } else if (it.id == IT_SCROLL_RECHARGE) {
+        artifact_charge(4);
         for (int i = 0; i < inv_n; i++)
           if (item_def(inv[i].id).kind == K_WAND)
             inv[i].charges = std::min<int>(wand_capacity(inv[i]),
@@ -2145,28 +2308,13 @@ void Game::use_item(int idx) {
       break;
     case K_FOOD:
       hunger = std::max(0, hunger - hero_rules::food_energy(it.id));
+      cleric_food();
       message("你吃了一些食物。");
       remove_item(idx, 1);
       for (int turn = 0; turn < 3 && !dead && !dialog; ++turn) advance_turn();
       return;
     case K_SEED:
-      if (it.id == IT_SEED_SUNGRASS) {
-        hp = std::min(maxhp, hp + d.power);
-        message("阳草治愈了你的伤口。");
-      } else if (it.id == IT_SEED_FIREBLOOM) {
-        for (size_t i = 0; i < mobs.size(); i++)
-          if (mobs[i].alive && !is_npc(mobs[i].type) &&
-              absi(mobs[i].x - px) <= 2 && absi(mobs[i].y - py) <= 2)
-            damage_mob((int)i, d.power + floor / 3);
-        message("火焰花在脚下爆开！");
-      } else if (it.id == IT_SEED_BLINDWEED) {
-        for (Mob& m : mobs)
-          if (m.alive && !is_npc(m.type) && absi(m.x - px) <= 4 &&
-              absi(m.y - py) <= 4)
-            m.sleep_t = 12;
-        message("致盲花粉让敌人昏昏欲睡。");
-      }
-      break;
+      plant_seed(idx,py*MW+px);return;
     case K_WAND:
       if (it.charges == 0) { message("法杖还没有充能。"); return; }
       targeting = !targeting;
@@ -2337,6 +2485,7 @@ void Game::cast_wand(int idx, int tx, int ty) {
       break;
   }
   it.charges--;
+  dispel_action();
   it.flags|=IF_CURSE_KNOWN;
   identify_use(it.flags,it.identification,10.f);
   combat_delay = 0;
@@ -2377,7 +2526,14 @@ void Game::use_feature(int idx) {
         gain_gold(*this, f.loot_gold);
         message("箱子里装满了金币。");
       } else if (f.loot_id != IT_NONE) {
+        const int before=inv_n;
         add_item(f.loot_id, 1, f.loot_level, f.loot_flags);
+        if(inv_n>before) inv[before].magic.effect=f.loot_effect;
+        else if(!item_is_stackable(f.loot_id)) {
+          items.push_back({f.x,f.y,f.loot_id,f.loot_level,f.loot_flags});
+          items.back().magic.effect=f.loot_effect;
+          if(artifact_rules::valid(f.loot_id)) items.back().charges=artifact_rules::initial_charge(f.loot_id,f.loot_level);
+        }
         char b[96];
         snprintf(b, sizeof(b), "你找到了 %s", display_name(f.loot_id));
         message(b);
@@ -2385,6 +2541,7 @@ void Game::use_feature(int idx) {
         give_loot(tier, true);
       }
       f.loot_id = IT_NONE;
+      f.loot_effect = 0;
       f.loot_gold = 0;
       if (f.type == F_REMAINS) features.erase(features.begin() + idx);
       else f.type = F_CHEST_OPEN;
@@ -2401,6 +2558,8 @@ void Game::use_feature(int idx) {
       message("这里没有可以交互的东西。");
       break;
     case F_ALCHEMY:
+      if(!f.state) {alchemy_energy+=6;f.state=1;}
+      artifact_brewing=false;
       alchemy_open = true;
       alchemy_sel = 0;
       break;
@@ -2418,6 +2577,10 @@ void Game::use_feature(int idx) {
       advance_turn();
       break;
     case F_PLANT:
+      if(seed_rules::index(f.aux)>=0) {
+        const uint8_t seed=f.aux;const int cell=f.y*MW+f.x;
+        features.erase(features.begin()+idx);seed_effect(seed,cell);break;
+      }
       hp = std::min(maxhp, hp + 6);
       features.erase(features.begin() + idx);
       message("你吃下植物，恢复了少量生命。");
@@ -2495,6 +2658,12 @@ void Game::trigger_trap(int idx, Mob* who) {
   if (f.type != F_TRAP_FOUND && (f.type != F_TRAP || who)) return;
   if ((who && (who->type == M_BAT || who->type == M_SWARM || who->type == M_WRAITH ||
                who->type == M_EYE)) || (!who && levit_t > 0)) return;
+  if (spell_effects.bubble_active) {
+    f.type = F_TRAP_FOUND;
+    const int cell=f.y*MW+f.x;
+    if(std::find(bubble_presses.begin(),bubble_presses.end(),cell)==bubble_presses.end())bubble_presses.push_back(cell);
+    return;
+  }
   const TrapKind kind = trap_kind(f);
   const int x = f.x, y = f.y;
   f.type = F_TRAP_DISARMED;
@@ -2530,6 +2699,7 @@ void Game::trigger_trap(int idx, Mob* who) {
     if (who) who->sleep_t = std::max<uint8_t>(who->sleep_t, 2);
     else haste_t = 0;
   } else if (kind == TR_FIRE) {
+    if(!who && armor_magic.effect==magic_rules::Brimstone) return;
     raw = 5 + floor / 3;
   } else if (kind == TR_SHOCK) {
     raw = 4 + floor / 3;
@@ -2547,6 +2717,11 @@ void Game::trigger_trap(int idx, Mob* who) {
 void Game::trigger_tile_features() {
   const int idx = feature_at(px, py);
   if (idx < 0) return;
+  if(spell_effects.bubble_active && features[idx].type==F_PLANT) {
+    const int cell=py*MW+px;
+    if(std::find(bubble_presses.begin(),bubble_presses.end(),cell)==bubble_presses.end())bubble_presses.push_back(cell);
+    return;
+  }
   if (features[idx].type == F_PLANT) use_feature(idx);
   else trigger_trap(idx);
 }
@@ -2686,6 +2861,10 @@ void Game::alchemy_brew(int recipe) {
   int have = 0;
   for (int i = 0; i < inv_n; i++)
     if (inv[i].id == NEED[recipe]) have += inv[i].count;
+  auto& toolkit=ring1==IT_ART_TOOLKIT ? ring1_magic : ring2_magic;
+  if(artifact_brewing && (!has_artifact(IT_ART_TOOLKIT) || toolkit.aux<1)) {
+    message("炼金工具箱至少需要 1 点充能。");return;
+  }
   if (have < 3) { message("材料不足，需要 3 个同类种子。"); return; }
   int need = 3;
   for (int i = inv_n - 1; i >= 0 && need > 0; i--) {
@@ -2695,6 +2874,7 @@ void Game::alchemy_brew(int recipe) {
     need -= take;
   }
   add_item(OUT[recipe], 1, 0);
+  if(artifact_brewing) --toolkit.aux;
   message("炼金成功！");
 }
 
@@ -2800,6 +2980,17 @@ void Game::talk_npc(int idx) {
 void Game::pick_item(int idx) {
   if(idx<0 || idx>=int(items.size())) return;
   FloorItem fi = items[idx];
+  if(item_def(fi.id).kind==K_MISSILE) {
+    if(fi.magic.aux!=0)return;
+    Item projectile;projectile.id=fi.id;projectile.level=fi.level;projectile.flags=fi.flags;
+    projectile.magic=fi.magic;projectile.augment=fi.augment;projectile.identification=fi.identification;
+    if(!projectile.magic.aux2 && !projectile_rules::dart(fi.id))projectile.magic.aux2=projectile_serial++;
+    for(int i=0;i<inv_n;++i)if(inv[i].count<99 && missile_similar(inv[i],projectile)) {
+      ++inv[i].count;items.erase(items.begin()+idx);return;
+    }
+    if(inv_n>=bag_capacity()){message("背包满了！");return;}
+    inv[inv_n++]=projectile;items.erase(items.begin()+idx);return;
+  }
   if(fi.id==IT_DEWDROP) {
     for(int i=0;i<inv_n;++i) if(inv[i].id==IT_WATERSKIN && inv[i].charges<20) {
       ++inv[i].charges;items.erase(items.begin()+idx);message("你将露珠收集进了水袋。");return;
@@ -2841,12 +3032,14 @@ void Game::pick_item(int idx) {
   }
   const int before=inv_n;
   add_item(fi.id, 1, fi.level, fi.flags);
-  if(inv_n>before && (item_def(fi.id).kind==K_WAND || fi.id==IT_WATERSKIN)) {
+  if(inv_n>before && (item_def(fi.id).kind==K_WAND || fi.id==IT_WATERSKIN || artifact_rules::valid(fi.id))) {
     inv[inv_n-1].charges=fi.charges;
     inv[inv_n-1].partial_charge=fi.partial_charge;
   }
   if(inv_n>before) inv[inv_n-1].augment=fi.augment;
   if(inv_n>before) inv[inv_n-1].identification=fi.identification;
+  if(inv_n>before) inv[inv_n-1].magic=fi.magic;
+  if(inv_n>before) discover_item(inv[inv_n-1]);
   char b[96];
   snprintf(b, sizeof(b), "拾取了 %s", display_name(fi.id));
   message(b);
@@ -2863,8 +3056,11 @@ void Game::close_door_if_clear(int x, int y) {
 }
 
 void Game::move_player(int dx, int dy) {
+  if(hero_effects.paralysis>0 || spell_effects.magical_sleep){spend_action(1);return;}
+  if(hero_effects.roots>0) {message("你被缠住了，暂时无法移动。");clear_path();return;}
   if (dead || (!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
   int nx = px + dx, ny = py + dy;
+  if(spell_effects.vertigo>0){dx=ri(*this,-1,1);dy=ri(*this,-1,1);nx=px+dx;ny=py+dy;}
   if (!in_map(nx, ny)) return;
   if (feature_blocking(nx, ny)) return;
   if (tiles[ny][nx] == T_DOOR) {
@@ -2887,8 +3083,10 @@ void Game::move_player(int dx, int dy) {
   int m = mob_at(nx, ny);
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
+    if (mobs[m].effects.ally) { message("这是你的盟友。"); return; }
+    const float delay=melee_delay();
     attack(m, false);
-    spend_action(melee_delay());
+    spend_action(delay);
     return;
   }
   pvx = (float)px; pvy = (float)py;
@@ -2903,12 +3101,7 @@ void Game::move_player(int dx, int dy) {
   trigger_tile_features();
   if (dead) return;
   if (tiles[py][px]==T_STAIRS || tiles[py][px]==T_STAIRS_UP) transition_prompt();
-  float delay = hero_rules::movement_delay(armor,armor_level,effective_strength());
-  delay /= std::pow(1.175f, ring_bonus(*this, IT_RING_HASTE));
-  if (haste_t > 0) delay /= 3.f;
-  if (debuffs[status_rules::Cripple]) delay *= 2.f;
-  if (ascending && ascent_stacks>=6.f) delay=std::max(1.f,delay*2.f);
-  spend_action(delay);
+  spend_action(movement_cost());
 }
 
 void Game::combat_strike(CombatPose& pose, int x, int y, int tx, int ty,
@@ -2928,9 +3121,25 @@ void Game::combat_hit(CombatPose& pose, int x, int y, int damage) {
 }
 
 void Game::take_damage(int damage, bool bypass_shield) {
+  if(magic_actor>=0 && magic_actor<int(mobs.size())) {
+    auto& ally=mobs[magic_actor];ally.hp=std::max(0,ally.hp-std::max(0,damage));hp=ally.hp;
+    if(!ally.hp)ally.alive=false;
+    return;
+  }
+  if(time_stasis) return;
+  if(damage>0){spell_effects.drowsy=0;spell_effects.magical_sleep=false;}
+  if(spell_effects.earth>0 && spell_effects.earth_anchor==py*MW+px) {
+    damage=seed_rules::absorb(spell_effects.earth,damage,floor);
+  }
   if (dead) return;
+  if(link_left>0 && linked_ally>=0 && linked_ally<int(mobs.size()) && mobs[linked_ally].alive && !extra_proc && damage>0) {
+    const int shared=(damage+1)/2;extra_proc=true;damage_mob(linked_ally,shared);extra_proc=false;damage-=shared;
+  }
   if(!bypass_shield && damage>0 && ring_bonus(*this,IT_RING_TENACITY)!=0)
     damage=int(std::floor(damage*std::pow(.85f,ring_bonus(*this,IT_RING_TENACITY)*float(maxhp-hp)/maxhp)+.5f));
+  if(spell_effects.divine>0 && damage>0){int block=std::min(damage,int(spell_effects.divine));damage-=block;spell_effects.divine-=block;}
+  if(spell_effects.aura>0)damage=int(std::lround(damage*(1-(10+10*spell_effects.aura_rank)/100.f)));
+  if(spell_effects.arena>0 && grid_distance(px,py,spell_effects.arena_cell%MW,spell_effects.arena_cell/MW)<=2)damage=int(std::lround(damage*.67f));
   const int absorbed = bypass_shield ? 0 : std::min(shield, std::max(0, damage));
   shield -= absorbed;
   const int loss = std::clamp(damage - absorbed, 0, hp);
@@ -2952,7 +3161,7 @@ void Game::take_damage(int damage, bool bypass_shield) {
   clear_path();
 }
 
-void Game::damage_mob(int idx, int raw, DamageKind kind) {
+void Game::damage_mob(int idx, int raw, DamageKind kind, int enchantment) {
   if (idx < 0 || idx >= (int)mobs.size()) return;
   Mob& m = mobs[idx];
   if (!m.alive) return;
@@ -2979,6 +3188,20 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
   }
   const int reduction = kind == DamageKind::Physical ? int(std::floor(damage_reduction(*this, m.def)*mob_modifier(m)+.5f)) : 0;
   int dmg = std::max(0, raw - reduction);
+  if(dmg>0){actor_effects(idx).drowsy=0;actor_effects(idx).magical_sleep=false;m.sleep_t=0;}
+  if(link_left>0 && idx==linked_ally && !extra_proc && dmg>0){const int shared=(dmg+1)/2;extra_proc=true;take_damage(shared);extra_proc=false;dmg-=shared;}
+  if(spell_effects.arena>0 && grid_distance(px,py,spell_effects.arena_cell%MW,spell_effects.arena_cell/MW)<=2 && !m.effects.ally)dmg=int(std::lround(dmg*1.33f));
+  if(m.rose_ally && kind==DamageKind::Physical) {
+    const auto armor_range=hero_rules::armor_range(rose_armor.id,rose_armor.level,rose_armor.augment);
+    const auto weapon_range=hero_rules::weapon_defense(rose_weapon.id,rose_weapon.level);
+    dmg=std::max(0,dmg-normal_roll(*this,armor_range.min,armor_range.max)-normal_roll(*this,weapon_range.min,weapon_range.max));
+  }
+  auto& plant_effect=actor_effects(idx);
+  if(plant_effect.divine>0 && dmg>0){const int block=std::min(dmg,int(plant_effect.divine));dmg-=block;plant_effect.divine-=block;}
+  if(plant_effect.shield>0 && dmg>0){int block=std::min(dmg,int(plant_effect.shield));dmg-=block;plant_effect.shield-=block;}
+  if(plant_effect.earth>0 && plant_effect.earth_anchor==m.y*MW+m.x) {
+    dmg=seed_rules::absorb(plant_effect.earth,dmg,floor);
+  }
   if(m.type==M_SLIME) {
     const float scale=mob_modifier(m),amount=dmg/scale;
     if(amount>=5.f) dmg=int((4.f+(std::sqrt(8.f*(amount-4.f)+1.f)-1.f)/2.f)*scale);
@@ -2988,8 +3211,10 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
     const int absorbed=std::min(m.rage_shield,dmg);
     m.rage_shield-=absorbed;dmg-=absorbed;
   }
+  if(enchantment) dmg=weapon_final_damage(m,dmg,enchantment);
   dmg = std::min(dmg, m.hp);
   m.hp -= dmg;
+  if(idx==magic_actor)hp=m.hp;
   combat_hit(m.combat, m.x, m.y, dmg);
   char b[96];
   snprintf(b, sizeof(b), "%s受到了 %d 点伤害", mob_def(m.type).name, dmg);
@@ -3001,14 +3226,22 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
     message("蛮兵陷入临死狂暴！");return;
   }
   m.alive = false;
+  for(auto& item:items)if(item_def(item.id).kind==K_MISSILE && item.magic.aux==idx+1){item.x=m.x;item.y=m.y;item.magic.aux=0;}
   m.combat.death_age = -combat_delay;
+  if(m.effects.ally) {
+    if(m.rose_ally) rose_ghost=-1;
+    return;
+  }
   if(m.type==M_NECROMANCER && m.minion>=0 && m.minion<int(mobs.size()) && mobs[m.minion].alive)
     damage_mob(m.minion,mobs[m.minion].hp+mobs[m.minion].rage_shield);
   if (m.type==M_SKELETON) {
     const int x=m.x,y=m.y;
     // Each neighboring victim gets its own damage roll and two DR rolls.
-    if (grid_distance(x,y,px,py)==1)
+    if (magic_actor<0 && grid_distance(x,y,px,py)==1)
       take_damage(std::max(0,normal_roll(*this,6,12)-roll_armor()-roll_armor()));
+    if(magic_actor>=0 && magic_hero_cell>=0 && grid_distance(x,y,magic_hero_cell%MW,magic_hero_cell/MW)==1) {
+      pending_ally_blasts.push_back(normal_roll(*this,6,12));
+    }
     for (size_t target=0;target<mobs.size();++target) {
       if (!mobs[target].alive || is_npc(mobs[target].type) ||
           grid_distance(x,y,mobs[target].x,mobs[target].y)!=1) continue;
@@ -3023,16 +3256,19 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
   }
   const auto experience = mob_rules::base(m.type, floor);
   const bool grants_exp=m.owner<0 && !(m.type==M_SWARM && m.variant>0);
-  if(grants_exp && level<=experience.max_level) identify_on_exp(experience.xp);
-  if (grants_exp && level <= experience.max_level) earn_exp(experience.xp);
+  if(grants_exp && level<=experience.max_level)award_combat_experience(experience.xp);
   if(ascending) {
     const float before=ascent_stacks;
     ascent_stacks=std::max(0.f,ascent_stacks-ascent_rules::kill_reduction(m.type));
     if(level==hero_rules::max_level && before>ascent_stacks)
-      identify_on_exp(int(std::floor(10.f*(before-ascent_stacks)+.5f)));
+      award_combat_experience(int(std::floor(10.f*(before-ascent_stacks)+.5f)),false);
   }
   snprintf(b, sizeof(b), "%s被击败了！", mob_def(m.type).name);
   message(b);
+  if(m.lucky && !is_boss(m.type)) {
+    const uint8_t loot[]={IT_POTION_HEAL,IT_SCROLL_TELE,IT_SCROLL_RECHARGE,IT_FOOD_RATION};
+    items.push_back({m.x,m.y,loot[ri(*this,0,3)],0,0});
+  }
   if (is_boss(m.type)) {
     boss_dead[region()] = 1;
     int tier = region() + 1;
@@ -3046,9 +3282,12 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
       return f.type == F_MIMIC_LOOT && f.aux == idx;
     });
     if (payload != features.end()) {
-      if (payload->loot_id != IT_NONE)
+      if (payload->loot_id != IT_NONE) {
         items.push_back({m.x, m.y, payload->loot_id, (int16_t)(payload->loot_id == IT_GOLD
-                         ? payload->loot_gold : payload->loot_level), payload->loot_flags});
+                           ? payload->loot_gold : payload->loot_level), payload->loot_flags});
+        items.back().magic.effect=payload->loot_effect;
+        if(artifact_rules::valid(payload->loot_id)) items.back().charges=artifact_rules::initial_charge(payload->loot_id,payload->loot_level);
+      }
       features.erase(payload);
     } else {
       items.push_back({m.x, m.y, IT_GOLD,
@@ -3059,7 +3298,7 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
       ++swarm_healing_drops;items.push_back({m.x,m.y,IT_POTION_HEAL,0,0});
     }
   } else if(m.owner<0) {
-    if ((rnd(*this) % 100) < 10) {
+    if (!m.effects.stolen && (rnd(*this) % 100) < 10) {
       items.push_back({m.x, m.y, IT_GOLD,
                        (int16_t)ri(*this, 10 + floor * 5, 20 + floor * 8)});
     }
@@ -3071,6 +3310,7 @@ void Game::damage_mob(int idx, int raw, DamageKind kind) {
 }
 
 bool Game::hero_hits(Mob& mob, bool ranged) {
+  if(actor_effects(int(&mob-mobs.data())).illuminated)return true;
   if(mob.type==M_MONK && mob.focused && !mob.sleep_t && mob.ai!=Mob::Sleeping) {
     mob.focused=false;
     mob.focus_cooldown=6.f+(combat_roll(*this)+combat_roll(*this))*.5f;
@@ -3083,8 +3323,9 @@ bool Game::hero_hits(Mob& mob, bool ranged) {
         hero_rules::strength_requirement(weapon, weapon_level) - effective_strength());
     float accuracy = (9 + level) * std::pow(1.3f, ring_bonus(*this, IT_RING_ACCURACY));
     if (!ranged) accuracy *= hero_rules::weapon_accuracy(weapon) / std::pow(1.5f, missing);
-    if (blessed_t > 0) accuracy *= 1.25f;
+  if (blessed_t > 0 || spell_effects.bless>0) accuracy *= 1.25f;
     if (debuffs[status_rules::Hex]) accuracy *= .8f;
+    if(spell_effects.wayward>0)accuracy/=5;
     // Insufficient strength prevents a surprise attack, even on a sleeping
     // target. Sleep is a behavior state, not the Paralysis buff.
     float evasion = noticed || missing > 0 || weapon==IT_FLAIL ? mob_evasion(*this,mob) : 0;
@@ -3104,7 +3345,8 @@ bool Game::hero_hits(Mob& mob, bool ranged) {
 void Game::attack(int idx, bool ranged, int bonus) {
   if (dead || idx < 0 || idx >= int(mobs.size())) return;
   Mob& m = mobs[idx];
-  if (!m.alive) return;
+  if (!m.alive || m.effects.ally) return;
+  if (hero_effects.charm>0 && m.effects.charm>0) {message("你无法攻击令你着迷的目标。");return;}
   if (is_shopkeeper(m.type, floor)) { harm_shopkeeper(); return; }
   if (is_npc(m.type)) { talk_npc(idx); return; }
   combat_strike(hero_combat, px, py, m.x, m.y,
@@ -3113,10 +3355,14 @@ void Game::attack(int idx, bool ranged, int bonus) {
   if (hero_hits(m, ranged)) {
     if(!ranged && weapon!=IT_NONE) identify_use(weapon_flags,weapon_identification,20.f);
     int raw = roll_weapon(m) + bonus + (might_t > 0 ? 3 : 0);
+    auto& light=actor_effects(idx);if(light.illuminated){light.illuminated=false;if(cleric_ranks[cleric_rules::SearingLight])raw+=1+2*cleric_ranks[cleric_rules::SearingLight];}
     if (debuffs[status_rules::Weakness]) raw = int(std::floor(raw*.67f+.5f));
-    damage_mob(idx, raw, DamageKind::Physical);
+    int enchantment=0;
+    if(!ranged) raw=weapon_proc(idx,raw,enchantment);
+    damage_mob(idx,raw,DamageKind::Physical,enchantment);
   }
   combat_delay = 0;
+  if(magic_actor<0)dispel_action();
 }
 
 void Game::interact_at(int x, int y) {
@@ -3128,12 +3374,13 @@ void Game::interact_at(int x, int y) {
   int m = mob_at(x, y);
   if (m >= 0) {
     if (is_npc(mobs[m].type)) { talk_npc(m); return; }
-    const int reach = hero_rules::weapon_reach(weapon);
-    if (grid_distance(x, y, px, py) > reach || !los(px,py,x,y)) {
+    if (!melee_reaches(x,y)) {
       message("距离太远，先靠近一点。"); return;
     }
+  if (mobs[m].effects.ally) { message("这是你的盟友。"); return; }
+    const float delay=melee_delay();
     attack(m, false);
-    spend_action(melee_delay());
+    spend_action(delay);
     return;
   }
   int fi = feature_at(x, y);
@@ -3172,10 +3419,21 @@ void Game::interact_at(int x, int y) {
 
 void Game::act_at(int x, int y, bool interact) {
   if (dialog || dead || shop_open) return;
+  if(hero_effects.paralysis>0 || spell_effects.magical_sleep){spend_action(1);return;}
   if (!in_map(x, y)) return;
   if(examining) {examine_at(x,y);return;}
-  if (interact) { interact_at(x, y); return; }
+  if (interact && !targeting) { interact_at(x, y); return; }
   if (targeting) {
+    if(artifact_targeting && magic_target==-3){trinity_use(1,y*MW+x);return;}
+    if(artifact_targeting && magic_target==-4){trinity_use(2,y*MW+x);return;}
+    if(artifact_targeting && magic_target==-2){artifact_targeting=targeting=false;cleric_armor_action(y*MW+x);return;}
+    if(book_scroll==IT_SCROLL_SIREN) {
+      if(!scroll_effect(book_scroll,y*MW+x))return;
+      if(!book_empowered)for(int i=0;i<inv_n;++i)if(inv[i].id==book_scroll){remove_item(i);break;}
+      remember_inscription(book_scroll);
+      book_scroll=IT_NONE;book_empowered=inscription_replay=false;targeting=artifact_targeting=false;spend_action(1);return;
+    }
+    if(artifact_targeting) {artifact_targeting=false;targeting=false;if(artifact_slot>=0)tome_cast(magic_target,y*MW+x);else artifact_action(artifact_slot,0,y*MW+x);return;}
     if (target_item >= 0 && item_def(inv[target_item].id).kind == K_WAND)
       cast_wand(target_item, x, y);
     else
@@ -3188,7 +3446,7 @@ void Game::act_at(int x, int y, bool interact) {
     message("你等待了一回合。");
     return;
   }
-  if (mob_at(x,y) >= 0 && grid_distance(px,py,x,y) <= hero_rules::weapon_reach(weapon) && los(px,py,x,y)) {
+  if (mob_at(x,y) >= 0 && melee_reaches(x,y)) {
     interact_at(x,y);
     return;
   }
@@ -3202,15 +3460,12 @@ void Game::act_at(int x, int y, bool interact) {
 void Game::clear_path() { path_goal = -1; }
 
 bool Game::next_step_encounter(int x,int y) const {
-  float duration=hero_rules::movement_delay(armor,armor_level,effective_strength())/
-      std::pow(1.175f,ring_bonus(*this,IT_RING_HASTE))*(haste_t ? 1.f/3.f : 1.f)*
-      (debuffs[status_rules::Cripple] ? 2.f : 1.f);
-  if(ascending && ascent_stacks>=6.f) duration=std::max(1.f,duration*2.f);
+  const float duration=movement_cost(x,y);
   bool next_visible[MH][MW]{};
-  shadowcaster::cast(x,y,fov_radius,[&](int cx,int cy){return blocks_sight(cx,cy);},
+  shadowcaster::cast(x,y,hero_effects.blind>0 ? 1 : fov_radius,[&](int cx,int cy){return blocks_sight(cx,cy);},
       [&](int cx,int cy){if(in_map(cx,cy)) next_visible[cy][cx]=true;});
   for(const auto& mob:mobs) {
-    if(!mob.alive || is_npc(mob.type)) continue;
+    if(!mob.alive || is_npc(mob.type) || mob.effects.ally) continue;
     if(next_visible[mob.y][mob.x] && !vis[mob.y][mob.x]) return true;
     if(!vis[mob.y][mob.x] || mob.sleep_t) continue;
     const int distance=grid_distance(x,y,mob.x,mob.y);
@@ -3269,7 +3524,7 @@ void Game::tick(int dt_ms) {
     }
     m.anim_ms += dt_ms;
   }
-  if (!dialog && !examining && !dead && !paused && !backpack && !shop_open && !transmute_open && !alchemy_open &&
+  if (!dialog && !examining && !targeting && !dead && !paused && !backpack && !shop_open && !transmute_open && !alchemy_open &&
       path_goal >= 0 && fabsf(pvx - px) < 0.02f && fabsf(pvy - py) < 0.02f) {
     navigation.load_actors(*this);
     const int goal = path_goal;
@@ -3307,7 +3562,7 @@ bool Game::bolt_reaches(int x, int y, int tx, int ty) const {
 
 float Game::mob_turn(Mob& m) {
   if (!m.alive || is_npc(m.type)) return 1.f;
-  if (m.sleep_t > 0) return 1.f;
+  if (m.sleep_t > 0 || m.effects.paralysis>0 || actor_effects(int(&m-mobs.data())).magical_sleep) return 1.f;
   if(m.type==M_GOO) {
     if(m.ai!=Mob::Hunting) m.pumped_up=0;
     if(tiles[m.y][m.x]==T_WATER && m.hp<m.maxhp) ++m.hp;
@@ -3321,7 +3576,7 @@ float Game::mob_turn(Mob& m) {
            !visible_trap_at(p % MW, p / MW);
   };
   auto step_to = [&](int step) {
-    if (step < 0 || !passable(step)) return false;
+    if (m.effects.roots>0 || step < 0 || !passable(step)) return false;
     int ox = m.x, oy = m.y;
     m.vx = ox; m.vy = oy;
     m.x = step % MW; m.y = step / MW;
@@ -3330,14 +3585,50 @@ float Game::mob_turn(Mob& m) {
     if (tiles[m.y][m.x] == T_DOOR) tiles[m.y][m.x] = T_DOOR_OPEN;
     close_door_if_clear(ox, oy);
     const int trap = feature_at(m.x, m.y);
-    if (trap >= 0) trigger_trap(trap, &m);
+    if(trap>=0 && features[trap].type==F_PLANT && seed_rules::index(features[trap].aux)>=0 && m.type!=M_WRAITH && m.type!=M_BAT && m.type!=M_SWARM && m.type!=M_EYE) {
+      const uint8_t seed=features[trap].aux;const int cell=m.y*MW+m.x;features.erase(features.begin()+trap);seed_effect(seed,cell);
+    } else if (trap >= 0) trigger_trap(trap, &m);
     return true;
   };
   auto move_delay=[&]() {
     const float ascent_speed=ascending && ascent_stacks>=4.f && m.ai!=Mob::Hunting && !m.terror_t ? 2.f : 1.f;
-    return mob_rules::movement_delay(m.type)/(ascent_speed*(m.adrenaline ? 2.f : 1.f));
+    const auto &effect=actor_effects(int(&m-mobs.data()));
+    return mob_rules::movement_delay(m.type)*(effect.cripple>0 ? 2.f : 1.f)*(effect.slow>0 ? 2.f : m.effects.chill>0 ? 1.5f : 1.f)/(ascent_speed*(m.adrenaline ? 2.f : 1.f)*(effect.haste>0 ? 3.f : 1.f));
   };
-  auto attack_delay=[&]() {return mob_rules::attack_delay(m.type)/(m.adrenaline ? 1.5f : 1.f);};
+  auto attack_delay=[&]() {auto &effect=actor_effects(int(&m-mobs.data()));effect.bubble_active=false;effect.time_bubble=0;return mob_rules::attack_delay(m.type)*(effect.slow>0 ? 2.f : m.effects.chill>0 ? 1.5f : 1.f)/(m.adrenaline ? 1.5f : 1.f)/(effect.haste>0 ? 3.f : 1.f);};
+  if(m.effects.ally) {
+    int target=-1,nearest=9;
+    for(size_t i=0;i<mobs.size();++i) {
+      const auto& enemy=mobs[i];
+      const int range=grid_distance(m.x,m.y,enemy.x,enemy.y);
+      if(enemy.alive && !is_npc(enemy.type) && !enemy.effects.ally && range<nearest && los(m.x,m.y,enemy.x,enemy.y)) {
+        target=i;nearest=range;
+      }
+    }
+    if(m.rose_ally && rose_enemy>=0 && rose_enemy<int(mobs.size()) && mobs[rose_enemy].alive && !mobs[rose_enemy].effects.ally) {
+      target=rose_enemy;nearest=grid_distance(m.x,m.y,mobs[target].x,mobs[target].y);
+    }
+    const int reach=m.rose_ally ? hero_rules::weapon_reach(rose_weapon.id) : 1;
+    if(target>=0 && nearest<=reach && los(m.x,m.y,mobs[target].x,mobs[target].y) && m.effects.charm<=0) {
+      auto& enemy=mobs[target];
+      combat_strike(m.combat,m.x,m.y,enemy.x,enemy.y,CombatStyle::Melee);
+      if(m.rose_ally) {
+        rose_attack(target);
+        return rose_weapon.id==IT_NONE ? 1.f : hero_rules::attack_delay(rose_weapon.id,rose_weapon.level,13+artifact_level(IT_ART_ROSE)/2);
+      }
+      const auto ally_effect=actor_effects(int(&m-mobs.data()));
+      if(ally_effect.prismatic>0)damage_mob(target,normal_roll(*this,2+level/4,4+level/2),DamageKind::Physical);
+      else if(ally_effect.mirror>0)damage_mob(target,(roll_weapon(mobs[target])+1)/2,DamageKind::Physical);
+      else if(ally_effect.light_ally)damage_mob(target,normal_roll(*this,5,30),DamageKind::Physical);
+      else damage_mob(target,roll_mob_damage(m),DamageKind::Physical);
+      return attack_delay();
+    }
+    const int goal=target>=0 ? mobs[target].y*MW+mobs[target].x : m.rose_ally && rose_command>=0 ? rose_command : m.target>=0 ? m.target : hero;
+    if(start==goal) {if(!m.rose_ally)m.target=-1;}
+    else if(target>=0 || m.target>=0 || dist>1)
+      step_to(navigation.toward(start,goal,[&](int p){return p==goal || passable(p);}));
+    return m.rose_ally && target<0 && rose_command<0 && dist>1 ? .5f : move_delay();
+  }
   if (m.terror_t > 0) {
     // Dungeon.flee first ignores actors, then excludes any occupied step
     // and retries. Terror uses four cells and cannot approach the source.
@@ -3352,15 +3643,19 @@ float Game::mob_turn(Mob& m) {
       excluded[next] = true;
     }
   }
-  if (rage_t > 0) {
+  const bool amok=rage_t>0 || actor_effects(int(&m-mobs.data())).amok>0;
+  if (amok || m.effects.charm<=0) {
     for (size_t i = 0; i < mobs.size(); i++) {
       Mob& o = mobs[i];
-      if (!o.alive || &o == &m || is_npc(o.type)) continue;
+      if (!o.alive || &o == &m || is_npc(o.type) || (!amok && !o.effects.ally)) continue;
       if (absi(o.x - m.x) <= 1 && absi(o.y - m.y) <= 1) {
         combat_strike(m.combat, m.x, m.y, o.x, o.y, CombatStyle::Melee);
         combat_delay = 70;
-        if (attack_hits(*this, mob_accuracy(*this, m)*mob_modifier(m), mob_evasion(*this, o)*mob_modifier(o)))
-          damage_mob((int)i, int(std::floor(roll_mob_damage(m)*mob_modifier(m)+.5f)), DamageKind::Physical);
+        if (attack_hits(*this, mob_accuracy(*this, m)*mob_modifier(m), mob_evasion(*this, o)*mob_modifier(o))) {
+          int damage=int(std::floor(roll_mob_damage(m)*mob_modifier(m)+.5f));
+          if(o.rose_ally)rose_defend(int(&m-mobs.data()),damage);
+          damage_mob((int)i,damage,DamageKind::Physical);
+        }
         else combat_hit(o.combat, o.x, o.y, COMBAT_MISS);
         combat_delay = 0;
         return attack_delay();
@@ -3451,7 +3746,7 @@ float Game::mob_turn(Mob& m) {
         if (attack_hits(*this,2.f*mob_accuracy(*this,m)*mob_modifier(m),hero_evasion()*(blessed_t>0 ? 1.25f : 1.f))) {
           int damage=int(std::floor(normal_roll(*this,30,50)*mob_modifier(m)+.5f));
           damage=int(std::floor(damage*std::pow(.825f,ring_bonus(*this,IT_RING_ELEMENTS))+.5f));
-          take_damage(damage);
+          take_damage(armor_proc(m,damage,true));
         } else combat_hit(hero_combat,px,py,COMBAT_MISS);
       } else {
         const int target=mob_at(x,y);
@@ -3477,7 +3772,7 @@ float Game::mob_turn(Mob& m) {
       bolt_reaches(m.x,m.y,px,py);
   const bool goo_reach=m.type==M_GOO && m.pumped_up && dist<=2 &&
       cast_ray(start,hero,13).collision==hero && cast_ray(hero,start,13).collision==start;
-  if (m.ai == Mob::Hunting && sees && m.type!=M_NECROMANCER && (ranged || goo_reach || (dist == 1 && m.type != M_SCORPIO))) {
+  if (m.ai == Mob::Hunting && sees && m.effects.charm<=0 && m.type!=M_NECROMANCER && (ranged || goo_reach || (dist == 1 && m.type != M_SCORPIO))) {
     if(m.type==M_GOO) {
       if(m.pumped_up==1) {m.pumped_up=2;message("史莱姆王继续膨胀！");return 1.f;}
       if(m.pumped_up==0 && ri(*this,0,2*m.hp<=m.maxhp ? 1 : 4)==0) {
@@ -3491,13 +3786,16 @@ float Game::mob_turn(Mob& m) {
       combat_fx.push_back({m.x,m.y,px,py,0,0,-1,m.combat.style});
     }
     combat_delay = 70;
-    const float evasion = hero_evasion() * (blessed_t > 0 ? 1.25f : 1.f);
+    const float evasion = armor_magic.effect==magic_rules::Stone ? 0.f : hero_evasion() * (blessed_t > 0 ? 1.25f : 1.f);
     char text[96];
     if (attack_hits(*this, mob_accuracy(*this, m)*(magic ? 2.f : 1.f)*mob_modifier(m), evasion)) {
       int rolled = magic ? (m.type == M_DM100 ? normal_roll(*this,3,10) :
           m.type == M_SHAMAN ? normal_roll(*this,6,15) : normal_roll(*this,12,18)) : roll_mob_damage(m);
       if(m.type==M_GOO && m.pumped_up) rolled=normal_roll(*this,3,2*m.hp<=m.maxhp ? 36 : 24);
       int damage = std::max(0, int(std::floor(rolled*mob_modifier(m)+.5f)) - (magic ? 0 : roll_armor()));
+      if(spell_effects.light_shield>0 && spell_effects.shield_target==int(&m-mobs.data()) && !magic)
+        damage=std::max(0,damage-normal_roll(*this,1+spell_effects.shield_rank,2+2*spell_effects.shield_rank));
+      damage=armor_proc(m,damage,magic);
       if(!magic && armor!=IT_NONE) identify_use(armor_flags,armor_identification,10.f);
       if (!magic && debuffs[status_rules::Vulnerable]) damage = int(damage*1.33f);
       if (magic) damage = int(std::floor(damage*std::pow(.825f,ring_bonus(*this,IT_RING_ELEMENTS))+.5f));
@@ -3555,9 +3853,10 @@ float Game::mob_turn(Mob& m) {
 void Game::recharge_wands() {
   for(int i=0;i<inv_n;++i) if(item_def(inv[i].id).kind==K_WAND) {
     auto& wand=inv[i];const int capacity=wand_capacity(wand);
-    if(wand.charges<capacity && !boss_alive()) {
+    if(wand.charges<capacity && spell_effects.magic_immunity<=0) {
       const float delay=10.f+40.f*std::pow(.875f,capacity-wand.charges);
-      wand.partial_charge+=std::pow(1.175f,ring_bonus(*this,IT_RING_ENERGY))/delay;
+      if(!boss_alive())wand.partial_charge+=std::pow(1.175f,ring_bonus(*this,IT_RING_ENERGY))/delay;
+      if(spell_effects.wand_recharge>0)wand.partial_charge+=.25f*std::min(1.f,spell_effects.wand_recharge);
     }
     while(wand.partial_charge>=1.f && wand.charges<capacity) {--wand.partial_charge;++wand.charges;}
     if(wand.charges>=capacity) wand.partial_charge=0.f;
@@ -3608,6 +3907,7 @@ bool Game::drop_item(int idx) {
   items.back().partial_charge=inv[idx].partial_charge;
   items.back().augment=inv[idx].augment;
   items.back().identification=inv[idx].identification;
+  items.back().magic=inv[idx].magic;
   char b[96];
   snprintf(b, sizeof(b), "你丢下了 %s", display_name(inv[idx].id));
   message(b);
@@ -3668,32 +3968,64 @@ Item Game::selection_item(int idx) const {
   if (idx >= 0 && idx < inv_n) return inv[idx];
   Item item;
   switch (idx) {
-    case -1: item.id=weapon; item.level=weapon_level; item.flags=weapon_flags; item.augment=weapon_augment; item.identification=weapon_identification; break;
-    case -2: item.id=armor; item.level=armor_level; item.flags=armor_flags; item.augment=armor_augment; item.identification=armor_identification; break;
-    case -3: item.id=ring1; item.level=ring1_level; item.flags=ring1_flags; item.identification=ring1_identification; break;
-    case -4: item.id=ring2; item.level=ring2_level; item.flags=ring2_flags; item.identification=ring2_identification; break;
+    case -1: item.id=weapon; item.level=weapon_level; item.flags=weapon_flags; item.augment=weapon_augment; item.identification=weapon_identification;item.magic=weapon_magic; break;
+    case -2: item.id=armor; item.level=armor_level; item.flags=armor_flags; item.augment=armor_augment; item.identification=armor_identification;item.magic=armor_magic; break;
+    case -3: item.id=ring1; item.level=ring1_level; item.flags=ring1_flags; item.identification=ring1_identification;item.magic=ring1_magic;item.charges=ring1_magic.aux; break;
+    case -4: item.id=ring2; item.level=ring2_level; item.flags=ring2_flags; item.identification=ring2_identification;item.magic=ring2_magic;item.charges=ring2_magic.aux; break;
     default: break;
   }
   return item;
 }
 
 bool Game::can_select_item(int idx) const {
+  if(artifact_feed_slot>=102 && artifact_feed_slot<=104) {
+    if(idx<0 || idx>=inv_n)return false;
+    const Item item=inv[idx];const auto kind=item_def(item.id).kind;
+    if(artifact_feed_slot==102)return (kind==K_WEAPON || kind==K_ARMOR) && item.magic.effect &&
+      !(kind==K_ARMOR ? magic_rules::curse_glyph(item.magic.effect) : magic_rules::curse_enchant(item.magic.effect));
+    if(artifact_feed_slot==103)return kind==K_WAND || kind==K_MISSILE;
+    return kind==K_RING;
+  }
+  if(artifact_feed_slot==101)return idx>=0 && idx<inv_n && !(inv[idx].flags&IF_CURSE_KNOWN) &&
+      (item_is_equipment(inv[idx].id) || item_def(inv[idx].id).kind==K_WAND || item_def(inv[idx].id).kind==K_MISSILE);
+  if(artifact_feed_slot==100) return idx>=0 && idx<inv_n && (item_def(inv[idx].id).kind==K_WEAPON || item_def(inv[idx].id).kind==K_ARMOR);
+  if(artifact_feed_slot) return artifact_feedable(artifact_feed_slot,idx);
   if (selection_scroll == IT_SCROLL_TRANSMUTE) return can_transmute(idx);
   const Item item = selection_item(idx);
-  if(selection_scroll==IT_STONE_AUG) return item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_ARMOR;
+  if(selection_scroll==IT_STONE_ENCHANT || selection_scroll==IT_SCROLL_ENCHANT || selection_scroll==IT_ARCANE_STYLUS)
+    return item_def(item.id).kind==K_ARMOR || (selection_scroll!=IT_ARCANE_STYLUS && (item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_MISSILE));
+  if(selection_scroll==IT_STONE_AUG) return item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_ARMOR || item_def(item.id).kind==K_MISSILE;
   if (item.id == IT_NONE) return false;
-  if (selection_scroll == IT_SCROLL_UP) return (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND) && item.level < 255;
+  if (selection_scroll == IT_SCROLL_UP) return item_def(item.id).kind!=K_ARTIFACT && (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_def(item.id).kind==K_MISSILE) && item.level < 255;
   if (selection_scroll == IT_SCROLL_IDENTIFY)
-    return (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_random_identity(item.id)) &&
+    return (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_def(item.id).kind==K_MISSILE || item_random_identity(item.id)) &&
         (!(item.flags & IF_IDENTIFIED) || !identity_known(item.id));
-  if(!item_is_equipment(item.id) && item_def(item.id).kind!=K_WAND) return false;
+  if(!item_is_equipment(item.id) && item_def(item.id).kind!=K_WAND && item_def(item.id).kind!=K_MISSILE) return false;
   if (selection_scroll == IT_SCROLL_CURSE)
-    return item.flags & IF_CURSED || !(item.flags & (IF_IDENTIFIED|IF_CURSE_KNOWN));
+    return item.flags & IF_CURSED || !(item.flags & (IF_IDENTIFIED|IF_CURSE_KNOWN)) ||
+        ((item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_MISSILE) && magic_rules::curse_enchant(item.magic.effect)) ||
+        (item_def(item.id).kind==K_ARMOR && magic_rules::curse_glyph(item.magic.effect));
   return false;
 }
 
 void Game::select_item(int idx) {
   if (!transmute_open || !can_select_item(idx)) return;
+  if(artifact_feed_slot>=102 && artifact_feed_slot<=104){cleric_form(cleric_rules::BodyForm+artifact_feed_slot-102,idx);return;}
+  if(artifact_feed_slot==101){tome_cast(cleric_rules::HolyIntuition,idx+1);artifact_feed_slot=0;transmute_open=false;return;}
+  if(artifact_feed_slot==100){rose_outfit(idx);return;}
+  if(artifact_feed_slot){artifact_feed(artifact_feed_slot,idx);return;}
+  if(selection_scroll==IT_STONE_ENCHANT || selection_scroll==IT_SCROLL_ENCHANT || selection_scroll==IT_ARCANE_STYLUS) {
+    magic_target=idx;const bool arm=item_def(selection_item(idx).id).kind==K_ARMOR;
+    if(selection_scroll==IT_SCROLL_ENCHANT) {
+      const int current=selection_item(idx).magic.effect;
+      for(int rarity=0;rarity<3;++rarity) magic_choice[rarity]=random_enchant(arm,false,rarity,current);
+      transmute_open=false;
+      open_dialog(24,"选择附魔","选择后消耗一张附魔卷轴。",arm ? magic_rules::glyph_name(magic_choice[0]) : magic_rules::enchant_name(magic_choice[0]),
+          arm ? magic_rules::glyph_name(magic_choice[1]) : magic_rules::enchant_name(magic_choice[1]),
+          arm ? magic_rules::glyph_name(magic_choice[2]) : magic_rules::enchant_name(magic_choice[2]),"取消 (Y)");
+    } else enchant_item(idx,random_enchant(arm,false,-1,selection_item(idx).magic.effect));
+    return;
+  }
   if(selection_scroll==IT_STONE_AUG) {
     augment_target=idx;transmute_open=false;
     open_dialog(22,"强化石","选择一项属性调整。不会提升装备等级。",
@@ -3704,9 +4036,20 @@ void Game::select_item(int idx) {
   if (selection_scroll == IT_SCROLL_TRANSMUTE) { transmute_choose(idx); return; }
   int scroll = -1;
   for (int i=0; i<inv_n; ++i) if (inv[i].id == selection_scroll) { scroll=i; break; }
-  if (scroll < 0) return;
+  const bool from_book=book_empowered && book_scroll==selection_scroll;
+  if (scroll < 0 && !from_book) return;
   Item item = selection_item(idx);
   if (selection_scroll == IT_SCROLL_UP) {
+    if(item_def(item.id).kind==K_MISSILE){item.magic.durability=100;item.count=projectile_rules::dart(item.id) ? item.count : 3;}
+    const bool armor_item=item_def(item.id).kind==K_ARMOR;
+    if(item.magic.effect) {
+      const int set_id=item.magic.aux2;
+      const bool curse=armor_item ? magic_rules::curse_glyph(item.magic.effect) : magic_rules::curse_enchant(item.magic.effect);
+      if((curse && ri(*this,0,2)==0) || (!curse && item.level>=4 &&
+          (item.level>=8 || ri(*this,0,9)<(1<<(item.level-4))))) item.magic={};
+      if(!armor_item && item.magic.effect==magic_rules::Crystal) item.magic.durability=100.f;
+      if(item_def(item.id).kind==K_MISSILE)item.magic.aux2=set_id;
+    }
     ++item.level;
     item.flags &= ~IF_CURSED;
     if(item_def(item.id).kind==K_WAND) item.charges=std::min(wand_capacity(item),int(item.charges)+1);
@@ -3717,17 +4060,24 @@ void Game::select_item(int idx) {
     message("你鉴定了选中的物品。");
   } else {
     item.flags = (item.flags & ~IF_CURSED) | IF_CURSE_KNOWN;
+    const int set_id=item.magic.aux2;const float durability=item.magic.durability;
+    if(((item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_MISSILE) && magic_rules::curse_enchant(item.magic.effect)) ||
+        (item_def(item.id).kind==K_ARMOR && magic_rules::curse_glyph(item.magic.effect))) item.magic={};
+    if(item_def(item.id).kind==K_MISSILE){item.magic.aux2=set_id;item.magic.durability=durability;}
     message("选中物品的诅咒被驱散了。");
   }
   if (selection_scroll == IT_SCROLL_UP || selection_scroll == IT_SCROLL_CURSE)
     debuffs[status_rules::Degrade] = 0;
   if (idx >= 0) inv[idx] = item;
-  else if (idx == -1) { weapon_level=item.level; weapon_flags=item.flags; }
-  else if (idx == -2) { armor_level=item.level; armor_flags=item.flags; }
-  else if (idx == -3) { ring1_level=item.level; ring1_flags=item.flags; }
-  else if (idx == -4) { ring2_level=item.level; ring2_flags=item.flags; }
+  else if (idx == -1) { weapon_level=item.level; weapon_flags=item.flags;weapon_magic=item.magic; }
+  else if (idx == -2) { armor_level=item.level; armor_flags=item.flags;armor_magic=item.magic; }
+  else if (idx == -3) { ring1_level=item.level; ring1_flags=item.flags;ring1_magic=item.magic; }
+  else if (idx == -4) { ring2_level=item.level; ring2_flags=item.flags;ring2_magic=item.magic; }
   update_maxhp();
-  remove_item(scroll,1);
+  discover_item(item);
+  remember_inscription(selection_scroll);
+  if(from_book){book_scroll=IT_NONE;book_empowered=inscription_replay=false;}
+  else remove_item(scroll,1);
   transmute_open = false;
   spend_action(1.f);
 }
@@ -3742,8 +4092,9 @@ void Game::transmute_choose(int idx) {
   item.id = nw;
   item.charges = item_def(nw).kind == K_WAND ?
       std::min(int(item.charges),wand_capacity(item)) : 0;
-  // consume one transmutation scroll
-  for (int i = 0; i < inv_n; i++)
+  discover_item(item);remember_inscription(IT_SCROLL_TRANSMUTE);
+  if(book_empowered && book_scroll==IT_SCROLL_TRANSMUTE){book_scroll=IT_NONE;book_empowered=inscription_replay=false;}
+  else for (int i = 0; i < inv_n; i++)
     if (inv[i].id == IT_SCROLL_TRANSMUTE) { remove_item(i, 1); break; }
   transmute_open = false;
   char b[96];
@@ -3759,12 +4110,15 @@ void Game::augment_item(int choice) {
   if(item.augment==augment) return;
   int stone=-1;
   for(int i=0;i<inv_n;++i) if(inv[i].id==IT_STONE_AUG) {stone=i;break;}
-  if(stone<0) return;
+  const bool free=book_empowered && book_scroll==IT_STONE_AUG;
+  if(stone<0 && !free) return;
   if(augment_target>=0) inv[augment_target].augment=augment;
   else if(augment_target==-1) weapon_augment=augment;
   else if(augment_target==-2) armor_augment=augment;
   else return;
-  remove_item(stone);message("装备属性已调整。");spend_action(1.f);
+  remember_inscription(IT_STONE_AUG);
+  if(free){book_scroll=IT_NONE;book_empowered=inscription_replay=false;}else remove_item(stone);
+  message("装备属性已调整。");spend_action(1.f);
 }
 
 void Game::check_talents() {
@@ -3791,6 +4145,17 @@ void Game::earn_exp(int amount) {
   }
   if (level == hero_rules::max_level) xp = 0;
 }
+void Game::award_combat_experience(int amount,bool advance) {
+  if(magic_actor>=0){pending_ally_experience.push_back({amount,advance});return;}
+  identify_on_exp(amount);if(advance)earn_exp(amount);
+}
+void Game::finish_ally_combat() {
+  if(magic_actor>=0)return;
+  auto blasts=std::move(pending_ally_blasts);pending_ally_blasts.clear();
+  for(int raw:blasts)take_damage(std::max(0,raw-roll_armor()-roll_armor()));
+  auto experience=std::move(pending_ally_experience);pending_ally_experience.clear();
+  for(const auto& reward:experience)award_combat_experience(reward.amount,reward.advance);
+}
 
 void Game::identify_use(uint8_t& flags,Identification& progress,float total) {
   if(flags&IF_IDENTIFIED) return;
@@ -3801,6 +4166,7 @@ void Game::identify_use(uint8_t& flags,Identification& progress,float total) {
 void Game::identify_on_exp(int amount) {
   if(amount<=0) return;
   const float fraction=float(amount)/xpnext;
+  artifact_experience(fraction);
   if(!(weapon_flags&IF_IDENTIFIED)) weapon_identification.experience(fraction,20.f);
   if(!(armor_flags&IF_IDENTIFIED)) armor_identification.experience(fraction,10.f);
   auto ring=[&](uint8_t id,uint8_t& flags,Identification& progress) {
@@ -3814,14 +4180,26 @@ void Game::identify_on_exp(int amount) {
 }
 
 void Game::tick_health() {
+  if(time_stasis) return;
   if (healing_left > 0) {
     const int heal = std::min(healing_left, flat_healing>0 ? flat_healing : std::max(1, int(std::floor(healing_left * .25f + .5f))));
     hp = std::min(maxhp, hp + heal);
     healing_left -= heal;
     if(!healing_left) flat_healing=0;
   }
-  if (!boss_alive() && hunger < hero_rules::starving && hp < maxhp &&
-      ++regen_ticks >= hero_rules::regeneration_period) {
+  const bool spirit_chalice=spell_effects.spirit_left>0 && spell_effects.spirit_ring==IT_ART_CHALICE;
+  const bool chalice=(ring1==IT_ART_CHALICE || ring2==IT_ART_CHALICE || spirit_chalice) && spell_effects.magic_immunity<=0;
+  if(chalice) {
+    if(!boss_alive() && hunger<hero_rules::starving && hp<maxhp) {
+      auto item=selection_item(ring1==IT_ART_CHALICE ? -3 : -4);
+      if(spirit_chalice){item={};item.id=IT_ART_CHALICE;item.level=2+2*cleric_ranks[cleric_rules::SpiritForm];}
+      float delay=item.flags&IF_CURSED ? 15.f : (10-(1.33f+item.level*.667f))/std::pow(1.175f,accessory_bonus(IT_RING_ENERGY));
+      spell_effects.regen_partial+=1/std::max(.05f,delay);
+      const int heal=int(spell_effects.regen_partial);hp=std::min(maxhp,hp+heal);spell_effects.regen_partial-=heal;
+    }
+    return;
+  }
+  if (!boss_alive() && hunger < hero_rules::starving && hp < maxhp && ++regen_ticks>=hero_rules::regeneration_period) {
     ++hp;
     regen_ticks = 0;
   }
@@ -3853,6 +4231,10 @@ void Game::tick_survival() {
 }
 
 void Game::tick_buffs() {
+  if(time_stasis) return;
+  tick_extended_effects();
+  tick_magic();
+  if(dead) return;
   tick_hunger();
   if (dead) return;
   if(ascending) {
@@ -3890,10 +4272,14 @@ void Game::tick_buffs() {
     }
   }
   recharge_wands();
+  spell_effects.wand_recharge=std::max(0.f,spell_effects.wand_recharge-1);
 }
 
 void Game::tick_world() {
   ++turns;
+  features.erase(std::remove_if(features.begin(),features.end(),[](Feature& feature) {
+    return feature.type==F_KEY_WALL && (!feature.state || --feature.state==0);
+  }),features.end());
   tick_trap_clouds();
   if (dead) return;
   if (have_dust && wand_state == 1) {
@@ -3945,6 +4331,16 @@ void Game::spend_action(float duration) {
   if (dead || !std::isfinite(duration) || duration <= 0.f) return;
   for(const auto& swarm:pending_swarms) mobs.push_back(swarm);
   pending_swarms.clear();
+  if(freeze_left>0) {
+    const float frozen=std::min(freeze_left,duration);
+    freeze_left-=frozen;duration-=frozen;
+    if(duration<=0) {recompute_fov();return;}
+  }
+  if(spell_effects.bubble_active) {
+    if(time_bubble_rules::process(spell_effects.time_bubble,duration))end_time_bubble();
+    recompute_fov();
+    return;
+  }
   const float end = actor_rules::spend(action_remainder, duration);
   for (;;) {
     actor_rules::Event next{end, actor_rules::hero_priority, -1};
@@ -3969,9 +4365,19 @@ void Game::spend_action(float duration) {
     } else if (next.id == -4) {
       buff_time = actor_rules::spend(buff_time, 1.f);
       tick_buffs();
+      // Materialize buff summons before another event changes actor indices.
+      for(const auto& actor:pending_swarms)mobs.push_back(actor);
+      pending_swarms.clear();
     } else {
       const size_t index = size_t(next.id);
-      const float cost = mob_turn(mobs[index]);
+      float cost = mob_turn(mobs[index]);
+      auto &bubble=actor_effects(int(index));
+      if(bubble.bubble_active) {
+        if(time_bubble_rules::process(bubble.time_bubble,cost)) {
+          bubble.bubble_active=false;bubble.time_bubble=0;
+        }
+        cost=0;
+      }
       for(const auto& swarm:pending_swarms) mobs.push_back(swarm);
       pending_swarms.clear();
       if(mobs[index].type==M_MONK) {
@@ -4010,12 +4416,14 @@ void Game::descend() {
     return;
   }
   if (floor>=26) return;
+  carry_allies(true);
   remember_floor();
   floor++;
   keys = golden_keys = crystal_keys = 0;
   legacy_keys = false;
   if (!restore_floor(floor,false)) gen_level();
   ascent_level_switch();
+  carry_allies(false);
   pvx = (float)px; pvy = (float)py;
   clear_path();
   char b[64];
@@ -4033,7 +4441,9 @@ void Game::capture_floor(FloorState& state) const {
   state.depth=floor;state.width=map_width;state.height=map_height;state.entrance=entrance_cell;
   memcpy(state.tiles,tiles,sizeof(tiles));memcpy(state.seen,seen,sizeof(seen));
   state.mobs=mobs;state.items=items;state.features=features;state.gas=toxic_gas;
+  state.effects=mob_effects;
   state.mobs.insert(state.mobs.end(),pending_swarms.begin(),pending_swarms.end());
+  state.effects.resize(state.mobs.size());
   state.keys=keys;state.golden_keys=golden_keys;state.crystal_keys=crystal_keys;state.legacy_keys=legacy_keys;
   state.respawn=respawn_t;state.mob_cap=mob_cap;state.rooms.clear();
   for (auto room:spawn_rooms) state.rooms.push_back({room.x,room.y,room.w,room.h});
@@ -4073,6 +4483,9 @@ void Game::apply_floor(const FloorState& state) {
   floor=state.depth;map_width=state.width;map_height=state.height;entrance_cell=state.entrance;
   memcpy(tiles,state.tiles,sizeof(tiles));memcpy(seen,state.seen,sizeof(seen));
   mobs=state.mobs;items=state.items;features=state.features;toxic_gas=state.gas;
+  mob_effects=state.effects;
+  rose_ghost=-1;
+  for(size_t i=0;i<mobs.size();++i) if(mobs[i].rose_ally && mobs[i].alive) rose_ghost=i;
   // Older saves may contain the former SentryRoom's injected prison guard.
   if(floor<7) for(auto& mob:mobs) if(mob.type==M_GUARD) mob.alive=false;
   keys=state.keys;golden_keys=state.golden_keys;crystal_keys=state.crystal_keys;legacy_keys=state.legacy_keys;
@@ -4095,7 +4508,7 @@ void Game::ascend() {
   if(std::none_of(visited_floors.begin(),visited_floors.end(),[&](const FloorState& state){return state.depth==destination;})) {
     message("旧存档没有保存上一层，无法返回。");return;
   }
-  remember_floor();restore_floor(destination,true);dialog=false;ascent_level_switch();
+  carry_allies(true);remember_floor();restore_floor(destination,true);dialog=false;ascent_level_switch();carry_allies(false);
 }
 
 void Game::ascent_level_switch() {
@@ -4140,6 +4553,40 @@ void Game::dialog_choose(int i) {
   if (dlg_type == 0) {
     if (i == 0) { dialog = false; descend(); }
     else dialog = false;
+  } else if(dlg_type==24) {
+    dialog=false;if(i<3) enchant_item(magic_target,magic_choice[i]);
+  } else if(dlg_type==25) {
+    dialog=false;
+    if(i==1 && selection_item(artifact_slot).id==IT_ART_ROSE)rose_menu();
+    else artifact_action(artifact_slot,i);
+  } else if(dlg_type==28) {
+    dialog=false;if(i<3 && cleric_choices[i]>=0)tome_cast(cleric_choices[i]);
+  } else if(dlg_type==32) {
+    dialog=false;if(i<3 && cleric_choices[i]>=0){cleric_learn(cleric_choices[i]);cleric_menu(1);}
+  } else if(dlg_type==33) {
+    dialog=false;if(i<2 && hero==5 && level>=10 && boss_dead[1] && !cleric_subclass)cleric_subclass=i+1;
+  } else if(dlg_type==34) {
+    dialog=false;if(i<3 && hero==5 && level>=20 && boss_dead[3] && !cleric_ability)cleric_ability=i+1;
+  } else if(dlg_type==35) {
+    dialog=false;
+    const int index=cleric_page*3+i;
+    if(i<3 && index<int(trinity_options.size()))trinity_imbue(trinity_options[index]);
+  } else if(dlg_type==36) {
+    dialog=false;if(i<3)trinity_use(i);
+  } else if(dlg_type==29) {
+    dialog=false;
+    if(i==0){artifact_feed_slot=100;selection_scroll=IT_ART_ROSE;transmute_open=true;transmute_sel=transmute_page=0;}
+    if(i==1){rose_command=rose_enemy=-1;}
+    if(i==2) {
+      if(rose_weapon.id!=IT_NONE && inv_n<bag_capacity()){inv[inv_n++]=rose_weapon;rose_weapon={};}
+      if(rose_armor.id!=IT_NONE && inv_n<bag_capacity()){inv[inv_n++]=rose_armor;rose_armor={};}
+    }
+  } else if(dlg_type==30) {
+    dialog=false;spellbook_resolve(i==1);
+  } else if(dlg_type==26) {
+    dialog=false;if(i==0) artifact_action(artifact_slot,4);
+  } else if(dlg_type==27) {
+    dialog=false;if(i<2) artifact_action(artifact_slot,4+i);
   } else if(dlg_type==20) {
     dialog=false;if(i==0) ascend();
   } else if(dlg_type==22) {
@@ -4254,6 +4701,7 @@ void Game::dialog_choose(int i) {
 
 void Game::cast_or_throw(int x, int y) {
   if (target_item < 0 || target_item >= inv_n) { targeting = false; return; }
+  if(item_def(inv[target_item].id).kind==K_MISSILE){throw_projectile(target_item,x,y);return;}
   Item& it = inv[target_item];
   uint8_t kind = item_def(it.id).kind;
   if (kind != K_BOMB && kind != K_MISSILE) { targeting = false; return; }
@@ -4297,6 +4745,7 @@ void Game::cast_or_throw(int x, int y) {
   }
   it.count--;
   if (it.count <= 0) remove_item(target_item, 1);
+  dispel_action();
   targeting = false;
   target_item = -1;
   combat_delay = 0;
@@ -4304,7 +4753,7 @@ void Game::cast_or_throw(int x, int y) {
 }
 
 static const uint32_t SAVE_MAGIC = 0x33445053u;  // "SPD3"
-static const uint16_t SAVE_VERSION = 13, HERO_SAVE_VERSION = 11,
+static const uint16_t SAVE_VERSION = 15, HERO_SAVE_VERSION = 11,
                       MAP_SAVE_VERSION = 10, LEGACY_SAVE_VERSION = 9;
 // Optional trailer: the original V9 header and slot metadata stay readable.
 struct SpawnDisk {
@@ -4348,7 +4797,7 @@ struct ItemStateDisk {
   float partial_charge[BAG_MAX]{};
   uint8_t weapon_augment=0,armor_augment=0,inventory_augment[BAG_MAX]{};
   Identification equipped_identification[4]{},inventory_identification[BAG_MAX]{};
-  Item buyback_items[3]{};
+  legacy_save::Item buyback_items[3]{};
 };
 
 struct StatusDisk {
@@ -4369,8 +4818,38 @@ struct GasDisk {
 
 struct DiscoveryDisk {
   uint32_t magic=0x31444944; // DID1, appended in V13; V12 layout is unchanged.
-  uint8_t known[IT_COUNT]{};
+  uint8_t known[IT_ART_TOOLKIT]{};
   uint8_t swarm_healing_drops=0;
+};
+
+struct MagicDisk {
+  uint32_t magic=0x3143474D; // MGC1, required in V14.
+  magic_rules::State equipped[4]{},inventory[BAG_MAX]{},buyback[3]{};
+  magic_rules::Effects hero;
+  float deferred=0,kinetic=0,freeze=0;
+  uint16_t generated=0;
+  uint8_t artifact_deck=0;
+  int32_t energy=0,ghost=-1;
+};
+struct ExtendedDisk {
+  uint32_t magic=0x31545845; // EXT1 (V15); frozen V14 entities remain readable.
+  mechanics_rules::Actor hero;
+  Item rose_weapon,rose_armor;
+  int32_t rose_command=-1,rose_enemy=-1;
+  uint32_t projectile_serial=1;
+  uint8_t cleric_ranks[cleric_rules::Count]{},subclass=0,ability=0;
+  float lance=0,priest=0,link=0,stasis=0;
+  int32_t linked=-1,stasis_ally=-1;
+  uint8_t recalled=IT_NONE;
+  float recall_left=0;
+  float armor_charge=100,ascended_left=0;
+  int32_t ascended_casts=0,ascended_flashes=0,powered=-1;
+  uint8_t divine_used=0;
+  uint8_t known[IT_COUNT]{},appearances[IT_COUNT]{};
+  uint8_t spellbook_order[10]{};
+  Item trinity_body,trinity_mind,trinity_spirit;
+  uint8_t discovered_items[IT_COUNT]{};
+  uint32_t discovered_enchants=0,discovered_glyphs=0;
 };
 
 template<class T> static bool floor_value(FILE* file,T& value,bool writing) {
@@ -4388,31 +4867,95 @@ static bool valid_identification(const Identification& progress) {
   return std::isfinite(progress.used) && progress.used>=0.f && progress.used<=100.f &&
       std::isfinite(progress.available) && progress.available>=0.f && progress.available<=10.f;
 }
-static bool valid_item(const Item& item) {
-  return item.id<IT_COUNT && item.count<=99 && item.charges<=(item.id==IT_WATERSKIN ? 20 : 10) && item.augment<=2 &&
-      item.flags<=7 && std::isfinite(item.partial_charge) && item.partial_charge>=0.f &&
-      item.partial_charge<1.f && valid_identification(item.identification);
+static bool finite_range(float value,float maximum) {
+  return std::isfinite(value) && value>=0 && value<=maximum;
 }
-static bool floor_archive(FILE* file,FloorState& state,bool writing) {
+static bool valid_effect(uint8_t id,uint8_t effect) {
+  if(!effect) return true;
+  const auto kind=item_def(id).kind;
+  return ((kind==K_WEAPON || kind==K_MISSILE) && effect<magic_rules::EnchantCount) ||
+         (kind==K_ARMOR && effect<magic_rules::GlyphCount);
+}
+static bool valid_magic(uint8_t id,int level,const magic_rules::State& state) {
+  if(!valid_effect(id,state.effect) || !finite_range(state.durability,100) ||
+      !(id==IT_ART_FORESIGHT ? std::isfinite(state.stored) && state.stored>=-3.f && state.stored<=1.f
+                            : finite_range(state.stored,1)) || !finite_range(state.cooldown,100) ||
+      state.experience<0 || state.experience>1000000) return false;
+  if(item_def(id).kind==K_MISSILE)return state.aux>=-MW*MH && state.aux<=512 && state.aux2>=0;
+  if(!artifact_rules::valid(id)) return state.aux==0 && state.aux2==0;
+  return level>=0 && level<=artifact_rules::level_cap(id) && state.aux>=0 &&
+      state.aux<=artifact_rules::capacity(id,level) && state.aux2>=0 && state.aux2<IT_COUNT;
+}
+static bool valid_effects(const magic_rules::Effects& effects) {
+  for(float value : {effects.burning,effects.chill,effects.poison,effects.poison_delay,
+       effects.bleeding,effects.blind,effects.paralysis,effects.roots,effects.charm})
+    if(!finite_range(value,10000000)) return false;
+  return true;
+}
+static int charge_limit(uint8_t id,int level) {
+  return id==IT_WATERSKIN ? 20 : artifact_rules::valid(id) ? artifact_rules::capacity(id,level) : 10;
+}
+static bool valid_item(const Item& item) {
+  return item.id<IT_COUNT && item.count<=99 && item.charges<=charge_limit(item.id,item.level) && item.augment<=2 &&
+      item.flags<=7 && std::isfinite(item.partial_charge) && item.partial_charge>=0.f &&
+      item.partial_charge<1.f && valid_identification(item.identification) && valid_magic(item.id,item.level,item.magic);
+}
+static bool valid_extended_actor(const mechanics_rules::Actor& effect) {
+  for(float value:{effect.vertigo,effect.bless,effect.haste,effect.levitation,effect.healing,effect.partial_heal,
+      effect.earth,effect.magic_immunity,effect.foresight,effect.artifact_recharge,effect.holy_weapon,
+      effect.holy_ward,effect.light_shield,effect.light,effect.sunray_recent,effect.dread,effect.prismatic,effect.arena,
+      effect.aura,effect.divine,effect.divine_left,effect.wall,effect.lifelink,effect.wayward,effect.shuriken_cooldown,
+      effect.body_left,effect.spirit_left,effect.shield,effect.regen_partial,effect.mirror,effect.prismatic_guard,
+      effect.cleanse,effect.hallowed,effect.power_left,effect.deferred,effect.kinetic,effect.wand_recharge,effect.drowsy,effect.amok,effect.body_durability,effect.scry,
+      effect.cripple,effect.slow,effect.weakness,effect.vulnerable})
+    if(!finite_range(value,10000000))return false;
+  if(!std::isfinite(effect.time_bubble) || effect.time_bubble<-.001f || effect.time_bubble>100 ||
+      (!effect.bubble_active && effect.time_bubble!=0))return false;
+  return effect.anchor>=-1 && effect.anchor<MW*MH && effect.earth_anchor>=-1 && effect.earth_anchor<MW*MH && effect.shield_target>=-1 && effect.shield_target<512 &&
+    effect.arena_cell>=-1 && effect.arena_cell<MW*MH &&
+    effect.body_effect<(effect.body_armor ? int(magic_rules::GlyphCount) : int(magic_rules::EnchantCount)) &&
+    effect.spirit_ring<IT_COUNT && effect.aura_rank>=0 && effect.aura_rank<=4 && effect.shield_rank>=0 && effect.shield_rank<=4 &&
+    effect.hallowed_cell>=-1 && effect.hallowed_cell<MW*MH && effect.hallowed_rank>=0 && effect.hallowed_rank<=4;
+}
+template<class New,class Old> static bool archive_vector(FILE* file,std::vector<New>& values,bool writing,int maximum,bool legacy) {
+  if(!legacy) return floor_vector(file,values,writing,maximum);
+  std::vector<Old> old;
+  if(writing) return false;
+  if(!floor_vector(file,old,false,maximum)) return false;
+  values.clear();values.reserve(old.size());
+  for(const auto& value:old) values.push_back(legacy_save::migrate<New>(value));
+  return true;
+}
+static bool floor_archive(FILE* file,FloorState& state,bool writing,bool legacy=false) {
   // This archive has its own magic/version and preserves all entities rather
   // than truncating to the historical GameDisk limits.
-  uint32_t schema=0x31524C46; // FLR1
-  if(!floor_value(file,schema,writing) || schema!=0x31524C46) return false;
+  const uint32_t expected=legacy ? 0x31524C46 : 0x32524C46;
+  uint32_t schema=expected; // FLR2 extends entities; FLR1 remains importable.
+  if(!floor_value(file,schema,writing) || schema!=expected) return false;
   if(!floor_value(file,state.depth,writing) || !floor_value(file,state.width,writing) ||
       !floor_value(file,state.height,writing) || !floor_value(file,state.entrance,writing)) return false;
   if(state.depth<1 || state.depth>26 || state.width<3 || state.width>MW || state.height<3 || state.height>MH ||
       state.entrance < -1 || state.entrance>=MW*MH) return false;
   if(!floor_value(file,state.tiles,writing) || !floor_value(file,state.seen,writing) ||
-      !floor_vector(file,state.mobs,writing,512) || !floor_vector(file,state.items,writing,4096) ||
+      !archive_vector<Mob,legacy_save::Mob>(file,state.mobs,writing,512,legacy) ||
+      !archive_vector<FloorItem,legacy_save::FloorItem>(file,state.items,writing,4096,legacy) ||
       !floor_vector(file,state.features,writing,4096) || !floor_value(file,state.gas,writing) ||
       !floor_value(file,state.keys,writing) || !floor_value(file,state.golden_keys,writing) ||
       !floor_value(file,state.crystal_keys,writing) || !floor_value(file,state.respawn,writing) ||
       !floor_value(file,state.mob_cap,writing) || !floor_value(file,state.legacy_keys,writing) ||
       !floor_vector(file,state.rooms,writing,256) || !floor_vector(file,state.weights,writing,256) ||
       !floor_vector(file,state.deck,writing,256) || !floor_value(file,state.shop_n,writing) ||
-      !floor_value(file,state.shop_floor,writing) || !floor_value(file,state.shop_items,writing) ||
+      !floor_value(file,state.shop_floor,writing)) return false;
+  if(legacy) {
+    legacy_save::Item old[20];
+    if(!floor_value(file,old,false)) return false;
+    for(int i=0;i<20;++i) state.shop_items[i]=legacy_save::migrate<Item>(old[i]);
+  } else if(!floor_value(file,state.shop_items,writing)) return false;
+  if(
       !floor_value(file,state.shop_prices,writing) || !floor_value(file,state.shop_sold,writing)) return false;
   if(state.shop_n<0 || state.shop_n>20 || state.rooms.size()!=state.weights.size()) return false;
+  static_assert(sizeof(Feature)==20 && offsetof(Feature,loot_effect)==17);
+  if(legacy) for(auto& feature:state.features) feature.loot_effect=0;
   auto position=[&](int x,int y){return x>=0 && y>=0 && x<state.width && y<state.height;};
   auto cell=[&](int value){return value==-1 || (value>=0 && position(value%MW,value/MW));};
   if(!cell(state.entrance)) return false;
@@ -4423,13 +4966,15 @@ static bool floor_archive(FILE* file,FloorState& state,bool writing) {
         !cell(mob.target) || !cell(mob.beam_target) || !cell(mob.summoning_pos) ||
         mob.minion < -1 || mob.minion>=int(state.mobs.size()) ||
         mob.owner < -1 || mob.owner>=int(state.mobs.size()) ||
-        !std::isfinite(mob.focus_cooldown) ||
-        !std::isfinite(mob.next_action) || mob.next_action<0 || mob.next_action>4) return false;
+        !std::isfinite(mob.focus_cooldown) || !valid_effects(mob.effects) ||
+        !std::isfinite(mob.next_action) || mob.next_action<0 || mob.next_action>16) return false;
   for(const auto& item:state.items)
     if(!position(item.x,item.y) || item.id>=IT_COUNT || item.flags>7 || item.augment>2 ||
-        item.charges>(item.id==IT_WATERSKIN ? 20 : 10) || !std::isfinite(item.partial_charge) || item.partial_charge<0.f ||
-        item.partial_charge>=1.f || !valid_identification(item.identification)) return false;
-  for(const auto& feature:state.features) if(!position(feature.x,feature.y) || feature.type>F_CHEST_CRYSTAL) return false;
+        item.charges>charge_limit(item.id,item.level) || !std::isfinite(item.partial_charge) || item.partial_charge<0.f ||
+        item.partial_charge>=1.f || !valid_identification(item.identification) || !valid_magic(item.id,item.level,item.magic)) return false;
+  for(const auto& feature:state.features)
+    if(!position(feature.x,feature.y) || feature.type>F_KEY_WALL || feature.loot_id>=IT_COUNT ||
+        !valid_effect(feature.loot_id,feature.loot_effect)) return false;
   const auto& gas=state.gas;
   if(gas.volume<0 || gas.left<0 || gas.top<0 || gas.right>MW || gas.bottom>MH ||
       gas.left>gas.right || gas.top>gas.bottom) return false;
@@ -4473,6 +5018,16 @@ SlotMeta Game::meta() const {
 }
 
 bool Game::save(int slot) const {
+  for(int cell:bubble_presses)if(cell<0 || cell>=MW*MH)return false;
+  for(const auto& heap:scry_heaps)
+    if(heap.depth<1 || heap.depth>26 || heap.cell<0 || heap.cell>=MW*MH || !finite_range(heap.left,25))return false;
+  if(!valid_extended_actor(spell_effects) || !valid_item(rose_weapon) || !valid_item(rose_armor) ||
+      !valid_item(trinity_body) || !valid_item(trinity_mind) || !valid_item(trinity_spirit))return false;
+  for(const auto& effect:mob_effects)if(!valid_extended_actor(effect))return false;
+  for(const auto& state:visited_floors)for(const auto& effect:state.effects)if(!valid_extended_actor(effect))return false;
+  for(int i=0;i<cleric_rules::Count;++i)if(cleric_ranks[i]>cleric_rules::rank_cap(i))return false;
+  if(!finite_range(armor_charge,100) || !finite_range(ascended_left,100) || !finite_range(link_left,1000000) ||
+      !finite_range(stasis_left,1000000) || !finite_range(recall_left,300))return false;
   GameDisk d{};
   d.magic = SAVE_MAGIC;
   d.version = SAVE_VERSION;
@@ -4565,7 +5120,7 @@ bool Game::save(int slot) const {
   map.crystal_keys = std::clamp(crystal_keys, 0, 65535);
   map.legacy_keys = legacy_keys;
   map.loot_second_deck = loot_second_deck;
-  memcpy(map.loot_remaining, loot_remaining, sizeof(loot_remaining));
+  memcpy(map.loot_remaining, loot_remaining, sizeof(map.loot_remaining));
   memcpy(map.tiles, tiles, sizeof(tiles));
   memcpy(map.seen, seen, sizeof(seen));
   HeroDisk stats;
@@ -4599,7 +5154,11 @@ bool Game::save(int slot) const {
   for (int i=0; i<d.feature_n; ++i) states.features[i]=features[i].loot_flags;
   for (int i=0; i<d.shop_n; ++i) states.shop[i]=shop_items[i].flags;
   for (int i=0; i<d.buyback_n; ++i) states.buyback[i]=buyback_items[i].flags;
-  std::copy_n(buyback_items,3,states.buyback_items);
+  for(int i=0;i<3;++i) {
+    const auto& item=buyback_items[i];
+    states.buyback_items[i]={item.id,item.count,item.level,item.charges,item.flags,
+                            item.partial_charge,item.augment,item.identification};
+  }
   StatusDisk status;
   status.hp_boost=hp_boost;
   status.ascending=ascending;status.highest_ascent=highest_ascent;
@@ -4633,9 +5192,41 @@ bool Game::save(int slot) const {
     gas_ok=gas_ok && floor_archive(f,*current,true);
   }
   DiscoveryDisk discovery;
-  for(int i=0;i<IT_COUNT;++i) discovery.known[i]=type_known[i];
+  for(int i=0;i<IT_ART_TOOLKIT;++i) discovery.known[i]=type_known[i];
   discovery.swarm_healing_drops=swarm_healing_drops;
   gas_ok=gas_ok && floor_value(f,discovery,true);
+  MagicDisk magic;
+  magic.equipped[0]=weapon_magic;magic.equipped[1]=armor_magic;
+  magic.equipped[2]=ring1_magic;magic.equipped[3]=ring2_magic;
+  for(int i=0;i<inv_n;++i) magic.inventory[i]=inv[i].magic;
+  for(int i=0;i<buyback_n;++i) magic.buyback[i]=buyback_items[i].magic;
+  magic.hero=hero_effects;magic.deferred=deferred_damage;magic.kinetic=kinetic_damage;
+  magic.freeze=freeze_left;magic.generated=artifact_generated;magic.energy=alchemy_energy;magic.ghost=rose_ghost;
+  magic.artifact_deck=loot_remaining[10];
+  gas_ok=gas_ok && floor_value(f,magic,true);
+  ExtendedDisk extended;
+  extended.hero=spell_effects;extended.rose_weapon=rose_weapon;extended.rose_armor=rose_armor;
+  extended.rose_command=rose_command;extended.rose_enemy=rose_enemy;extended.projectile_serial=projectile_serial;
+  std::copy_n(cleric_ranks,cleric_rules::Count,extended.cleric_ranks);
+  extended.subclass=cleric_subclass;extended.ability=cleric_ability;
+  extended.lance=cleric_lance_cooldown;extended.priest=cleric_priest_cooldown;
+  extended.link=link_left;extended.stasis=stasis_left;extended.linked=linked_ally;extended.stasis_ally=stasis_ally;
+  extended.recalled=recalled_item;extended.recall_left=recall_left;
+  extended.armor_charge=armor_charge;extended.ascended_left=ascended_left;extended.ascended_casts=ascended_casts;
+  extended.ascended_flashes=ascended_flashes;extended.powered=powered_ally;extended.divine_used=divine_used;
+  for(int i=0;i<IT_COUNT;++i){extended.known[i]=type_known[i];extended.appearances[i]=appearances[i];}
+  std::copy_n(spellbook_order,10,extended.spellbook_order);
+  extended.trinity_body=trinity_body;extended.trinity_mind=trinity_mind;extended.trinity_spirit=trinity_spirit;
+  for(int i=0;i<IT_COUNT;++i)extended.discovered_items[i]=discovered_items[i];
+  extended.discovered_enchants=discovered_enchants;extended.discovered_glyphs=discovered_glyphs;
+  gas_ok=gas_ok && floor_value(f,extended,true);
+  auto effects=mob_effects;effects.resize(mobs.size()+pending_swarms.size());
+  gas_ok=gas_ok && floor_vector(f,effects,true,512);
+  for(const auto& state:visited_floors){effects=state.effects;gas_ok=gas_ok && floor_vector(f,effects,true,512);}
+  auto heaps=scry_heaps;
+  gas_ok=gas_ok && floor_vector(f,heaps,true,4096);
+  auto presses=bubble_presses;
+  gas_ok=gas_ok && floor_vector(f,presses,true,MW*MH);
   const bool closed=fclose(f)==0;
   if(!closed || !gas_ok) {unlink(temporary);return false;}
   if(rename(temporary,path)!=0) {unlink(temporary);return false;}
@@ -4663,7 +5254,7 @@ bool Game::load(int slot) {
       stats.blessed_t <= 30 && std::isfinite(stats.action_remainder) &&
       stats.action_remainder >= 0.f && stats.action_remainder < 1.f;
   ActorDisk actors;
-  auto valid_time = [](float value) { return std::isfinite(value) && value >= 0.f && value <= 4.f; };
+  auto valid_time = [](float value) { return std::isfinite(value) && value >= 0.f && value <= 16.f; };
   const bool have_actors = have_stats && fread(&actors, sizeof(actors), 1, f) == 1 &&
       actors.magic == 0x31544341 && valid_time(actors.health) && valid_time(actors.world) &&
       valid_time(actors.buffs) && std::all_of(actors.mob_times, actors.mob_times+48, valid_time) &&
@@ -4690,10 +5281,10 @@ bool Game::load(int slot) {
   auto current=std::make_unique<FloorState>();
   std::vector<FloorState> archive;
   bool have_archive=have_gas && floor_value(f,archive_magic,false) && archive_magic==0x31545356 &&
-      floor_value(f,archive_count,false) && archive_count<=26 && floor_archive(f,*current,false);
+      floor_value(f,archive_count,false) && archive_count<=26 && floor_archive(f,*current,false,d.version<14);
   if(have_archive) {
     archive.resize(archive_count);
-    for(auto& state:archive) if(!floor_archive(f,state,false)) { have_archive=false;break; }
+    for(auto& state:archive) if(!floor_archive(f,state,false,d.version<14)) { have_archive=false;break; }
     have_archive=have_archive && current->depth==d.floor;
     bool depths[27]{};
     for(const auto& state:archive) {
@@ -4705,10 +5296,63 @@ bool Game::load(int slot) {
   DiscoveryDisk discovery;
   const bool have_discovery=have_archive && d.version>=13 && floor_value(f,discovery,false) &&
       discovery.magic==0x31444944 && discovery.swarm_healing_drops<=5 &&
-      std::all_of(discovery.known,discovery.known+IT_COUNT,[](uint8_t known){return known<=1;});
+      std::all_of(discovery.known,discovery.known+IT_ART_TOOLKIT,[](uint8_t known){return known<=1;});
+  MagicDisk magic;
+  const bool have_magic=have_discovery && d.version>=14 && floor_value(f,magic,false) && magic.magic==0x3143474D;
+  ExtendedDisk extended;
+  std::vector<mechanics_rules::Actor> current_effects;
+  std::vector<mechanics_rules::HeapAwareness> heaps;
+  std::vector<int> presses;
+  bool have_extended=have_magic && d.version>=15 && floor_value(f,extended,false) && extended.magic==0x31545845 &&
+      floor_vector(f,current_effects,false,512) && current_effects.size()<=current->mobs.size();
+  if(have_extended) for(auto& state:archive)
+    if(!floor_vector(f,state.effects,false,512) || state.effects.size()>state.mobs.size()){have_extended=false;break;}
+  if(have_extended)have_extended=floor_vector(f,heaps,false,4096);
+  if(have_extended)have_extended=floor_vector(f,presses,false,MW*MH);
+  for(int cell:presses)if(cell<0 || cell>=MW*MH)have_extended=false;
+  for(const auto& heap:heaps)
+    if(heap.depth<1 || heap.depth>26 || heap.cell<0 || heap.cell>=MW*MH || !finite_range(heap.left,25))have_extended=false;
+  auto valid_extended=[](const mechanics_rules::Actor& effect) {
+    return valid_extended_actor(effect);
+  };
+  if(have_extended) {
+    have_extended=valid_extended(extended.hero) && valid_item(extended.rose_weapon) && valid_item(extended.rose_armor) &&
+      valid_item(extended.trinity_body) && valid_item(extended.trinity_mind) && valid_item(extended.trinity_spirit);
+    have_extended&=extended.discovered_enchants<(1u<<magic_rules::EnchantCount) && extended.discovered_glyphs<(1u<<magic_rules::GlyphCount);
+    for(auto discovered:extended.discovered_items)have_extended&=discovered<=1;
+    have_extended&=extended.subclass<=2 && extended.ability<=3 && extended.projectile_serial>0 &&
+      extended.rose_command>=-1 && extended.rose_command<MW*MH && extended.rose_enemy>=-1 && extended.rose_enemy<int(current->mobs.size());
+    for(int i=0;i<cleric_rules::Count;++i)have_extended&=extended.cleric_ranks[i]<=cleric_rules::rank_cap(i);
+    for(float value:{extended.lance,extended.priest,extended.link,extended.stasis})have_extended&=finite_range(value,1000000);
+    have_extended&=extended.linked>=-1 && extended.linked<int(current->mobs.size()) && extended.stasis_ally>=-1 && extended.stasis_ally<int(current->mobs.size());
+    have_extended&=extended.recalled<IT_COUNT && finite_range(extended.recall_left,300);
+    have_extended&=finite_range(extended.armor_charge,100) && finite_range(extended.ascended_left,100) &&
+      extended.ascended_casts>=0 && extended.ascended_casts<=10000 && extended.ascended_flashes>=0 && extended.ascended_flashes<=10000 &&
+      extended.powered>=-1 && extended.powered<int(current->mobs.size()) && extended.divine_used<=1;
+    for(int i=0;i<IT_COUNT;++i)have_extended&=extended.known[i]<=1 && extended.appearances[i]<32;
+    for(int i=0;i<10;++i){have_extended&=extended.spellbook_order[i]<IT_COUNT && item_def(extended.spellbook_order[i]).cat==CAT_SCROLL;
+      for(int j=0;j<i;++j)have_extended&=extended.spellbook_order[i]!=extended.spellbook_order[j];}
+    for(const auto& effect:current_effects)have_extended&=valid_extended(effect);
+    for(const auto& state:archive)for(const auto& effect:state.effects)have_extended&=valid_extended(effect);
+  }
   fclose(f);
   if (!ok || d.magic != SAVE_MAGIC) return false;
-  if(d.version> SAVE_VERSION || (d.version==13 && !have_discovery)) return false;
+  if(d.version> SAVE_VERSION || (d.version>=13 && !have_discovery) || (d.version>=14 && !have_magic)) return false;
+  if(d.version>=15 && !have_extended)return false;
+  if(have_magic) {
+    if(!valid_effects(magic.hero) || !finite_range(magic.deferred,10000000) ||
+       !finite_range(magic.kinetic,10000000) || !finite_range(magic.freeze,20) ||
+       magic.energy<0 || magic.energy>1000000 || magic.artifact_deck>1 ||
+       magic.generated>=(1u<<artifact_rules::count) || magic.ghost < -1 ||
+       magic.ghost>=int(current->mobs.size()) || (magic.ghost>=0 && !current->mobs[magic.ghost].rose_ally)) return false;
+    const uint8_t ids[]={d.weapon,d.armor,d.ring1,d.ring2};
+    const uint8_t levels[]={d.weapon_level,d.armor_level,d.ring1_level,d.ring2_level};
+    for(int i=0;i<4;++i) if(ids[i]>=IT_COUNT || !valid_magic(ids[i],levels[i],magic.equipped[i])) return false;
+    for(int i=0;i<std::min(int(d.inv_n),BAG_MAX);++i)
+      if(d.inv[i].charges>charge_limit(d.inv[i].id,d.inv[i].level) || !valid_magic(d.inv[i].id,d.inv[i].level,magic.inventory[i])) return false;
+    for(int i=0;i<std::min(int(d.buyback_n),3);++i)
+      if(!valid_magic(states.buyback_items[i].id,states.buyback_items[i].level,magic.buyback[i])) return false;
+  }
   if (d.version >= 12) {
     if (!have_map || !have_stats || !have_actors || !have_items || !have_status || !have_gas || !have_archive) return false;
     if(states.weapon_augment>2 || states.armor_augment>2) return false;
@@ -4717,7 +5361,7 @@ bool Game::load(int slot) {
       if(d.inv[i].id>=IT_COUNT || states.inventory_augment[i]>2 || states.inventory[i]>7 ||
           !valid_identification(states.inventory_identification[i]) || !std::isfinite(states.partial_charge[i]) ||
           states.partial_charge[i]<0.f || states.partial_charge[i]>=1.f) return false;
-    for(int i=0;i<std::min(int(d.buyback_n),3);++i) if(!valid_item(states.buyback_items[i])) return false;
+    for(int i=0;i<std::min(int(d.buyback_n),3);++i) if(!valid_item(legacy_save::migrate<Item>(states.buyback_items[i]))) return false;
   } else if (d.version == HERO_SAVE_VERSION) {
     if (!have_map || !have_stats) return false;
   } else if (d.version == MAP_SAVE_VERSION) {
@@ -4730,7 +5374,7 @@ bool Game::load(int slot) {
   seed = d.seed; rng = d.rng;
   init_identities(true);examining=false;pending_swarms.clear();swarm_healing_drops=0;
   if(d.version>=13) {
-    for(int i=0;i<IT_COUNT;++i) type_known[i]=discovery.known[i];
+    for(int i=0;i<IT_ART_TOOLKIT;++i) type_known[i]=discovery.known[i];
     swarm_healing_drops=discovery.swarm_healing_drops;
   }
   floor = d.floor; hero = d.hero;
@@ -4798,7 +5442,7 @@ bool Game::load(int slot) {
   crystal_keys = have_map ? map.crystal_keys : 0;
   legacy_keys = !have_map || map.legacy_keys;
   loot_second_deck = have_map ? map.loot_second_deck != 0 : (seed >> 31) != 0;
-  memcpy(loot_remaining, map.loot_remaining, sizeof(loot_remaining));
+  memcpy(loot_remaining, map.loot_remaining, sizeof(map.loot_remaining));
   if (!have_map) memset(loot_remaining, 0, sizeof(loot_remaining));
   if (have_map) {
     memcpy(tiles, map.tiles, sizeof(tiles));
@@ -4885,7 +5529,7 @@ bool Game::load(int slot) {
                         d.buyback_items[i].level, d.buyback_items[i].charges,
                         uint8_t(d.version >= 12 ? states.buyback[i] : IF_KNOWN)};
     buyback_prices[i] = d.buyback_prices[i];
-    if(d.version>=12) buyback_items[i]=states.buyback_items[i];
+    if(d.version>=12) buyback_items[i]=legacy_save::migrate<Item>(states.buyback_items[i]);
   }
   shop_n = std::min((int)d.shop_n, 20);
   shop_floor = d.shop_floor ? d.shop_floor : -1;
@@ -4942,6 +5586,35 @@ bool Game::load(int slot) {
     for(int y=0;y<map_height;++y) for(int x=0;x<map_width;++x)
       if(tiles[y][x]==T_STAIRS_UP) entrance_cell=y*MW+x;
   }
+  weapon_magic=magic.equipped[0];armor_magic=magic.equipped[1];
+  ring1_magic=magic.equipped[2];ring2_magic=magic.equipped[3];
+  hero_effects=magic.hero;deferred_damage=magic.deferred;kinetic_damage=magic.kinetic;
+  freeze_left=magic.freeze;artifact_generated=magic.generated;alchemy_energy=magic.energy;rose_ghost=magic.ghost;
+  loot_remaining[10]=magic.artifact_deck;
+  for(int i=0;i<inv_n;++i) inv[i].magic=magic.inventory[i];
+  for(int i=0;i<buyback_n;++i) buyback_items[i].magic=magic.buyback[i];
+  artifact_targeting=artifact_brewing=time_stasis=false;
+  spell_effects=extended.hero;mob_effects=std::move(current_effects);scry_heaps=std::move(heaps);bubble_presses=std::move(presses);
+  rose_weapon=extended.rose_weapon;rose_armor=extended.rose_armor;
+  rose_command=extended.rose_command;rose_enemy=extended.rose_enemy;projectile_serial=extended.projectile_serial;
+  std::copy_n(extended.cleric_ranks,cleric_rules::Count,cleric_ranks);cleric_subclass=extended.subclass;cleric_ability=extended.ability;
+  cleric_lance_cooldown=extended.lance;cleric_priest_cooldown=extended.priest;
+  link_left=extended.link;stasis_left=extended.stasis;linked_ally=extended.linked;stasis_ally=extended.stasis_ally;
+  recalled_item=extended.recalled;recall_left=extended.recall_left;extra_proc=virtual_projectile=returning_projectile=false;form_item={};
+  trinity_body=extended.trinity_body;trinity_mind=extended.trinity_mind;trinity_spirit=extended.trinity_spirit;
+  trinity_spell=-1;trinity_options.clear();
+  for(int i=0;i<IT_COUNT;++i)discovered_items[i]=extended.discovered_items[i];
+  discovered_enchants=extended.discovered_enchants;discovered_glyphs=extended.discovered_glyphs;
+  armor_charge=extended.armor_charge;ascended_left=extended.ascended_left;ascended_casts=extended.ascended_casts;
+  ascended_flashes=extended.ascended_flashes;powered_ally=extended.powered;divine_used=extended.divine_used;
+  if(d.version>=15)for(int i=0;i<IT_COUNT;++i){type_known[i]=extended.known[i];appearances[i]=extended.appearances[i];}
+  if(d.version>=15)std::copy_n(extended.spellbook_order,10,spellbook_order);
+  else {const auto before=rng;init_spellbook();rng=before;}
+  magic_actor=-1;
+  magic_hero_cell=-1;pending_ally_experience.clear();pending_ally_blasts.clear();
+  carried_allies.clear();
+  book_scroll=IT_NONE;book_empowered=inscription_replay=false;cleric_page=0;
+  artifact_feed_slot=0;
   check_talents();
   recompute_fov();
   return true;
@@ -4959,7 +5632,7 @@ bool Game::slot_meta(int slot, SlotMeta& out) {
     GameDisk d{};
     bool ok = fread(&d, sizeof(d), 1, f) == 1;
     fclose(f);
-    if (!ok || (d.version != SAVE_VERSION && d.version!=12 && d.version != HERO_SAVE_VERSION && d.version != MAP_SAVE_VERSION &&
+    if (!ok || (d.version != SAVE_VERSION && d.version!=14 && d.version!=13 && d.version!=12 && d.version != HERO_SAVE_VERSION && d.version != MAP_SAVE_VERSION &&
                 d.version != LEGACY_SAVE_VERSION)) return false;
     out = d.meta;
     out.used = true;
