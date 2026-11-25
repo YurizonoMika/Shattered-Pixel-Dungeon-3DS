@@ -815,14 +815,16 @@ static void draw_quickslots() {
     if (i == 0) { sx = 86; sw = 20; }
     else if (i == 7) { sx = 106; sw = 19; }
     draw_rect_src(A_toolbar, sx, 0, sw, 24, x, SLOT_Y, SLOT_SIZE, 36, 0, 0.4f);
-    if (i < G.inv_n) {
-      const ItemDef& d = item_def(G.inv[i].id);
-      draw_item_icon(G.inv[i].id, x + 6, SLOT_Y + 8, 1.0f);
-      int num = d.kind == K_WAND ? G.inv[i].charges : G.inv[i].count;
-      if (d.kind == K_WAND || num > 1)
+    const int index=G.quickslot_item(i);
+    if (index!=-100) {
+      const Item item=G.selection_item(index);
+      const ItemDef& d = item_def(item.id);
+      draw_item_icon(item.id, x + 6, SLOT_Y + 8, 1.0f);
+      int num = item.id==IT_MAGES_STAFF ? item.magic.aux : d.kind == K_WAND ? item.charges : item.count;
+      if (d.kind == K_WAND || item.id==IT_MAGES_STAFF || num > 1)
         textf(x + 17, SLOT_Y + 21, CLR_WHITE, 1.0f, "%d", num);
     }
-    if (G.targeting && G.target_item == i)
+    if (index!=-100 && G.targeting && G.target_item == index)
       draw_cursor(x, SLOT_Y, SLOT_SIZE, 36, CLR_YELLOW);
   }
 }
@@ -1463,7 +1465,7 @@ void game_update() {
     if (IN.tap_y >= SLOT_Y && IN.tap_y < SLOT_Y + 36 &&
         IN.tap_x >= SLOT_X && IN.tap_x < SLOT_X + SLOT_SIZE * 8) {
       int i = (int)((IN.tap_x - SLOT_X) / SLOT_SIZE);
-      if (i < G.inv_n && i >= 0) { G.clear_path(); G.use_item(i); }
+      if (i >= 0 && i < 8) { G.clear_path(); G.use_quickslot(i); }
       return;
     }
     if (IN.tap_y >= 196) {

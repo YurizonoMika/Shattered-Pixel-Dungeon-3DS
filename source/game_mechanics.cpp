@@ -1603,6 +1603,7 @@ void Game::throw_projectile(int index, int x, int y) {
       item_def(inv[index].id).kind != K_MISSILE || !in_map(x, y))
     return;
   Item thrown = inv[index];
+  const bool bow=thrown.id==IT_SPIRIT_BOW;
   thrown.count = 1;
   const int from = py * MW + px, target = y * MW + x;
   if (target == from)
@@ -1623,7 +1624,7 @@ void Game::throw_projectile(int index, int x, int y) {
   }
   combat_strike(hero_combat, px, py, x, y, CombatStyle::Throw, thrown.id);
   const int missing =
-      std::max(0, projectile_rules::strength(thrown.id, thrown.level) -
+      std::max(0, (bow ? hero_rules::strength_requirement(IT_MAGES_STAFF,0) : projectile_rules::strength(thrown.id, thrown.level)) -
                       effective_strength());
   const float delay = std::pow(1.2f, missing) * (thrown.augment == 1   ? 2.f / 3
                                                  : thrown.augment == 2 ? 5.f / 3
@@ -1663,14 +1664,14 @@ void Game::throw_projectile(int index, int x, int y) {
     if (target_hit) {
       const int damage_level =
           buffed_level(thrown.level) + accessory_bonus(IT_RING_SHARPSHOOTING);
-      const auto range = projectile_rules::damage(
+      const auto range = bow ? hero_rules::DamageRange{std::max(0,1+int(level)/5+accessory_bonus(IT_RING_SHARPSHOOTING)),std::max(0,6+int(level/2.5f)+2*accessory_bonus(IT_RING_SHARPSHOOTING))} : projectile_rules::damage(
           thrown.id, damage_level, surprise,
           weapon == IT_CROSSBOW ? buffed_level(weapon_level) : -1);
       int damage = normal(*this, range.min, range.max) +
                    normal(*this, 0,
                           std::max(0, effective_strength() -
-                                          projectile_rules::strength(
-                                              thrown.id, thrown.level)));
+                                          (bow ? 10 : projectile_rules::strength(
+                                              thrown.id, thrown.level))));
       damage = int(std::lround(damage * (thrown.augment == 1   ? .7f
                                          : thrown.augment == 2 ? 1.5f
                                                                : 1.f)));
@@ -1718,7 +1719,7 @@ void Game::throw_projectile(int index, int x, int y) {
       inv[index].identification = thrown.identification;
     }
   }
-  if (hit) {
+  if (hit && !bow) {
     const float cost = projectile_rules::durability_cost(
         thrown.id, thrown.level, accessory_bonus(IT_RING_SHARPSHOOTING),
         thrown.augment, thrown.magic.effect);
@@ -1733,8 +1734,8 @@ void Game::throw_projectile(int index, int x, int y) {
   }
   if (hit && thrown.id == IT_DART_TIPPED)
     thrown.id = IT_DART;
-  remove_item(index);
-  if (thrown.magic.durability > 0 && !virtual_projectile) {
+  if(!bow)remove_item(index);
+  if (!bow && thrown.magic.durability > 0 && !virtual_projectile) {
     FloorItem drop{x, y, thrown.id, thrown.level, thrown.flags};
     drop.magic = thrown.magic;
     drop.augment = thrown.augment;

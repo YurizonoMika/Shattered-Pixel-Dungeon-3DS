@@ -26,6 +26,8 @@ static void arena(Game& game, uint8_t type, int x, int y) {
   game.hp = game.maxhp = 1000;
   game.hp_boost = 980;
   game.armor = IT_NONE;
+  game.armor_magic = {};
+  game.weapon = IT_DAGGER;
   Mob mob;
   mob.type = type; mob.x = x; mob.y = y;
   mob.hp = mob.maxhp = 100;
@@ -38,6 +40,40 @@ static bool same_clock(float a, float b) { return std::fabs(a-b) < .00001f; }
 
 int main() {
   Game game;
+  const uint8_t weapons[]={IT_WORN_SHORTSWORD,IT_MAGES_STAFF,IT_DAGGER,IT_GLOVES,IT_RAPIER,IT_CUDGEL};
+  const uint8_t potions[]={IT_POTION_HEAL,IT_POTION_FLAME,IT_POTION_INVIS,IT_POTION_MIND,IT_POTION_STR,IT_POTION_PURITY};
+  const uint8_t scrolls[]={IT_SCROLL_RAGE,IT_SCROLL_UP,IT_SCROLL_MAP,IT_SCROLL_LULLABY,IT_SCROLL_MIRROR,IT_SCROLL_CURSE};
+  for(int h=0;h<6;++h) {
+    game.new_run(h,0x12345678);
+    assert(game.weapon==weapons[h] && game.weapon_level==0 && game.weapon_flags==IF_KNOWN);
+    assert(game.armor==IT_CLOTH_ARMOR && game.armor_level==0 && game.armor_flags==IF_KNOWN);
+    assert(game.inv_n==((h==0 || h==2 || h==3 || h==4) ? 4 : 3));
+    assert(game.inv[0].id==IT_FOOD_RATION && game.inv[0].count==1);
+    assert(game.inv[1].id==IT_VELVET_POUCH && game.inv[2].id==IT_WATERSKIN && game.inv[2].charges==0);
+    assert(game.identity_known(IT_SCROLL_IDENTIFY) && game.identity_known(potions[h]) && game.identity_known(scrolls[h]));
+    assert(game.identity_known(IT_SCROLL_UP)==(h==1));
+    for(int i=0;i<game.inv_n;++i)assert(game.inv[i].id!=IT_POTION_HEAL && game.inv[i].flags==IF_KNOWN);
+    if(h==0)assert(game.inv[3].id==IT_THROWING_STONE && game.inv[3].count==3 && game.armor_magic.aux2==1);
+    if(h==1)assert(game.weapon_magic.aux==4 && hero_rules::weapon_range(game.weapon,0,10,false).max==6);
+    if(h==2)assert(game.ring1==IT_ART_CLOAK && game.inv[3].id==IT_KNIFE && game.inv[3].count==3);
+    if(h==3)assert(game.inv[3].id==IT_SPIRIT_BOW && game.inv[3].count==1);
+    if(h==4)assert(game.inv[3].id==IT_THROWING_SPIKE && game.inv[3].count==2);
+    if(h==5)assert(game.ring1==IT_ART_TOME);
+    const int quick=game.quickslot_item(0);
+    assert(quick!=-100);
+    assert(game.save(106));Game loaded;assert(loaded.load(106));
+    assert(loaded.weapon==weapons[h] && loaded.quickslot_item(0)==quick && loaded.armor_magic.aux2==game.armor_magic.aux2);
+    assert(loaded.identity_known(potions[h]) && loaded.identity_known(scrolls[h]));
+  }
+  game.new_run(1,0x12345678);game.mobs.clear();game.mob_cap=0;
+  game.use_quickslot(0);assert(game.targeting && game.target_item==-1);
+  game.act_at(game.px,game.py,true);assert(game.weapon_magic.aux==3 && !game.targeting);
+  game.new_run(3,0x12345678);game.mobs.clear();game.mob_cap=0;
+  const int bow=game.quickslot_item(0);const size_t drops=game.items.size();
+  for(int y=1;y<game.map_height-1;++y)for(int x=1;x<game.map_width-1;++x)game.tiles[y][x]=T_FLOOR;
+  game.throw_projectile(bow,game.px+1,game.py);
+  assert(game.inv[bow].id==IT_SPIRIT_BOW && game.inv[bow].count==1 && game.items.size()==drops);
+  std::puts("Starting equipment passed: six class loadouts, quantities, identified types, quickslots, staff casting, infinite bow and save/load.");
   arena(game, M_CRAB, 6, 7);
   game.spend_action(.4f);
   assert(game.mobs[0].x == 7 && same_clock(game.mobs[0].next_action,.5f));

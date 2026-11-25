@@ -181,6 +181,10 @@ const ItemDef ITEM_DEFS[IT_COUNT] = {
     {"决斗卷轴","建立持续100回合的决斗区域。",K_USE,CAT_SCROLL,0,0,328},
     {"镜像卷轴","召唤与你并肩战斗的镜像。",K_USE,CAT_SCROLL,0,0,307},
     {"复仇卷轴","根据受伤程度伤害并致盲可见敌人。",K_USE,CAT_SCROLL,0,0,313},
+    {"法师魔杖","可近战攻击，也可释放内置魔弹法杖。",K_WEAPON,CAT_GEAR,1,4,101},
+    {"灵能短弓","发射无限灵能箭矢，伤害随英雄等级成长。",K_MISSILE,CAT_GEAR,1,0,144},
+    {"绒布袋","用于收纳种子与符石，可从背包查看和使用。",K_BAG,CAT_MISC,0,0,482},
+    {"净化药水","净化周围有害气体。",K_USE,CAT_POTION,0,0,362},
 };
 
 const char* item_name(uint8_t id) { return item_def(id).name; }
@@ -230,6 +234,7 @@ bool item_is_equipment(uint8_t id) {
 }
 
 bool item_is_stackable(uint8_t id) {
+  if(id==IT_SPIRIT_BOW)return false;
   uint8_t k = item_def(id).kind;
   return k == K_USE || k == K_FOOD || k == K_BOMB || k == K_KEY ||
          k == K_GOLD || k == K_MISSILE || k == K_SEED;

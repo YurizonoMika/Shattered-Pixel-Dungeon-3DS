@@ -1007,6 +1007,21 @@ int main() {
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
+        else if(want==126) {
+          const uint8_t weapons[]={IT_WORN_SHORTSWORD,IT_MAGES_STAFF,IT_DAGGER,IT_GLOVES,IT_RAPIER,IT_CUDGEL};
+          bool loadouts=true,persistence=true;
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot126.bin");struct stat exists;
+          const bool disposable=stat(path,&exists)!=0;
+          for(int h=0;h<6;++h) {
+            G.new_run(h,0x12345678);
+            loadouts&=G.weapon==weapons[h] && G.armor==IT_CLOTH_ARMOR && G.inv[0].id==IT_FOOD_RATION && G.inv[1].id==IT_VELVET_POUCH && G.inv[2].id==IT_WATERSKIN && G.quickslot_item(0)!=-100;
+            for(int i=0;i<G.inv_n;++i)loadouts&=G.inv[i].id!=IT_POTION_HEAL;
+            persistence&=disposable && G.save(126) && G.load(126) && G.weapon==weapons[h] && G.quickslot_item(0)!=-100;
+          }
+          if(disposable)remove(path);
+          dlog("[V15 starts] loadouts=%d persistence=%d",loadouts,persistence);
+          SCENE=Scene::GAME;G.demo_lock=true;
+        }
         else if(want==125) {
           G.new_run(0,0x12345678);SCENE=Scene::GAME;
           G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;

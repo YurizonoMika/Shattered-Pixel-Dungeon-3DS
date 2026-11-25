@@ -548,6 +548,8 @@ struct Game {
   float mob_turn(Mob& m);
   void message(const char* s);
   void use_item(int idx);
+  int quickslot_item(int slot) const;
+  void use_quickslot(int slot);
   void equip_item(int idx);
   void cast_wand(int idx, int tx, int ty);
   void pick_item(int idx);

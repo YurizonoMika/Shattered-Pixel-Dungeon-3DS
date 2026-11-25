@@ -63,7 +63,11 @@ incrementally and retains unused charges on cancellation. Several interactions
 remain partial. Stasis compensates hunger while existing effects continue to tick;
 meta progression is outside the requested parity scope.
 Icecap has independent Frost, damage-triggered thaw and water residual Chill;
-Chill speed varies with remaining duration. See the
+Chill speed varies with remaining duration.
+All six starting loadouts now follow v4.0.2, including class weapons, missile
+counts, artifacts and identified consumable types, with staff casting and an
+infinite spirit bow. Pouch storage and seal/weapon special actions remain partial.
+See the
 [development notes](docs/releases/v0.1.15alpha.md).
 
 ## Screenshots

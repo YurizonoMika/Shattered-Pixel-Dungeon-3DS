@@ -85,6 +85,12 @@ represented, but category depletion decks and exact RNG consumption still differ
 
 ## Current verification / 本轮验证
 
+Starting equipment: six class weapons, missile quantities, class artifacts,
+shared food/armor/pouch/waterskin and class identification now follow pinned
+HeroClass. Host tests cover all six starts, quickslots, staff casting, infinite
+bow and save/load. Seal attachment is persisted but shield activation is pending;
+pouch uses unified inventory. Staff imbue and class weapon abilities remain open.
+
 Frost follow-up: Icecap applies independent saved Frost, damage detaches it and
 water thaw leaves Chill. 10,001 speed-factor cases match pinned Java. Host
 tests cover paralysis coexistence, zero-damage thaw, expiry, movement blocking

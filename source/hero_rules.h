@@ -22,7 +22,7 @@ inline int food_energy(uint8_t id) {
 
 inline int equipment_tier(uint8_t id) {
   switch (id) {
-    case IT_DAGGER: case IT_CUDGEL: case IT_WORN_SHORTSWORD: case IT_GLOVES: case IT_RAPIER: case IT_CLOTH_ARMOR: return 1;
+    case IT_MAGES_STAFF: case IT_DAGGER: case IT_CUDGEL: case IT_WORN_SHORTSWORD: case IT_GLOVES: case IT_RAPIER: case IT_CLOTH_ARMOR: return 1;
     case IT_SHORTSWORD: case IT_HAND_AXE: case IT_SPEAR: case IT_PICKAXE: case IT_QUARTERSTAFF: case IT_DIRK: case IT_SICKLE: case IT_LEATHER_ARMOR: return 2;
     case IT_SCIMITAR: case IT_WHIP: case IT_SWORD: case IT_MACE: case IT_ROUND_SHIELD: case IT_SAI: case IT_MAIL: return 3;
     case IT_LONGSWORD: case IT_BATTLEAXE: case IT_RUNEBLADE: case IT_FLAIL: case IT_ASSASSINS_BLADE: case IT_CROSSBOW: case IT_KATANA: case IT_SCALE: return 4;
@@ -76,6 +76,7 @@ inline DamageRange weapon_range(uint8_t id, int level, int strength, bool surpri
   if (!tier) return {1, std::max(strength - 8, 1)};
   int min = tier + level, max = 5 * (tier + 1) + level * (tier + 1);
   switch (id) {
+    case IT_MAGES_STAFF: max=6+level*2;break;
     case IT_DAGGER: case IT_CUDGEL: case IT_HAND_AXE: case IT_SCIMITAR:
     case IT_BATTLEAXE: case IT_WARHAMMER: case IT_RAPIER: case IT_QUARTERSTAFF:
     case IT_DIRK: case IT_MACE: case IT_ASSASSINS_BLADE: case IT_KATANA:

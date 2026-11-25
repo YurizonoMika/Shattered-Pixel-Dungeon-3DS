@@ -1903,9 +1903,21 @@ void Game::new_run(int hero_class, uint32_t s) {
   weapon_level = 0;
   armor = IT_CLOTH_ARMOR;
   armor_level = 0;
-  add_item(IT_POTION_HEAL, 2);
   add_item(IT_FOOD_RATION, 1);
+  add_item(IT_VELVET_POUCH);
   add_item(IT_WATERSKIN);
+  constexpr uint8_t starting_weapons[]={IT_WORN_SHORTSWORD,IT_MAGES_STAFF,IT_DAGGER,IT_GLOVES,IT_RAPIER,IT_CUDGEL};
+  weapon=starting_weapons[std::clamp(hero_class,0,5)];
+  if(hero_class==0){add_item(IT_THROWING_STONE,3);armor_magic.aux2=1;}
+  if(hero_class==1)weapon_magic.aux=4;
+  if(hero_class==2)add_item(IT_KNIFE,3);
+  if(hero_class==3)add_item(IT_SPIRIT_BOW);
+  if(hero_class==4)add_item(IT_THROWING_SPIKE,2);
+  identify_type(IT_SCROLL_IDENTIFY);
+  constexpr uint8_t known_potions[]={IT_POTION_HEAL,IT_POTION_FLAME,IT_POTION_INVIS,IT_POTION_MIND,IT_POTION_STR,IT_POTION_PURITY};
+  constexpr uint8_t known_scrolls[]={IT_SCROLL_RAGE,IT_SCROLL_UP,IT_SCROLL_MAP,IT_SCROLL_LULLABY,IT_SCROLL_MIRROR,IT_SCROLL_CURSE};
+  identify_type(known_potions[std::clamp(hero_class,0,5)]);
+  identify_type(known_scrolls[std::clamp(hero_class,0,5)]);
   if(hero_class==2 || hero_class==5) {
     ring1=hero_class==2 ? IT_ART_CLOAK : IT_ART_TOME;
     ring1_magic.aux=artifact_rules::initial_charge(ring1);
@@ -1926,8 +1938,7 @@ void Game::new_run(int hero_class, uint32_t s) {
 // ---------------------------------------------------------------------------
 void Game::init_identities(bool legacy) {
   for(int id=0;id<IT_COUNT;++id) type_known[id]=legacy || !item_random_identity(id);
-  // Upgrade scrolls retain a fixed appearance and are known from the start.
-  type_known[IT_SCROLL_UP]=true;
+  // Upgrade scrolls have a fixed appearance, but only Mages know their type.
   std::fill_n(appearances,IT_COUNT,0);
   for(int category : {int(CAT_POTION),int(CAT_SCROLL),int(CAT_GEAR)}) {
     std::vector<uint8_t> ids;
@@ -1982,6 +1993,7 @@ void Game::describe_item(const Item& item,char* out,size_t size) const {
         range.min,range.max,hero_rules::strength_requirement(item.id,item.level),
         item.flags&IF_CURSED ? "已鉴定：受到诅咒。" : "已鉴定：无诅咒。");
   } else if(d.kind==K_MISSILE) {
+    if(item.id==IT_SPIRIT_BOW){snprintf(out,size,"灵能短弓\n伤害 %d–%d，力量需求 10\n无限箭矢，伤害随英雄等级成长。",std::max(0,1+int(level)/5+accessory_bonus(IT_RING_SHARPSHOOTING)),std::max(0,6+int(level/2.5f)+2*accessory_bonus(IT_RING_SHARPSHOOTING)));return;}
     const auto range=projectile_rules::damage(item.id,buffed_level(item.level)+accessory_bonus(IT_RING_SHARPSHOOTING),false,
         weapon==IT_CROSSBOW ? buffed_level(weapon_level) : -1);
     const float wear=projectile_rules::durability_cost(item.id,item.level,accessory_bonus(IT_RING_SHARPSHOOTING),item.augment,item.magic.effect);
@@ -1997,6 +2009,8 @@ void Game::describe_item(const Item& item,char* out,size_t size) const {
         item.flags&IF_CURSED ? "已鉴定：受到诅咒。" : "已鉴定：无诅咒。");
   } else if(item.id==IT_WATERSKIN) snprintf(out,size,"水袋 %d/20\n%s",item.charges,d.desc);
   else snprintf(out,size,"%s\n%s",display_name(item.id),d.desc);
+  if(item.id==IT_MAGES_STAFF){const size_t used=strlen(out);if(used<size)snprintf(out+used,size-used,"\n魔弹充能 %d/%d",item.magic.aux,std::min(10,4+int(item.level)));}
+  if(d.kind==K_ARMOR && item.magic.aux2==1){const size_t used=strlen(out);if(used<size)snprintf(out+used,size-used,"\n已附着破损纹章。");}
   const auto effect=item.magic.effect;
   const bool weapon_item=d.kind==K_WEAPON || d.kind==K_MISSILE;
   const bool cursed=weapon_item ? magic_rules::curse_enchant(effect) : magic_rules::curse_glyph(effect);
@@ -2168,7 +2182,43 @@ void Game::equip_item(int idx) {
   spend_action(replacing ? 2.f : 1.f);
 }
 
+int Game::quickslot_item(int slot) const {
+  // Resolve by ID each frame so consuming/reordering inventory never changes
+  // the class action. Negative values refer to equipped items.
+  const uint8_t primary[]={IT_THROWING_STONE,IT_MAGES_STAFF,IT_ART_CLOAK,IT_SPIRIT_BOW,IT_RAPIER,IT_ART_TOME};
+  const uint8_t secondary[]={IT_WATERSKIN,IT_WATERSKIN,IT_KNIFE,IT_WATERSKIN,IT_THROWING_SPIKE,IT_WATERSKIN};
+  const int h=std::clamp(int(hero),0,5);
+  uint8_t id=slot==0 ? primary[h] : slot==1 ? secondary[h] : (slot==2 && (h==2 || h==4)) ? IT_WATERSKIN : IT_NONE;
+  if(slot<0 || slot>=8)return -100;
+  if(id!=IT_NONE) {
+    if(id==weapon)return -1;
+    if(id==ring1)return -3;
+    if(id==ring2)return -4;
+    for(int i=0;i<inv_n;++i)if(inv[i].id==id)return i;
+    return -100;
+  }
+  int offset=slot-((h==2 || h==4) ? 3 : 2);
+  for(int i=0;i<inv_n;++i) {
+    if(inv[i].id==primary[h] || inv[i].id==secondary[h] || inv[i].id==IT_WATERSKIN || inv[i].id==IT_VELVET_POUCH)continue;
+    if(offset--==0)return i;
+  }
+  return -100;
+}
+
+void Game::use_quickslot(int slot) {
+  const int index=quickslot_item(slot);
+  if(index==-100)return;
+  if(index>=0){use_item(index);return;}
+  if(index==-3 || index==-4){artifact_menu(index);return;}
+  if(weapon==IT_MAGES_STAFF) {
+    if(weapon_magic.aux<=0){message("法师魔杖还没有充能。");return;}
+    targeting=!targeting;target_item=-1;message("选择魔弹目标（B 取消）。");return;
+  }
+  message("刺剑已装备，靠近敌人即可攻击。");
+}
+
 void Game::use_item(int idx) {
+  if(idx>=0 && idx<inv_n && inv[idx].id==IT_VELVET_POUCH){message("绒布袋内的种子与符石可从背包直接使用。");return;}
   if(idx>=0 && idx<inv_n && inv[idx].id==IT_ART_TOME && cleric_ranks[cleric_rules::LightReading]){tome_menu();return;}
   if(idx>=0 && idx<inv_n && (inv[idx].id==IT_ROSE_PETAL || inv[idx].id==IT_HOURGLASS_SAND)) {
     message("在已佩戴的神器菜单中使用培养材料。");return;
@@ -2219,6 +2269,10 @@ void Game::use_item(int idx) {
       } else if (it.id == IT_POTION_STR) {
         strength = std::min(255, strength + 1);
         message("力量涌入身体，力量 +1。");
+      } else if (it.id == IT_POTION_PURITY) {
+        for(int y=std::max(0,py-2);y<=std::min(map_height-1,py+2);++y)
+          for(int x=std::max(0,px-2);x<=std::min(map_width-1,px+2);++x){const int cell=y*MW+x;toxic_gas.volume-=toxic_gas.cur[cell];toxic_gas.cur[cell]=toxic_gas.off[cell]=0;}
+        message("周围的毒气消散了。");
       } else if (it.id == IT_POTION_SHIELD) {
         shield += d.power;
         message("一层护盾包围了你。");
@@ -2361,8 +2415,11 @@ static CombatStyle wand_style(uint8_t id) {
 }
 
 void Game::cast_wand(int idx, int tx, int ty) {
-  if (idx < 0 || idx >= inv_n) { targeting = false; return; }
-  Item& it = inv[idx];
+  const bool staff=idx==-1 && weapon==IT_MAGES_STAFF;
+  if (!staff && (idx < 0 || idx >= inv_n)) { targeting = false; return; }
+  Item equipped;
+  if(staff){equipped.id=IT_WAND_MAGIC;equipped.level=weapon_level;equipped.charges=weapon_magic.aux;equipped.flags=weapon_flags;}
+  Item& it = staff ? equipped : inv[idx];
   const ItemDef& d = item_def(it.id);
   if (d.kind != K_WAND || it.charges == 0) { targeting = false; return; }
   if (absi(tx - px) + absi(ty - py) > 6 || !los(px, py, tx, ty)) {
@@ -2376,6 +2433,7 @@ void Game::cast_wand(int idx, int tx, int ty) {
   combat_strike(hero_combat, px, py, tx, ty, wand_style(it.id));
   combat_delay = 170;
   int dmg = d.power + it.level * 2 + ri(*this, 0, 2);
+  if(staff)dmg=normal_roll(*this,2+it.level,8+2*it.level);
   auto hit_area = [&](int radius, int bonus) {
     int hits = 0;
     for (size_t i = 0; i < mobs.size(); i++) {
@@ -2487,6 +2545,7 @@ void Game::cast_wand(int idx, int tx, int ty) {
       break;
   }
   it.charges--;
+  if(staff)weapon_magic.aux=it.charges;
   dispel_action();
   it.flags|=IF_CURSE_KNOWN;
   identify_use(it.flags,it.identification,10.f);
@@ -3438,7 +3497,7 @@ void Game::act_at(int x, int y, bool interact) {
       book_scroll=IT_NONE;book_empowered=inscription_replay=false;targeting=artifact_targeting=false;spend_action(1);return;
     }
     if(artifact_targeting) {artifact_targeting=false;targeting=false;if(artifact_slot>=0)tome_cast(magic_target,y*MW+x);else artifact_action(artifact_slot,0,y*MW+x);return;}
-    if (target_item >= 0 && item_def(inv[target_item].id).kind == K_WAND)
+    if ((target_item==-1 && weapon==IT_MAGES_STAFF) || (target_item >= 0 && item_def(inv[target_item].id).kind == K_WAND))
       cast_wand(target_item, x, y);
     else
       cast_or_throw(x, y);
@@ -3855,6 +3914,15 @@ float Game::mob_turn(Mob& m) {
 }
 
 void Game::recharge_wands() {
+  if(weapon==IT_MAGES_STAFF) {
+    const int capacity=std::min(10,4+int(weapon_level));
+    if(weapon_magic.aux<capacity && spell_effects.magic_immunity<=0) {
+      if(!boss_alive())weapon_magic.stored+=std::pow(1.175f,ring_bonus(*this,IT_RING_ENERGY))/(10.f+40.f*std::pow(.75f,capacity-weapon_magic.aux));
+      if(spell_effects.wand_recharge>0)weapon_magic.stored+=.25f*std::min(1.f,spell_effects.wand_recharge);
+    }
+    while(weapon_magic.stored>=1 && weapon_magic.aux<capacity){--weapon_magic.stored;++weapon_magic.aux;}
+    if(weapon_magic.aux>=capacity)weapon_magic.stored=0;
+  }
   for(int i=0;i<inv_n;++i) if(item_def(inv[i].id).kind==K_WAND) {
     auto& wand=inv[i];const int capacity=wand_capacity(wand);
     if(wand.charges<capacity && spell_effects.magic_immunity<=0) {
@@ -3960,7 +4028,7 @@ bool Game::can_transmute(int idx) const {
   if (idx < 0 || idx >= inv_n) return false;
   uint8_t id = inv[idx].id;
   if (id == IT_NONE || item_def(id).kind == K_KEY || id == IT_GOLD || id == IT_AMULET ||
-      id == IT_PICKAXE || id == IT_ANKH || id == IT_SCROLL_TRANSMUTE ||
+      id == IT_MAGES_STAFF || id == IT_SPIRIT_BOW || id == IT_PICKAXE || id == IT_ANKH || id == IT_SCROLL_TRANSMUTE ||
       item_def(id).kind == K_QUEST || item_def(id).kind == K_BAG)
     return false;
   uint8_t k = item_def(id).kind;
@@ -4000,7 +4068,7 @@ bool Game::can_select_item(int idx) const {
     return item_def(item.id).kind==K_ARMOR || (selection_scroll!=IT_ARCANE_STYLUS && (item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_MISSILE));
   if(selection_scroll==IT_STONE_AUG) return item_def(item.id).kind==K_WEAPON || item_def(item.id).kind==K_ARMOR || item_def(item.id).kind==K_MISSILE;
   if (item.id == IT_NONE) return false;
-  if (selection_scroll == IT_SCROLL_UP) return item_def(item.id).kind!=K_ARTIFACT && (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_def(item.id).kind==K_MISSILE) && item.level < 255;
+  if (selection_scroll == IT_SCROLL_UP) return item.id!=IT_SPIRIT_BOW && item_def(item.id).kind!=K_ARTIFACT && (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_def(item.id).kind==K_MISSILE) && item.level < 255;
   if (selection_scroll == IT_SCROLL_IDENTIFY)
     return (item_is_equipment(item.id) || item_def(item.id).kind==K_WAND || item_def(item.id).kind==K_MISSILE || item_random_identity(item.id)) &&
         (!(item.flags & IF_IDENTIFIED) || !identity_known(item.id));
@@ -4055,6 +4123,7 @@ void Game::select_item(int idx) {
       if(item_def(item.id).kind==K_MISSILE)item.magic.aux2=set_id;
     }
     ++item.level;
+    if(item.id==IT_MAGES_STAFF)item.magic.aux=std::min(std::min(10,4+int(item.level)),item.magic.aux+1);
     item.flags &= ~IF_CURSED;
     if(item_def(item.id).kind==K_WAND) item.charges=std::min(wand_capacity(item),int(item.charges)+1);
     message("选中的物品得到了强化。");
@@ -4884,6 +4953,8 @@ static bool valid_magic(uint8_t id,int level,const magic_rules::State& state) {
                             : finite_range(state.stored,1)) || !finite_range(state.cooldown,100) ||
       state.experience<0 || state.experience>1000000) return false;
   if(item_def(id).kind==K_MISSILE)return state.aux>=-MW*MH && state.aux<=512 && state.aux2>=0;
+  if(id==IT_MAGES_STAFF)return state.aux>=0 && state.aux<=std::min(10,4+level) && state.aux2==0;
+  if(item_def(id).kind==K_ARMOR)return state.aux==0 && state.aux2>=0 && state.aux2<=1;
   if(!artifact_rules::valid(id)) return state.aux==0 && state.aux2==0;
   return level>=0 && level<=artifact_rules::level_cap(id) && state.aux>=0 &&
       state.aux<=artifact_rules::capacity(id,level) && state.aux2>=0 && state.aux2<IT_COUNT;
