@@ -552,7 +552,7 @@ int main() {
   assert(game.dlg_type==27);
   const int before_freeze=game.turns;
   game.dialog_choose(1);game.spend_action(1);
-  assert(game.freeze_left==9 && game.turns==before_freeze);
+  assert(game.freeze_left==1 && game.ring1_magic.aux==4 && game.spell_effects.hourglass_active && game.turns==before_freeze);
   game.add_item(IT_ART_ROSE);game.use_item(0);
   game.artifact_action(-4,0);
   assert(game.rose_ghost>=0 && game.mobs[game.rose_ghost].effects.ally);
@@ -948,6 +948,77 @@ int main() {
   assert(game.actor_effects(0).bubble_active && game.actor_effects(0).haste==0 && !game.spell_effects.bubble_active);
   game.spend_action(.1f);assert(game.mobs[0].x==11 && !game.actor_effects(0).bubble_active);
   std::puts("Time bubble passed: seven-point reset, zero/tolerance boundary, full-action expiry, queued presses/save/disarm, sandals order, offensive detachment and monster-local time.");
+  // Hourglass charges are debited as time is used; early cancellation keeps the rest.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_HOURGLASS;game.ring1_magic.aux=5;
+  const int hourglass_turn=game.turns;
+  game.artifact_action(-3,5);assert(game.ring1_magic.aux==4 && game.freeze_left==2 && game.spell_effects.hourglass_active);
+  game.spend_action(2);assert(game.ring1_magic.aux==4 && game.freeze_left==0 && game.spell_effects.hourglass_active);
+  game.spend_action(.0005f);assert(game.ring1_magic.aux==4 && game.freeze_left<0 && game.spell_effects.hourglass_active);
+  assert(game.save(106) && restored.load(106) && restored.freeze_left==game.freeze_left);
+  game.spend_action(.001f);assert(game.ring1_magic.aux==3 && game.freeze_left>1.99f && game.turns==hourglass_turn);
+  game.artifact_action(-3,0);assert(game.ring1_magic.aux==3 && !game.spell_effects.hourglass_active && game.freeze_left==0);
+  // A single charge freezes the complete action which crosses expiry.
+  game.ring1_magic.aux=1;game.artifact_action(-3,5);game.spend_action(3);
+  assert(game.ring1_magic.aux==0 && !game.spell_effects.hourglass_active && game.turns==hourglass_turn);
+  // Shared pending-press path resolves on manual cancellation and offensive dispel.
+  game.ring1_magic.aux=5;game.artifact_action(-3,5);
+  queued.x=game.px;queued.y=game.py;queued.type=F_TRAP;queued.aux=TR_FIRE;game.features.push_back(queued);
+  const int frozen_hp=game.hp;game.trigger_tile_features();game.trigger_tile_features();
+  assert(game.hp==frozen_hp && game.bubble_presses.size()==1);
+  assert(game.save(106) && restored.load(106) && restored.spell_effects.hourglass_active);
+  game.artifact_action(-3,0);assert(game.hp==frozen_hp-5 && game.features[0].type==F_TRAP_DISARMED && game.bubble_presses.empty() && game.ring1_magic.aux==4);
+  game.artifact_action(-3,5);game.dispel_action();assert(!game.spell_effects.hourglass_active && game.ring1_magic.aux==3);
+  // Hourglass takes precedence when both time effects are present.
+  game.artifact_action(-3,5);game.seed_effect(IT_SEED_SWIFTTHISTLE,game.py*MW+game.px);
+  game.spend_action(1);assert(game.freeze_left==1 && game.spell_effects.time_bubble==7);
+  game.end_hourglass();game.spend_action(1);assert(game.spell_effects.time_bubble==6);
+  game.end_time_bubble();game.ring1_magic.aux=2;game.artifact_action(-3,5);
+  game.artifact_action(-3,2);assert(game.ring1==IT_NONE && !game.spell_effects.hourglass_active && game.freeze_left==0);
+  std::puts("Hourglass passed: incremental charge, early cancellation, fractional debt save, whole-action expiry, queued presses, offensive dispel, bubble priority and unequip.");
+  // Stasis advances existing buffs and world time; protection is not a buff pause.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_HOURGLASS;game.ring1_magic.aux=5;
+  game.hp=900;game.hunger=100;game.healing_left=100;
+  game.hero_effects.poison=20;game.hero_effects.burning=20;game.hero_effects.bleeding=8;
+  game.spell_effects.bless=30;game.spell_effects.vertigo=20;game.haste_t=20;
+  const int stasis_turn=game.turns;
+  game.artifact_action(-3,4);
+  assert(!game.time_stasis && game.turns==stasis_turn+10 && game.ring1_magic.aux==3);
+  assert(game.hunger==100 && game.hp>900 && game.healing_left<100);
+  assert(game.spell_effects.bless==20 && game.spell_effects.vertigo==10 && game.haste_t==10);
+  assert(game.hero_effects.poison==10 && game.hero_effects.burning==10 && game.hero_effects.bleeding<8);
+  // No food is created below zero hunger; starving heroes receive no compensation.
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_HOURGLASS;game.ring1_magic.aux=1;game.hunger=2;
+  game.artifact_action(-3,4);assert(game.turns==5 && game.hunger==5 && game.ring1_magic.aux==0);
+  arena(game,M_RAT,20,7);game.mobs.clear();game.ring1=IT_ART_HOURGLASS;game.ring1_magic.aux=2;
+  game.hunger=hero_rules::starving;const int starving_hp=game.hp;
+  game.artifact_action(-3,4);assert(game.hunger==hero_rules::starving && game.hp==starving_hp);
+  // Monster status timers also continue while the hero is protected.
+  arena(game,M_RAT,20,7);game.ring1=IT_ART_HOURGLASS;game.ring1_magic.aux=2;
+  game.mobs[0].sleep_t=30;game.mobs[0].effects.poison=20;
+  game.artifact_action(-3,4);
+  assert(game.mobs[0].sleep_t==0 && game.mobs[0].effects.poison==10 && game.mobs[0].hp<100);
+  game.time_stasis=true;const int protected_hp=game.hp;
+  game.armor_magic.effect=magic_rules::AntiEntropy;
+  const auto protected_burning=game.hero_effects.burning;
+  game.take_damage(10000);assert(game.hp==protected_hp);
+  assert(game.armor_proc(game.mobs[0],100)==0 && game.hero_effects.burning==protected_burning);
+  game.time_stasis=false;
+  std::puts("Stasis passed: hunger compensation, zero/starving limits, continuing healing/status clocks, damage immunity and monster status progression.");
+  arena(game,M_RAT,15,7);game.tiles[7][15]=T_WATER;
+  game.mobs[0].effects.paralysis=7;game.mobs[0].effects.burning=8;game.mobs[0].effects.chill=4;
+  game.freeze_actor(0);assert(game.actor_effects(0).frost==30 && game.mobs[0].effects.paralysis==7 && game.mobs[0].effects.burning==0 && game.mobs[0].effects.chill==0);
+  assert(game.mob_turn(game.mobs[0])==1 && game.mobs[0].x==15);
+  assert(game.save(106) && restored.load(106) && restored.actor_effects(0).frost==30);
+  game.damage_mob(0,0);assert(game.actor_effects(0).frost==0 && game.mobs[0].effects.chill==5 && game.mobs[0].effects.paralysis==7);
+  game.tiles[game.py][game.px]=T_WATER;game.freeze_actor(-1);game.hero_effects.paralysis=6;
+  const int frozen_x=game.px;game.move_player(1,0);assert(game.px==frozen_x && game.spell_effects.frost>0);
+  game.take_damage(0);assert(game.spell_effects.frost==0 && game.hero_effects.chill==5 && game.hero_effects.paralysis>0);
+  game.hero_effects.paralysis=0;game.hero_effects.chill=2;
+  const float chilled_move=game.movement_cost(),chilled_attack=game.melee_delay();
+  game.hero_effects.chill=0;assert(same_clock(chilled_move,game.movement_cost()/ .8f) && same_clock(chilled_attack,game.melee_delay()/ .8f));
+  game.freeze_actor(-1);game.spell_effects.frost=1;game.tick_extended_effects();assert(game.spell_effects.frost==0 && game.hero_effects.chill==5);
+  game.time_stasis=true;game.freeze_actor(-1);assert(game.spell_effects.frost==0);game.time_stasis=false;
+  std::puts("Frost passed: independent paralysis, water duration/residual chill, damage/zero-damage thaw, movement blocking, expiry, variable chill speed and save/load.");
   std::puts("V15 mechanics passed: projectile wear/recovery/pinning, selected seed feeding, plant anchors, shop theft, rose equipment, tome gates, spellbook and extended saves.");
   std::remove("sdmc:/3ds/spd/slot106.bin");
   std::remove("sdmc:/3ds/spd/slot107.bin");

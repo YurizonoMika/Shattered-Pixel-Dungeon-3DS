@@ -10,6 +10,10 @@ Wiki 可能混有版本差异和笔误：例如 Dungeon 页仍写固定 32×32 �
 Enemies 表的部分数值与 v4.0.2 不一致，不能机械地照抄。发生冲突时记录冲突，
 用固定 v4.0.2 源码复核；不把“跑完 25 层”标成机制一致。
 
+Current scope: align in-run features and mechanics. Meta systems such as badges,
+daily runs and persistent achievement progression are excluded by user request.
+后续对齐范围为局内功能与机制；局外成就、每日挑战等不作为对齐目标。
+
 ## Evidence / 依据
 
 These are independent summaries of rules, not copies of Wiki article text.
@@ -61,7 +65,7 @@ formulas pass tests. No whole-game or whole-floor parity is claimed.
 | Shops/quests | UI and simplified quest actions | Exact stock/value/identification rules, quest variants, Old Mine and Imp Vault remain |
 | Alchemy | Three fixed seed-to-potion recipes | Energy, seed mixtures, catalysts, bombs, spells, elixirs and exotic recipes remain |
 | Run completion | Ends after floor-25 boss | Persistent visited floors, stairs up, LastLevel walkable geometry, Amulet choice/surface victory and base ascent stacks/modifiers implemented. Exact transition timing, reset exceptions, original panoramas and full ascent interactions remain |
-| Meta/UI/audio | Native 3DS UI and ranking, no gameplay audio | Badges, challenges, daily/seeded runs, journal, localization and audio remain |
+| Meta/UI/audio | Native 3DS UI and ranking, no gameplay audio | Meta progression, badges and daily runs are outside the requested parity scope. In-run challenge modifiers, journal information, localization and audio remain incomplete. |
 | Saves | V9/V10 and bounded entity tables | V15 retains V14 magic/entity prefixes and appends plant/spell actor state, ghost gear, Cleric talents, Trinity imprints and spellbook order. V9–V14 import paths remain; independent historical runtime fixtures cover V12/V13. Atomic replacement preserves the previous file on failure. |
 
 V9/V10 migration retains existing HP and enemies. Missing strength defaults to
@@ -81,15 +85,27 @@ represented, but category depletion decks and exact RNG consumption still differ
 
 ## Current verification / 本轮验证
 
+Frost follow-up: Icecap applies independent saved Frost, damage detaches it and
+water thaw leaves Chill. 10,001 speed-factor cases match pinned Java. Host
+tests cover paralysis coexistence, zero-damage thaw, expiry, movement blocking
+and saving. Inventory freezing and full immunity/resistance tables remain open.
+
 Plant follow-up: 26,650 Earthroot absorption cases, 18,000 Sungrass healing ticks,
 nine cure entries and three buff durations match pinned Java. Runtime tests cover
 independent anchors, shared potion/Mageroyal cleansing, movement-only Blindweed
-Cripple, duration preservation and V15 saving. Swiftthistle, Warden, immunities,
+Cripple, duration preservation and V15 saving. Warden, immunities,
 full Frost and elemental terrain/item behavior remain incomplete. Swiftthistle
 now has independent TimeBubble consumption, queued presses/save state and
 transition disarming; 93,600 states match Java reset/processTime. Independent
 VFX scheduling and complete offensive dispel coverage remain partial. Azahar
 scene 122 passes bubble boundary, queue deduplication, saving/loading and expiry.
+Hourglass freeze now debits charges incrementally and retains unused charges
+when cancelled. 44,000 charge/timing/expiry states match pinned Java; host
+tests cover pending presses, fractional save state, bubble priority and removal.
+Azahar scene 123 passes charge, save/load and cancellation checks.
+Stasis compensates non-starving hunger and advances existing healing and status
+clocks while protecting the hero. 4,510 charge/duration/hunger cases match Java;
+independent buff ordering and complete artifact/talent hooks remain partial.
 
 For the unpublished v0.1.15alpha tree, the runtime ASan/UBSan suite and
 30,690 pinned Java projectile formula cases and 12,072 Foresight cone/charge
@@ -172,7 +188,8 @@ V15 在原有布局后扩展种子/法术状态、牧师、幽灵装备和先见
    only with verified behavior; retain generation reachability regressions.
 4. Full trap catalog and blob/status engines; original monster abilities.
 5. Complete item catalog, recipes, class talents, quests and boss scripts.
-6. Floor returns, Amulet/ascent, challenges, badges, audio and end-to-end fixtures.
+6. Floor returns, Amulet/ascent, in-run challenge modifiers, audio and end-to-end fixtures.
+   Badges, daily runs and other meta progression are outside the requested scope.
 
 测试结束关闭测试模拟器，只保留一个标题菜单的试玩实例。
 

@@ -6,6 +6,7 @@
 #include "projectile_rules.h"
 #include "seed_rules.h"
 #include "time_bubble_rules.h"
+#include "frost_rules.h"
 #include <algorithm>
 #include <cmath>
 namespace {
@@ -30,6 +31,21 @@ mechanics_rules::Actor &Game::actor_effects(int index) {
   if (mob_effects.size() < mobs.size())
     mob_effects.resize(mobs.size());
   return mob_effects.at(index);
+}
+void Game::freeze_actor(int index) {
+  if(index<0 && time_stasis)return;
+  auto &effect=actor_effects(index);
+  auto &status=index<0 ? hero_effects : mobs[index].effects;
+  const int x=index<0 ? px : mobs[index].x,y=index<0 ? py : mobs[index].y;
+  status.burning=status.chill=0;
+  effect.frost=std::max(effect.frost,frost_rules::duration(tiles[y][x]==T_WATER));
+  if(index<0)clear_path();
+}
+void Game::thaw_actor(int index) {
+  auto &effect=actor_effects(index);
+  auto &status=index<0 ? hero_effects : mobs[index].effects;
+  const int x=index<0 ? px : mobs[index].x,y=index<0 ? py : mobs[index].y;
+  frost_rules::detach(effect.frost,status.chill,tiles[y][x]==T_WATER);
 }
 void Game::seed_effect(uint8_t id, int cell) {
   if (seed_rules::index(id) < 0 || !in_map(cell % MW, cell / MW))
@@ -75,17 +91,8 @@ void Game::seed_effect(uint8_t id, int cell) {
         if (!in_map(cx, cy) || blocks_sight(cx, cy))
           continue;
         const int victim = mob_at(cx, cy);
-        const int duration = tiles[cy][cx] == T_WATER ? 30 : 10;
-        if (victim >= 0) {
-          mobs[victim].effects.burning = 0;
-          mobs[victim].effects.chill = 0;
-          mobs[victim].effects.paralysis = std::max(mobs[victim].effects.paralysis, float(duration));
-        }
-        if (cx == px && cy == py) {
-          hero_effects.burning = 0;
-          hero_effects.chill = 0;
-          hero_effects.paralysis = std::max(hero_effects.paralysis, float(duration));
-        }
+        if (victim >= 0) freeze_actor(victim);
+        if (cx == px && cy == py) freeze_actor(-1);
       }
     break;
   case IT_SEED_STORMVINE:
@@ -1511,6 +1518,15 @@ void Game::end_time_bubble(bool disarm) {
     spell_effects.bubble_active = false;
     spell_effects.time_bubble = 0;
   }
+  resolve_time_presses(disarm);
+}
+void Game::end_hourglass() {
+  const bool active=spell_effects.hourglass_active;
+  spell_effects.hourglass_active = false;
+  freeze_left = 0;
+  if(active)resolve_time_presses();
+}
+void Game::resolve_time_presses(bool disarm) {
   auto presses = std::move(bubble_presses);
   bubble_presses.clear();
   for (int cell : presses) {
@@ -1538,6 +1554,8 @@ void Game::end_time_bubble(bool disarm) {
 }
 void Game::dispel_action() {
   invis_t = 0;
+  spell_effects.hourglass_active=false;
+  freeze_left=0;
   end_time_bubble();
 }
 void Game::cancel_item_selection() {
@@ -1847,6 +1865,12 @@ void Game::tick_extended_effects() {
     const int cell = hero ? py * MW + px : mobs[index].y * MW + mobs[index].x;
     int &health = hero ? hp : mobs[index].hp;
     const int maximum = hero ? maxhp : mobs[index].maxhp;
+    if(e.frost>0) {
+      auto &cold=hero ? hero_effects : mobs[index].effects;
+      cold.chill=0;
+      if(e.frost<=1)thaw_actor(index);
+      else --e.frost;
+    }
     if (e.drowsy > 0) {
       e.drowsy = std::max(0.f, e.drowsy - 1);
       if (e.drowsy == 0 &&

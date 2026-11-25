@@ -373,7 +373,11 @@ struct Game {
   std::vector<mechanics_rules::HeapAwareness> scry_heaps;
   std::vector<int> bubble_presses;
   void end_time_bubble(bool disarm=false);
+  void end_hourglass();
+  void resolve_time_presses(bool disarm=false);
   void dispel_action();
+  void freeze_actor(int index);
+  void thaw_actor(int index);
   Item rose_weapon,rose_armor;
   int rose_command=-1,rose_enemy=-1;
   uint32_t projectile_serial=1;

@@ -15,6 +15,8 @@
 #include "projectile_rules.h"
 #include "seed_rules.h"
 #include "time_bubble_rules.h"
+#include "hourglass_rules.h"
+#include "frost_rules.h"
 
 void dlog(const char* fmt, ...);
 
@@ -164,7 +166,7 @@ int Game::roll_armor() {
 
 float Game::melee_delay() const {
   return hero_rules::attack_delay(weapon,weapon_level,effective_strength())/
-      std::pow(1.09051f,ring_bonus(*this,IT_RING_FUROR))*(weapon_augment==1 ? 2.f/3.f : weapon_augment==2 ? 5.f/3.f : 1.f)*(spell_effects.slow>0 ? 2.f : 1.f);
+      std::pow(1.09051f,ring_bonus(*this,IT_RING_FUROR))*(weapon_augment==1 ? 2.f/3.f : weapon_augment==2 ? 5.f/3.f : 1.f)*(spell_effects.slow>0 ? 2.f : 1.f/frost_rules::speed(hero_effects.chill));
 }
 
 bool Game::melee_reaches(int x,int y) const {
@@ -221,7 +223,7 @@ void Game::equip_ring(int idx) {
   const bool replacing=outgoing.id!=IT_NONE;
   if(replacing && (outgoing.flags&IF_CURSED)) {message("诅咒让你无法卸下这件饰品。");return;}
   if(outgoing.id==IT_ART_CLOAK && outgoing.magic.cooldown>0) {invis_t=0;outgoing.magic.cooldown=0;}
-  if(outgoing.id==IT_ART_HOURGLASS) freeze_left=0;
+  if(outgoing.id==IT_ART_HOURGLASS) end_hourglass();
   if(outgoing.id==IT_ART_ROSE && rose_ghost>=0 && rose_ghost<int(mobs.size())) {
     mobs[rose_ghost].alive=false;rose_ghost=-1;
   }
@@ -2658,7 +2660,7 @@ void Game::trigger_trap(int idx, Mob* who) {
   if (f.type != F_TRAP_FOUND && (f.type != F_TRAP || who)) return;
   if ((who && (who->type == M_BAT || who->type == M_SWARM || who->type == M_WRAITH ||
                who->type == M_EYE)) || (!who && levit_t > 0)) return;
-  if (spell_effects.bubble_active) {
+  if (spell_effects.bubble_active || spell_effects.hourglass_active) {
     f.type = F_TRAP_FOUND;
     const int cell=f.y*MW+f.x;
     if(std::find(bubble_presses.begin(),bubble_presses.end(),cell)==bubble_presses.end())bubble_presses.push_back(cell);
@@ -2717,7 +2719,7 @@ void Game::trigger_trap(int idx, Mob* who) {
 void Game::trigger_tile_features() {
   const int idx = feature_at(px, py);
   if (idx < 0) return;
-  if(spell_effects.bubble_active && features[idx].type==F_PLANT) {
+  if((spell_effects.bubble_active || spell_effects.hourglass_active) && features[idx].type==F_PLANT) {
     const int cell=py*MW+px;
     if(std::find(bubble_presses.begin(),bubble_presses.end(),cell)==bubble_presses.end())bubble_presses.push_back(cell);
     return;
@@ -3056,7 +3058,7 @@ void Game::close_door_if_clear(int x, int y) {
 }
 
 void Game::move_player(int dx, int dy) {
-  if(hero_effects.paralysis>0 || spell_effects.magical_sleep){spend_action(1);return;}
+  if(hero_effects.paralysis>0 || spell_effects.magical_sleep || spell_effects.frost>0){spend_action(1);return;}
   if(hero_effects.roots>0) {message("你被缠住了，暂时无法移动。");clear_path();return;}
   if (dead || (!dx && !dy) || absi(dx) > 1 || absi(dy) > 1) return;
   int nx = px + dx, ny = py + dy;
@@ -3127,6 +3129,7 @@ void Game::take_damage(int damage, bool bypass_shield) {
     return;
   }
   if(time_stasis) return;
+  if(damage>=0 && !dead)thaw_actor(-1);
   if(damage>0){spell_effects.drowsy=0;spell_effects.magical_sleep=false;}
   if(spell_effects.earth>0 && spell_effects.earth_anchor==py*MW+px) {
     damage=seed_rules::absorb(spell_effects.earth,damage,floor);
@@ -3165,6 +3168,7 @@ void Game::damage_mob(int idx, int raw, DamageKind kind, int enchantment) {
   if (idx < 0 || idx >= (int)mobs.size()) return;
   Mob& m = mobs[idx];
   if (!m.alive) return;
+  if(raw>=0)thaw_actor(idx);
   if(m.type==M_SWARM && kind==DamageKind::Physical && m.hp>=raw+2) {
     std::vector<int> cells;
     for(auto delta : {1,-1,MW,-MW}) {
@@ -3419,7 +3423,7 @@ void Game::interact_at(int x, int y) {
 
 void Game::act_at(int x, int y, bool interact) {
   if (dialog || dead || shop_open) return;
-  if(hero_effects.paralysis>0 || spell_effects.magical_sleep){spend_action(1);return;}
+  if(hero_effects.paralysis>0 || spell_effects.magical_sleep || spell_effects.frost>0){spend_action(1);return;}
   if (!in_map(x, y)) return;
   if(examining) {examine_at(x,y);return;}
   if (interact && !targeting) { interact_at(x, y); return; }
@@ -3562,7 +3566,7 @@ bool Game::bolt_reaches(int x, int y, int tx, int ty) const {
 
 float Game::mob_turn(Mob& m) {
   if (!m.alive || is_npc(m.type)) return 1.f;
-  if (m.sleep_t > 0 || m.effects.paralysis>0 || actor_effects(int(&m-mobs.data())).magical_sleep) return 1.f;
+  if (m.sleep_t > 0 || m.effects.paralysis>0 || actor_effects(int(&m-mobs.data())).magical_sleep || actor_effects(int(&m-mobs.data())).frost>0) return 1.f;
   if(m.type==M_GOO) {
     if(m.ai!=Mob::Hunting) m.pumped_up=0;
     if(tiles[m.y][m.x]==T_WATER && m.hp<m.maxhp) ++m.hp;
@@ -3593,9 +3597,9 @@ float Game::mob_turn(Mob& m) {
   auto move_delay=[&]() {
     const float ascent_speed=ascending && ascent_stacks>=4.f && m.ai!=Mob::Hunting && !m.terror_t ? 2.f : 1.f;
     const auto &effect=actor_effects(int(&m-mobs.data()));
-    return mob_rules::movement_delay(m.type)*(effect.cripple>0 ? 2.f : 1.f)*(effect.slow>0 ? 2.f : m.effects.chill>0 ? 1.5f : 1.f)/(ascent_speed*(m.adrenaline ? 2.f : 1.f)*(effect.haste>0 ? 3.f : 1.f));
+    return mob_rules::movement_delay(m.type)*(effect.cripple>0 ? 2.f : 1.f)*(effect.slow>0 ? 2.f : 1.f/frost_rules::speed(m.effects.chill))/(ascent_speed*(m.adrenaline ? 2.f : 1.f)*(effect.haste>0 ? 3.f : 1.f));
   };
-  auto attack_delay=[&]() {auto &effect=actor_effects(int(&m-mobs.data()));effect.bubble_active=false;effect.time_bubble=0;return mob_rules::attack_delay(m.type)*(effect.slow>0 ? 2.f : m.effects.chill>0 ? 1.5f : 1.f)/(m.adrenaline ? 1.5f : 1.f)/(effect.haste>0 ? 3.f : 1.f);};
+  auto attack_delay=[&]() {auto &effect=actor_effects(int(&m-mobs.data()));effect.bubble_active=false;effect.time_bubble=0;return mob_rules::attack_delay(m.type)*(effect.slow>0 ? 2.f : 1.f/frost_rules::speed(m.effects.chill))/(m.adrenaline ? 1.5f : 1.f)/(effect.haste>0 ? 3.f : 1.f);};
   if(m.effects.ally) {
     int target=-1,nearest=9;
     for(size_t i=0;i<mobs.size();++i) {
@@ -3799,7 +3803,7 @@ float Game::mob_turn(Mob& m) {
       if(!magic && armor!=IT_NONE) identify_use(armor_flags,armor_identification,10.f);
       if (!magic && debuffs[status_rules::Vulnerable]) damage = int(damage*1.33f);
       if (magic) damage = int(std::floor(damage*std::pow(.825f,ring_bonus(*this,IT_RING_ELEMENTS))+.5f));
-      if ((m.type == M_SHAMAN || m.type == M_WARLOCK || m.type == M_SCORPIO || m.type == M_SPINNER) &&
+      if (!time_stasis && (m.type == M_SHAMAN || m.type == M_WARLOCK || m.type == M_SCORPIO || m.type == M_SPINNER) &&
           ri(*this,0,1) == 0) {
         if (magic && m.type == M_SHAMAN) {
           const auto type = m.variant == 0 ? status_rules::Weakness : m.variant == 1 ? status_rules::Vulnerable : status_rules::Hex;
@@ -3813,7 +3817,7 @@ float Game::mob_turn(Mob& m) {
       message(text);
       take_damage(damage);
       if (m.type==M_BAT) m.hp=std::min(m.maxhp,m.hp+std::max(0,damage-4));
-      if(m.type==M_GOO && ri(*this,0,2)==0) debuffs[status_rules::Ooze]=20;
+      if(!time_stasis && m.type==M_GOO && ri(*this,0,2)==0) debuffs[status_rules::Ooze]=20;
     } else {
       combat_hit(hero_combat, px, py, COMBAT_MISS);
       message("你闪避了攻击。");
@@ -4180,7 +4184,6 @@ void Game::identify_on_exp(int amount) {
 }
 
 void Game::tick_health() {
-  if(time_stasis) return;
   if (healing_left > 0) {
     const int heal = std::min(healing_left, flat_healing>0 ? flat_healing : std::max(1, int(std::floor(healing_left * .25f + .5f))));
     hp = std::min(maxhp, hp + heal);
@@ -4231,7 +4234,6 @@ void Game::tick_survival() {
 }
 
 void Game::tick_buffs() {
-  if(time_stasis) return;
   tick_extended_effects();
   tick_magic();
   if(dead) return;
@@ -4331,10 +4333,10 @@ void Game::spend_action(float duration) {
   if (dead || !std::isfinite(duration) || duration <= 0.f) return;
   for(const auto& swarm:pending_swarms) mobs.push_back(swarm);
   pending_swarms.clear();
-  if(freeze_left>0) {
-    const float frozen=std::min(freeze_left,duration);
-    freeze_left-=frozen;duration-=frozen;
-    if(duration<=0) {recompute_fov();return;}
+  if(spell_effects.hourglass_active) {
+    auto &state=ring1==IT_ART_HOURGLASS ? ring1_magic : ring2_magic;
+    if(hourglass_rules::process(state.aux,freeze_left,duration))end_hourglass();
+    recompute_fov();return;
   }
   if(spell_effects.bubble_active) {
     if(time_bubble_rules::process(spell_effects.time_bubble,duration))end_time_bubble();
@@ -4907,7 +4909,7 @@ static bool valid_extended_actor(const mechanics_rules::Actor& effect) {
       effect.aura,effect.divine,effect.divine_left,effect.wall,effect.lifelink,effect.wayward,effect.shuriken_cooldown,
       effect.body_left,effect.spirit_left,effect.shield,effect.regen_partial,effect.mirror,effect.prismatic_guard,
       effect.cleanse,effect.hallowed,effect.power_left,effect.deferred,effect.kinetic,effect.wand_recharge,effect.drowsy,effect.amok,effect.body_durability,effect.scry,
-      effect.cripple,effect.slow,effect.weakness,effect.vulnerable})
+      effect.cripple,effect.slow,effect.weakness,effect.vulnerable,effect.frost})
     if(!finite_range(value,10000000))return false;
   if(!std::isfinite(effect.time_bubble) || effect.time_bubble<-.001f || effect.time_bubble>100 ||
       (!effect.bubble_active && effect.time_bubble!=0))return false;
@@ -5018,6 +5020,8 @@ SlotMeta Game::meta() const {
 }
 
 bool Game::save(int slot) const {
+  if(!std::isfinite(freeze_left) || freeze_left<-.001f || freeze_left>20 ||
+      (spell_effects.hourglass_active && ring1!=IT_ART_HOURGLASS && ring2!=IT_ART_HOURGLASS))return false;
   for(int cell:bubble_presses)if(cell<0 || cell>=MW*MH)return false;
   for(const auto& heap:scry_heaps)
     if(heap.depth<1 || heap.depth>26 || heap.cell<0 || heap.cell>=MW*MH || !finite_range(heap.left,25))return false;
@@ -5316,7 +5320,8 @@ bool Game::load(int slot) {
     return valid_extended_actor(effect);
   };
   if(have_extended) {
-    have_extended=valid_extended(extended.hero) && valid_item(extended.rose_weapon) && valid_item(extended.rose_armor) &&
+    have_extended= !extended.hero.hourglass_active || d.ring1==IT_ART_HOURGLASS || d.ring2==IT_ART_HOURGLASS;
+    have_extended=have_extended && valid_extended(extended.hero) && valid_item(extended.rose_weapon) && valid_item(extended.rose_armor) &&
       valid_item(extended.trinity_body) && valid_item(extended.trinity_mind) && valid_item(extended.trinity_spirit);
     have_extended&=extended.discovered_enchants<(1u<<magic_rules::EnchantCount) && extended.discovered_glyphs<(1u<<magic_rules::GlyphCount);
     for(auto discovered:extended.discovered_items)have_extended&=discovered<=1;
@@ -5341,7 +5346,7 @@ bool Game::load(int slot) {
   if(d.version>=15 && !have_extended)return false;
   if(have_magic) {
     if(!valid_effects(magic.hero) || !finite_range(magic.deferred,10000000) ||
-       !finite_range(magic.kinetic,10000000) || !finite_range(magic.freeze,20) ||
+       !finite_range(magic.kinetic,10000000) || !std::isfinite(magic.freeze) || magic.freeze<-.001f || magic.freeze>20 ||
        magic.energy<0 || magic.energy>1000000 || magic.artifact_deck>1 ||
        magic.generated>=(1u<<artifact_rules::count) || magic.ghost < -1 ||
        magic.ghost>=int(current->mobs.size()) || (magic.ghost>=0 && !current->mobs[magic.ghost].rose_ally)) return false;

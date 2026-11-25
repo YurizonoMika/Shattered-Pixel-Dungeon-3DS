@@ -1,5 +1,7 @@
 #include "artifact_rules.h"
 #include "foresight_rules.h"
+#include "hourglass_rules.h"
+#include "frost_rules.h"
 #include "game.h"
 #include "hero_rules.h"
 #include "seed_rules.h"
@@ -159,7 +161,7 @@ float Game::movement_cost(int x, int y) const {
     delay /= 3;
   if (debuffs[status_rules::Cripple] || spell_effects.cripple > 0)
     delay *= 2;
-  if (spell_effects.slow > 0) delay *= 2;
+  delay *= spell_effects.slow > 0 ? 2.f : 1.f/frost_rules::speed(hero_effects.chill);
   const int effect = armor_magic.effect, l = buffed_level(armor_level);
   const float power = enchant_power();
   if (effect == Flow && tiles[y][x] == T_WATER)
@@ -292,7 +294,10 @@ int Game::weapon_enchant_proc(int target, int damage, int &enchantment) {
                  rounded(normal(*this, 1, 3 + floor / 4) * .67f * scale));
     break;
   case Chilling:
-    m.effects.chill = std::min(6.f * scale, m.effects.chill + 3 * scale);
+    if(actor_effects(target).frost<=0) {
+      m.effects.burning=0;
+      m.effects.chill = std::min(6.f * scale, m.effects.chill + 3 * scale);
+    }
     break;
   case Venomous:
     if (m.effects.poison <= 0)
@@ -443,6 +448,7 @@ int Game::weapon_final_damage(Mob &enemy, int damage, int enchantment) {
 }
 
 int Game::armor_proc(Mob &attacker, int damage, bool magic) {
+  if (time_stasis && magic_actor < 0) return 0;
   if (spell_effects.magic_immunity > 0)
     return damage;
   const bool holy = spell_effects.holy_ward > 0 && !magic;
@@ -697,7 +703,7 @@ void Game::artifact_action(int slot, int action, int target) {
       return;
     }
     if (id == IT_ART_HOURGLASS)
-      freeze_left = 0;
+      end_hourglass();
     if (id == IT_ART_CLOAK && state.cooldown > 0) {
       invis_t = 0;
       item.magic.cooldown = 0;
@@ -813,8 +819,8 @@ void Game::artifact_action(int slot, int action, int target) {
     return;
   }
   if (id == IT_ART_HOURGLASS) {
-    if (freeze_left > 0) {
-      freeze_left = 0;
+    if (spell_effects.hourglass_active) {
+      end_hourglass();
       return;
     }
     if (state.aux < 1) {
@@ -823,18 +829,20 @@ void Game::artifact_action(int slot, int action, int target) {
     }
     if (action == 4) {
       const int used = std::min(2, state.aux);
-      const int duration = 5 * used;
+      const int duration = hourglass_rules::stasis_duration(state.aux);
+      hunger = hourglass_rules::stasis_hunger(hunger, state.aux);
       state.aux -= used;
-      invis_t = 0;
+      dispel_action();
       message("你进入了时间静止。");
       time_stasis = true;
       for (int i = 0; i < duration && !dead; ++i)
         spend_action(1);
       time_stasis = false;
     } else if (action == 5) {
-      freeze_left = state.aux * 2;
-      state.aux = 0;
-      invis_t = 0;
+      dispel_action();
+      freeze_left = 2;
+      --state.aux;
+      spell_effects.hourglass_active = true;
       message("时间冻结了。");
     } else
       open_dialog(27, "时光沙漏", "选择时间能力。", "时间静止", "冻结时间",

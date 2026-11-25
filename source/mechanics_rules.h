@@ -34,6 +34,8 @@ struct Actor {
   float cripple = 0, slow = 0, weakness = 0, vulnerable = 0;
   float time_bubble = 0;
   bool bubble_active = false;
+  bool hourglass_active = false;
+  float frost = 0;
 };
 struct HeapAwareness {
   int depth = 0, cell = 0;

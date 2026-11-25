@@ -1007,6 +1007,51 @@ int main() {
           G.new_run(0, 0x12345678);
           G.demo_lock = true;
         }
+        else if(want==125) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.tiles[G.py][G.px]=T_WATER;G.hero_effects.paralysis=7;
+          G.freeze_actor(-1);
+          const bool independent=G.spell_effects.frost==30 && G.hero_effects.paralysis==7;
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot125.bin");struct stat exists;
+          const bool saved=stat(path,&exists)!=0 && G.save(125);
+          const bool loaded=saved && G.load(125) && G.spell_effects.frost==30;
+          if(saved)remove(path);
+          G.take_damage(0);
+          const bool thaw=G.spell_effects.frost==0 && G.hero_effects.chill==5 && G.hero_effects.paralysis==7;
+          dlog("[V15 frost] independent=%d save=%d load=%d thaw=%d",independent,saved,loaded,thaw);
+          G.demo_lock=true;
+        }
+        else if(want==124) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.ring1=IT_ART_HOURGLASS;G.ring1_level=0;G.ring1_magic={};G.ring1_magic.aux=5;
+          G.hp=10;G.hunger=100;G.healing_left=100;G.hero_effects.poison=20;
+          G.spell_effects.bless=30;const int before=G.turns;
+          G.artifact_action(-3,4);
+          const bool clocks=G.turns==before+10 && G.spell_effects.bless==20 && G.hero_effects.poison==10;
+          const bool hunger=G.hunger==100,charge=G.ring1_magic.aux==3;
+          const bool healing=G.hp>10 && !G.dead && !G.time_stasis;
+          dlog("[V15 stasis] clocks=%d hunger=%d charge=%d healing=%d",clocks,hunger,charge,healing);
+          G.demo_lock=true;
+        }
+        else if(want==123) {
+          G.new_run(0,0x12345678);SCENE=Scene::GAME;
+          G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;
+          G.ring1=IT_ART_HOURGLASS;G.ring1_level=0;G.ring1_magic={};G.ring1_magic.aux=5;
+          const int before=G.turns;G.artifact_action(-3,5);G.spend_action(2);
+          const bool cost=G.ring1_magic.aux==4 && G.freeze_left==0 && G.spell_effects.hourglass_active && G.turns==before;
+          Feature trap;trap.x=G.px;trap.y=G.py;trap.type=F_TRAP;trap.aux=TR_FIRE;G.features.push_back(trap);
+          const int health=G.hp;G.trigger_tile_features();
+          char path[96];snprintf(path,sizeof(path),DATA_DIR "/slot123.bin");struct stat exists;
+          const bool saved=stat(path,&exists)!=0 && G.save(123);
+          const bool loaded=saved && G.load(123) && G.spell_effects.hourglass_active && G.bubble_presses.size()==1 && G.ring1_magic.aux==4;
+          if(saved)remove(path);
+          G.artifact_action(-3,0);
+          const bool cancel=!G.spell_effects.hourglass_active && G.ring1_magic.aux==4 && G.features[0].type==F_TRAP_DISARMED && G.hp==health-5;
+          dlog("[V15 hourglass] charge=%d save=%d load=%d cancel=%d",cost,saved,loaded,cancel);
+          G.demo_lock=true;
+        }
         else if(want==122) {
           G.new_run(0,0x12345678);SCENE=Scene::GAME;
           G.mobs.clear();G.items.clear();G.features.clear();G.mob_cap=0;

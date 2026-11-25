@@ -58,7 +58,12 @@ and talent menus. Foresight uses the pinned cone scan, fractional charge,
 discovery XP and timed enemy/heap awareness. Plant fixes include the shared
 healing-potion cure list, separate Sungrass/Earthroot anchors and Blindweed's
 movement-only Cripple. Swiftthistle has an independent time bubble with queued
-plant/trap presses and persistent remaining time. Several interactions remain partial; see the
+plant/trap presses and persistent remaining time. Hourglass freeze debits charges
+incrementally and retains unused charges on cancellation. Several interactions
+remain partial. Stasis compensates hunger while existing effects continue to tick;
+meta progression is outside the requested parity scope.
+Icecap has independent Frost, damage-triggered thaw and water residual Chill;
+Chill speed varies with remaining duration. See the
 [development notes](docs/releases/v0.1.15alpha.md).
 
 ## Screenshots
